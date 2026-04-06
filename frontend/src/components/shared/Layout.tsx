@@ -5,11 +5,13 @@ import {
   FlaskConical,
   ShieldAlert,
   Activity,
+  BarChart3,
 } from "lucide-react";
 import clsx from "clsx";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/", label: "Home", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/signals", label: "Signals", icon: Zap },
   { to: "/backtest", label: "Backtest", icon: FlaskConical },
   { to: "/risk", label: "Risk", icon: ShieldAlert },
@@ -35,7 +37,7 @@ export default function Layout() {
                 clsx(
                   "flex items-center gap-2 px-4 py-2 text-xs transition-colors",
                   isActive
-                    ? "bg-zinc-800/60 text-zinc-100 border-r-2 border-blue-500"
+                    ? "bg-zinc-800/60 text-zinc-100 border-r-2 border-green-500"
                     : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900",
                 )
               }
@@ -51,7 +53,7 @@ export default function Layout() {
       </nav>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
     </div>

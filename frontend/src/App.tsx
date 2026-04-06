@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Layout from "./components/shared/Layout";
+import HomePage from "./pages/HomePage";
+import MarketPage from "./pages/MarketPage";
 import DashboardPage from "./pages/DashboardPage";
 import GameDetailPage from "./pages/GameDetailPage";
 import SignalsPage from "./pages/SignalsPage";
@@ -23,8 +25,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/game/:gameId" element={<GameDetailPage />} />
+            <Route path="/" element={<HomePage />} />
+            <Route path="/game/:gameId" element={<MarketPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/game-detail/:gameId" element={<GameDetailPage />} />
             <Route path="/signals" element={<SignalsPage />} />
             <Route path="/backtest" element={<BacktestPage />} />
             <Route path="/risk" element={<RiskPage />} />
