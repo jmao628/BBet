@@ -48,3 +48,4 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+config/kalshi-key.pem
