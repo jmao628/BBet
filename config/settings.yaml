@@ -1,0 +1,142 @@
+# BPMDE — Non-sensitive configuration
+# Sensitive keys go in .env (never commit .env)
+
+leagues:
+  - NBA
+  # - NCAAB  # Phase 2
+  # - NCAAW  # Phase 2
+
+data_refresh:
+  market_quotes_interval_min: 2
+  orderbook_interval_min: 5
+  sportsbook_odds_interval_min: 15
+  injury_interval_hours: 4
+  nba_stats_cron_hour_utc: 6
+
+basketball_keywords:
+  - NBA
+  - basketball
+  - Lakers
+  - Warriors
+  - Celtics
+  - Bucks
+  - Heat
+  - Nuggets
+  - Knicks
+  - Nets
+  - Suns
+  - Clippers
+  - 76ers
+  - Bulls
+  - Pistons
+  - Pacers
+  - Cavaliers
+  - Hornets
+  - Magic
+  - Raptors
+  - Hawks
+  - Wizards
+  - Finals
+  - playoff
+  - Conference
+  - championship
+  - Eastern Conference
+  - Western Conference
+
+thresholds:
+  min_edge: 0.04
+  min_ev: 0.03
+  min_depth_usd: 500.0
+  max_spread_pct: 0.06
+  min_volume_24h_usd: 1000.0
+  min_confidence_score: 0.55
+  max_model_disagreement: 0.10
+  max_ci_width: 0.20
+  min_time_to_game_hours: 0.5
+  max_time_to_game_hours: 96.0
+  max_injury_uncertainty: 0.70
+  min_depth_3c_usd: 500.0
+  cross_platform_basis_alert: 0.10
+  book_market_divergence_alert: 0.15
+  line_move_1h_alert: 0.08
+
+risk:
+  kelly_fraction: 0.25
+  max_position_pct: 0.02        # per contract
+  max_game_exposure_pct: 0.05   # per game (all contracts)
+  max_team_exposure_pct: 0.08   # per team (all related markets)
+  max_series_exposure_pct: 0.12
+  max_daily_risk_pct: 0.15
+
+liquidity_tiers:
+  high:
+    min_depth_3c_usd: 5000
+    score: 1.0
+    max_pct: 1.0
+  medium:
+    min_depth_3c_usd: 1000
+    score: 0.7
+    max_pct: 0.70
+  low:
+    min_depth_3c_usd: 300
+    score: 0.4
+    max_pct: 0.30
+  skip:
+    min_depth_3c_usd: 0
+    score: 0.1
+    max_pct: 0.0  # do not trade
+
+platforms:
+  kalshi:
+    base_url: "https://api.elections.kalshi.com/trade-api/v2"
+    fee_pct: 0.02
+    sports_category: "sports"
+  polymarket:
+    gamma_url: "https://gamma-api.polymarket.com"
+    clob_url: "https://clob.polymarket.com"
+    fee_pct: 0.02
+  odds_api:
+    base_url: "https://api.the-odds-api.com/v4"
+    sport_key: "basketball_nba"
+    regions: "us"
+    markets: "h2h,spreads,totals"
+    odds_format: "american"
+
+sportsbooks_priority:
+  - pinnacle
+  - draftkings
+  - fanduel
+  - betmgm
+  - caesars
+
+sportsbook_weights:
+  pinnacle: 3
+  betmgm: 1
+  draftkings: 1
+  fanduel: 1
+  caesars: 1
+
+models:
+  lgb_version: "v0.1"
+  calibrator: "isotonic"
+  ensemble_weights:
+    sportsbook: 0.35
+    basketball_model: 0.40
+    market: 0.25
+  time_weight_decay: 0.95  # per day for rolling stats
+
+injury_status_weights:
+  Out: 1.0
+  Doubtful: 0.75
+  Questionable: 0.50
+  Probable: 0.15
+  Game Time Decision: 0.40
+  Active: 0.0
+
+home_advantage_net_rating: 2.5  # points per 100 possessions
+
+backtest:
+  signal_offset_min: -60     # generate signal 60min before tipoff
+  slippage_pct: 0.005
+  min_fill_usd: 10.0
+  max_book_depth_pct: 0.30   # don't consume more than 30% of available depth

@@ -1,0 +1,50 @@
+# Secrets — NEVER commit
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_meta
+
+# Models (large binary files — use git-lfs or model registry)
+models/artifacts/
+*.txt.lgb
+*.pkl
+
+# Data (never commit raw data)
+data/
+*.parquet
+*.csv
+*.json.gz
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/

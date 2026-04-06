@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: bpmde_db
+    environment:
+      POSTGRES_USER: bpmde
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bpmde
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bpmde"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: bpmde_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: bpmde_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://bpmde:password@db:5432/bpmde
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - dashboard
+
+volumes:
+  pgdata:
+  redisdata:
