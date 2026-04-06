@@ -67,32 +67,9 @@ async def _preload_background():
         print(f"[PRELOAD] Error: {e}")
         _startup_done = True
 
-# ── All basketball series on Kalshi ──────────────────────────────────
+# ── NBA only — Pro Basketball moneyline ──────────────────────────────
 BASKETBALL_SERIES = [
-    "KXNBAGAME",           # NBA moneyline
-    "KXNBASPREAD",         # NBA spread
-    "KXNBATOTAL",          # NBA total points
-    "KXKBLGAME",           # Korea KBL
-    "KXCBAGAME",           # China CBA
-    "KXEUROLEAGUEGAME",    # EuroLeague
-    "KXJBLEAGUEGAME",      # Japan B.League
-    "KXNBLGAME",           # Australia NBL
-    "KXBUNDESLIGABBGAME",  # Germany Bundesliga Basketball
-    "KXITASERIEABBGAME",   # Italy Serie A Basketball
-    "KXLIGAACBGAME",       # Spain ACB
-    "KXTURKEYBSLGAME",     # Turkey BSL
-    "KXABABGAME",          # ABA League
-    "KXEUROCUPBBGAME",     # EuroCup Basketball
-    "KXFIBAGAME",          # FIBA
-    "KXFIBACHAMPGAME",     # FIBA Champions League
-    "KXFIBAEUROCUPGAME",   # FIBA Europe Cup
-    "KXNCAABGAME",         # NCAA Basketball
-    "KXWNBAGAME",          # WNBA
-    "KXLNBGAME",           # Argentina LNB
-    "KXLNBELITEGAME",      # France LNB Elite
-    "KXVTBGAME",           # VTB United League
-    "KXTNCBBGAME",         # TNC Basketball
-    "KXGBLBBGAME",         # GBL Basketball
+    "KXNBAGAME",           # NBA moneyline (Pro Basketball)
 ]
 
 # ── Simulated Portfolio (persisted to JSON file) ─────────────────────
@@ -734,15 +711,9 @@ async def all_game_analyses(league: str = ""):
 
     events = await _get_all_basketball_events()
     results = []
+    filtered = events  # All events are NBA now
 
-    # Filter to requested league, default to NBA only for speed
-    target_leagues = {"NBA"} if not league else {league}
-    if league == "ALL":
-        target_leagues = set()  # no filter
-
-    filtered = [e for e in events if not target_leagues or e.get("_league") in target_leagues]
-
-    # Parallel analysis for all games — much faster
+    # Parallel analysis for all games
     import asyncio as _aio
 
     async def _analyze_one(event_ticker: str):

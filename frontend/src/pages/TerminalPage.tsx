@@ -19,16 +19,30 @@ export default function TerminalPage() {
   const { data: analysisData, isLoading: analysisLoading } = usePolling(["analysis-all"], api.analysis.all, 60_000);
 
   const analyses = analysisData?.analyses ?? [];
+  const analysisMap = new Map(analyses.map(a => [a.game_id, a]));
+
+  // Build combined list: all games, enriched with analysis when available
+  const allGames = (games ?? []).map(g => ({
+    game: g,
+    analysis: analysisMap.get(g.game_id) || null,
+  }));
+
+  // Sort: games with BUY analysis first, then by edge, then others
+  const sortedGames = [...allGames].sort((a, b) => {
+    const aScore = a.analysis?.trade_decision ? 1000 + (a.analysis.edge * 100) : (a.analysis ? a.analysis.edge * 100 : -1);
+    const bScore = b.analysis?.trade_decision ? 1000 + (b.analysis.edge * 100) : (b.analysis ? b.analysis.edge * 100 : -1);
+    return bScore - aScore;
+  });
 
   // Auto-select first actionable game
   useEffect(() => {
-    if (!selectedGameId && analyses.length > 0) {
-      const first = analyses.find(a => a.trade_decision) ?? analyses[0];
-      if (first) setSelectedGameId(first.game_id);
+    if (!selectedGameId && sortedGames.length > 0) {
+      const first = sortedGames.find(g => g.analysis?.trade_decision) ?? sortedGames[0];
+      if (first) setSelectedGameId(first.game.game_id);
     }
-  }, [analyses, selectedGameId]);
+  }, [sortedGames.length, selectedGameId]);
 
-  const selected = analyses.find(a => a.game_id === selectedGameId);
+  const selected = analysisMap.get(selectedGameId) || null;
   const selectedGame = (games ?? []).find(g => g.game_id === selectedGameId);
 
   return (
@@ -53,32 +67,30 @@ export default function TerminalPage() {
                 <span className="text-[9px] text-zinc-600">OFFLINE</span>
               </div>
             )}
-            <span className="text-[10px] text-zinc-600">{analyses.length}</span>
+            <span className="text-[10px] text-zinc-600">{sortedGames.length}</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {analyses.map(a => {
-            const lp = getGamePrices(a.game_id);
+          {sortedGames.map(({ game: g, analysis: a }) => {
+            const lp = getGamePrices(g.game_id);
             return (
-              <SignalCard
-                key={a.game_id}
+              <GameSignalCard
+                key={g.game_id}
+                game={g}
                 analysis={a}
-                game={(games ?? []).find(g => g.game_id === a.game_id)}
                 livePrices={lp}
-                isSelected={a.game_id === selectedGameId}
-                onClick={() => setSelectedGameId(a.game_id)}
+                isSelected={g.game_id === selectedGameId}
+                onClick={() => setSelectedGameId(g.game_id)}
               />
             );
           })}
-          {analyses.length === 0 && analysisLoading && (
+          {sortedGames.length === 0 && (
             <div className="text-zinc-600 text-xs text-center py-8">
-              <div className="animate-pulse mb-2">Analyzing {(games ?? []).length} games...</div>
-              <div className="text-zinc-700 text-[10px]">First load takes ~10s</div>
-            </div>
-          )}
-          {analyses.length === 0 && !analysisLoading && (games ?? []).length > 0 && (
-            <div className="text-zinc-600 text-xs text-center py-8">
-              No signals available
+              {analysisLoading ? (
+                <div className="animate-pulse">Loading games...</div>
+              ) : (
+                "No games available"
+              )}
             </div>
           )}
         </div>
@@ -114,16 +126,36 @@ export default function TerminalPage() {
    LEFT PANEL — SIGNAL CARD
    ══════════════════════════════════════════════════════════════════════ */
 
-function SignalCard({ analysis: a, game, livePrices, isSelected, onClick }: {
-  analysis: GameAnalysis; game?: GameListItem; livePrices: { yes_bid: number; yes_ask: number; team: string }[]; isSelected: boolean; onClick: () => void;
+function GameSignalCard({ game, analysis: a, livePrices, isSelected, onClick }: {
+  game: GameListItem; analysis: GameAnalysis | null;
+  livePrices: { yes_bid: number; yes_ask: number; team: string }[];
+  isSelected: boolean; onClick: () => void;
 }) {
-  // Use live WebSocket prices if available, fall back to analysis data
   const lp0 = livePrices[0];
   const lp1 = livePrices[1];
-  const edgeColor = a.edge > 0.06 ? "text-green-400" : a.edge > 0.03 ? "text-yellow-400" : a.edge > 0 ? "text-zinc-400" : "text-red-400";
-  const actionColor = a.trade_decision ? (a.direction === "YES" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400") : "bg-zinc-800 text-zinc-500";
-  const action = a.trade_decision ? (a.direction === "YES" ? "BUY" : "SELL") : "SKIP";
   const g = game as any;
+
+  // Prices from live WebSocket > game list > analysis
+  const homePct = lp0 ? Math.round(((lp0.yes_bid + lp0.yes_ask) / 2) * 100) : (g?.home_pct || 0);
+  const awayPct = lp1 ? Math.round(((lp1.yes_bid + lp1.yes_ask) / 2) * 100) : (g?.away_pct || 0);
+  const league = g?.league || game.season_type || "";
+
+  // Analysis badge
+  let action = "";
+  let actionColor = "bg-zinc-800/50 text-zinc-600";
+  let edgeText = "";
+  let edgeColor = "text-zinc-600";
+  let confBadge = "";
+
+  if (a) {
+    action = a.trade_decision ? "BUY" : "SKIP";
+    actionColor = a.trade_decision
+      ? (a.direction === "YES" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400")
+      : "bg-zinc-800/50 text-zinc-600";
+    edgeText = `${a.edge > 0 ? "+" : ""}${(a.edge * 100).toFixed(1)}%`;
+    edgeColor = a.edge > 0.06 ? "text-green-400" : a.edge > 0.03 ? "text-yellow-400" : a.edge > 0 ? "text-zinc-400" : "text-zinc-600";
+    confBadge = a.confidence_tier;
+  }
 
   return (
     <button
@@ -133,46 +165,45 @@ function SignalCard({ analysis: a, game, livePrices, isSelected, onClick }: {
       }`}
     >
       {/* Row 1: Teams + Action */}
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center justify-between mb-1">
         <span className="text-[13px] font-medium text-zinc-200 truncate mr-2">
-          {a.away_team} <span className="text-zinc-600">@</span> {a.home_team}
+          {game.away_team} <span className="text-zinc-600">@</span> {game.home_team}
         </span>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${actionColor}`}>
-          {action}
-        </span>
-      </div>
-
-      {/* Row 2: Edge + Confidence + Phase */}
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`text-xs font-semibold tabular-nums ${edgeColor}`}>
-          {a.edge > 0 ? "+" : ""}{(a.edge * 100).toFixed(1)}%
-        </span>
-        <span className="text-[10px] text-zinc-600">edge</span>
-        <span className={`text-[10px] px-1 rounded ${
-          a.confidence_tier === "HIGH" ? "bg-green-500/10 text-green-400" :
-          a.confidence_tier === "MED" ? "bg-yellow-500/10 text-yellow-400" :
-          "bg-zinc-800 text-zinc-500"
-        }`}>
-          {a.confidence_tier}
-        </span>
-        <span className="text-[10px] text-zinc-600 ml-auto">{a.phase.replace("_", " ")}</span>
-      </div>
-
-      {/* Row 3: Fair vs Market + Risk tags */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-zinc-500">
-          Fair <span className="text-zinc-400">{(a.blended_fair_prob * 100).toFixed(0)}%</span>
-          {" "}vs Mkt <span className="text-zinc-400">{(a.market_prob * 100).toFixed(0)}%</span>
-        </span>
-        {a.risk_alerts.length > 0 && (
-          <AlertTriangle size={10} className="text-yellow-500 ml-auto" />
-        )}
-        {(lp0 || g?.home_pct > 0) && (
-          <span className="text-[10px] text-zinc-600 tabular-nums">
-            {lp0 ? `${Math.round(lp0.yes_ask * 100)}¢` : `${g?.home_pct}¢`}
-            /
-            {lp1 ? `${Math.round(lp1.yes_ask * 100)}¢` : `${g?.away_pct}¢`}
+        {action && (
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${actionColor}`}>
+            {action}
           </span>
+        )}
+      </div>
+
+      {/* Row 2: Prices + Edge + League */}
+      <div className="flex items-center gap-2">
+        {/* Live prices */}
+        {(homePct > 0 || awayPct > 0) && (
+          <span className="text-[11px] tabular-nums text-zinc-400">
+            {homePct}¢ / {awayPct}¢
+          </span>
+        )}
+        {/* Edge */}
+        {edgeText && (
+          <span className={`text-[11px] font-semibold tabular-nums ${edgeColor}`}>
+            {edgeText}
+          </span>
+        )}
+        {/* Confidence */}
+        {confBadge && (
+          <span className={`text-[9px] px-1 rounded ${
+            confBadge === "HIGH" ? "bg-green-500/10 text-green-400" :
+            confBadge === "MED" ? "bg-yellow-500/10 text-yellow-400" :
+            "bg-zinc-800 text-zinc-500"
+          }`}>
+            {confBadge}
+          </span>
+        )}
+        {/* League tag */}
+        <span className="text-[9px] text-zinc-600 ml-auto">{league}</span>
+        {a && a.risk_alerts.length > 0 && (
+          <AlertTriangle size={9} className="text-yellow-500" />
         )}
       </div>
     </button>
