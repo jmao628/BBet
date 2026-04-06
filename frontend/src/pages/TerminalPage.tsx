@@ -437,7 +437,7 @@ function ExecutionPanel({ analysis: a, game }: { analysis: GameAnalysis; game?: 
     setTradeStatus("executing...");
     try {
       const res = await fetch(
-        `http://localhost:8000/api/portfolio/trade?ticker=${ticker}&side=${side}&action=buy&quantity=${quantity}&price_cents=${priceCents}`,
+        `/api/portfolio/trade?ticker=${ticker}&side=${side}&action=buy&quantity=${quantity}&price_cents=${priceCents}`,
         { method: "POST" },
       );
       const data = await res.json();

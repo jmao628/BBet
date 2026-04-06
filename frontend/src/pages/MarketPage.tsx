@@ -107,7 +107,7 @@ export default function MarketPage() {
     setTradeStatus("executing...");
     try {
       const res = await fetch(
-        `http://localhost:8000/api/portfolio/trade?ticker=${ticker}&side=${selectedSide}&action=${buyTab}&quantity=${quantity}&price_cents=${priceCents}`,
+        `/api/portfolio/trade?ticker=${ticker}&side=${selectedSide}&action=${buyTab}&quantity=${quantity}&price_cents=${priceCents}`,
         { method: "POST" },
       );
       const data = await res.json();

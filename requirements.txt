@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+httpx
+cryptography
+pyyaml
+pydantic-settings
+nba_api
+websockets
+structlog

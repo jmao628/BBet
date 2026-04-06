@@ -20,7 +20,7 @@ interface PriceUpdate {
   prices: LivePrice[];
 }
 
-const WS_URL = "ws://localhost:8000/ws/prices";
+const WS_URL = (window.location.protocol === "https:" ? "wss:" : "ws:") + "//" + window.location.host + "/ws/prices";
 const RECONNECT_DELAY = 2000;
 
 /**

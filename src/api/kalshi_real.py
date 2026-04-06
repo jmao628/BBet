@@ -6,6 +6,7 @@ Connects to demo or production Kalshi Trade API v2.
 from __future__ import annotations
 
 import base64
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 # ── Configuration ────────────────────────────────────────────────────
 
-KALSHI_API_KEY = "5ce679c0-46dd-42c6-8f46-4311f8321034"
+KALSHI_API_KEY = os.environ.get("KALSHI_API_KEY", "5ce679c0-46dd-42c6-8f46-4311f8321034")
 KALSHI_KEY_FILE = Path(__file__).parent.parent.parent / "config" / "kalshi-key.pem"
 KALSHI_BASE_URL = "https://api.elections.kalshi.com"  # production environment
 
@@ -35,6 +36,14 @@ BASKETBALL_KEYWORDS = [
 # ── RSA Signing ──────────────────────────────────────────────────────
 
 def _load_private_key() -> rsa.RSAPrivateKey:
+    # Try environment variable first (for cloud deployment)
+    env_key = os.environ.get("KALSHI_PRIVATE_KEY", "")
+    if env_key:
+        key_bytes = env_key.encode("utf-8")
+        return serialization.load_pem_private_key(
+            key_bytes, password=None, backend=default_backend()
+        )
+    # Fall back to file
     with open(KALSHI_KEY_FILE, "rb") as f:
         return serialization.load_pem_private_key(
             f.read(), password=None, backend=default_backend()

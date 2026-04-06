@@ -26,6 +26,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve frontend static files in production
+import os
+FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if FRONTEND_DIR.exists():
+    from starlette.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+
+    @app.get("/assets/{path:path}")
+    async def static_assets(path: str):
+        file = FRONTEND_DIR / "assets" / path
+        if file.exists():
+            return FileResponse(str(file))
+        return {"error": "not_found"}
+
+    @app.get("/{path:path}")
+    async def catch_all(path: str):
+        """Serve frontend for all non-API routes."""
+        if path.startswith("api/") or path.startswith("ws/"):
+            return {"error": "not_found"}
+        file = FRONTEND_DIR / path
+        if file.exists() and file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
+
 START = time.time()
 kalshi = KalshiRealClient()
 
