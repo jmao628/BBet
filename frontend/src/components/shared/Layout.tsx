@@ -1,21 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Zap,
-  FlaskConical,
-  ShieldAlert,
-  Activity,
-  BarChart3,
-} from "lucide-react";
+import { Zap } from "lucide-react";
 import clsx from "clsx";
 
 const NAV = [
   { to: "/", label: "Terminal", icon: Zap },
-  { to: "/portfolio", label: "Portfolio", icon: LayoutDashboard },
-  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { to: "/signals", label: "Signals", icon: FlaskConical },
-  { to: "/risk", label: "Risk", icon: ShieldAlert },
-  { to: "/system", label: "System", icon: Activity },
 ] as const;
 
 export default function Layout() {
