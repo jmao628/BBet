@@ -124,7 +124,7 @@ def _series_to_league(series: str) -> str:
 
 
 async def _get_market_with_orderbook(ticker: str) -> dict:
-    """Get market data + extract best bid/ask from orderbook."""
+    """Get market data with real Kalshi bid/ask + orderbook depth."""
     market = await kalshi.get_market(ticker)
     ob = await kalshi.get_orderbook(ticker)
     ob_fp = ob.get("orderbook_fp", ob.get("orderbook", {}))
@@ -132,22 +132,34 @@ async def _get_market_with_orderbook(ticker: str) -> dict:
     yes_bids = ob_fp.get("yes_dollars", ob_fp.get("yes", []))
     no_bids = ob_fp.get("no_dollars", ob_fp.get("no", []))
 
-    # Best YES bid = highest price someone will buy YES at
-    best_yes_bid = max((float(lvl[0]) for lvl in yes_bids), default=0) if yes_bids else 0
-    # Best YES ask = 1 - highest NO bid price
-    best_no_bid = max((float(lvl[0]) for lvl in no_bids), default=0) if no_bids else 0
-    best_yes_ask = 1 - (min((float(lvl[0]) for lvl in no_bids), default=1)) if no_bids else 1
+    # Use Kalshi's direct bid/ask fields — these are the real NBBO
+    best_yes_bid = float(market.get("yes_bid_dollars", 0) or 0)
+    best_yes_ask = float(market.get("yes_ask_dollars", 0) or 0)
+    last_price = float(market.get("last_price_dollars", 0) or 0)
+    prev_price = float(market.get("previous_price_dollars", 0) or 0)
 
-    # Calculate total depth
+    # Calculate total depth from orderbook
     yes_depth = sum(float(lvl[1]) for lvl in yes_bids) if yes_bids else 0
     no_depth = sum(float(lvl[1]) for lvl in no_bids) if no_bids else 0
 
+    yes_mid = (best_yes_bid + best_yes_ask) / 2 if best_yes_bid > 0 and best_yes_ask > 0 else last_price
+
     market["_best_yes_bid"] = round(best_yes_bid, 4)
     market["_best_yes_ask"] = round(best_yes_ask, 4)
-    market["_yes_mid"] = round((best_yes_bid + best_yes_ask) / 2, 4) if best_yes_bid > 0 else 0
+    market["_yes_mid"] = round(yes_mid, 4)
+    market["_last_price"] = round(last_price, 4)
+    market["_prev_price"] = round(prev_price, 4)
     market["_yes_depth"] = round(yes_depth, 2)
     market["_no_depth"] = round(no_depth, 2)
     market["_orderbook"] = {"yes": yes_bids, "no": no_bids}
+    # Copy direct dollar fields for frontend
+    market["_volume"] = int(float(market.get("volume_fp", 0) or 0))
+    market["_volume_24h"] = int(float(market.get("volume_24h_fp", 0) or 0))
+    market["_open_interest"] = int(float(market.get("open_interest_fp", 0) or 0))
+    market["_no_bid"] = float(market.get("no_bid_dollars", 0) or 0)
+    market["_no_ask"] = float(market.get("no_ask_dollars", 0) or 0)
+    market["_yes_sub_title"] = market.get("yes_sub_title", "")
+    market["_no_sub_title"] = market.get("no_sub_title", "")
     return market
 
 
@@ -251,7 +263,7 @@ async def game_detail(game_id: str):
     away_team = teams[0] if len(teams) == 2 else title
     home_team = teams[1] if len(teams) == 2 else ""
 
-    # Fetch real orderbook data for each market
+    # Fetch real-time data for each market
     enriched_markets = []
     for m in markets:
         try:
@@ -260,16 +272,26 @@ async def game_detail(game_id: str):
                 "ticker": m["ticker"],
                 "title": full.get("title", ""),
                 "subtitle": full.get("subtitle", ""),
+                "team_name": full["_yes_sub_title"] or "",
+                # Prices — direct from Kalshi NBBO
                 "yes_bid": full["_best_yes_bid"],
                 "yes_ask": full["_best_yes_ask"],
                 "yes_mid": full["_yes_mid"],
+                "no_bid": full["_no_bid"],
+                "no_ask": full["_no_ask"],
+                "last_price": full["_last_price"],
+                "prev_price": full["_prev_price"],
+                # Depth
                 "yes_depth": full["_yes_depth"],
                 "no_depth": full["_no_depth"],
-                "volume": full.get("volume") or 0,
-                "open_interest": full.get("open_interest") or 0,
-                "last_price": (full.get("last_price") or 0) / 100,
+                # Volume
+                "volume": full["_volume"],
+                "volume_24h": full["_volume_24h"],
+                "open_interest": full["_open_interest"],
+                # Meta
                 "status": full.get("status", ""),
                 "close_time": full.get("close_time", ""),
+                "expected_expiration_time": full.get("expected_expiration_time", ""),
                 "orderbook": full["_orderbook"],
             })
         except Exception:

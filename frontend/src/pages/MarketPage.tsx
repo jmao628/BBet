@@ -65,21 +65,26 @@ export default function MarketPage() {
     return () => clearInterval(interval);
   }, [priceData?.game_time_utc]);
 
-  const market0 = (gameDetail as any)?.markets?.[0];
-  const market1 = (gameDetail as any)?.markets?.[1];
+  const market0 = (gameDetail as any)?.markets?.[0]; // first outcome (usually home)
+  const market1 = (gameDetail as any)?.markets?.[1]; // second outcome (usually away)
 
-  // Real-time prices from market data (dollars, not cents)
+  // Team names from market sub_titles (most accurate from Kalshi)
+  const homeTeam = market0?.team_name || priceData?.home_team || (gameDetail as any)?.home_team || "";
+  const awayTeam = market1?.team_name || priceData?.away_team || (gameDetail as any)?.away_team || "";
+
+  // Real-time prices — direct from Kalshi NBBO (dollars)
   const homeBid = market0?.yes_bid ?? 0;
   const homeAsk = market0?.yes_ask ?? 0;
-  const awayBid = market1?.yes_bid ?? 0;
+  const homeNoBid = market0?.no_bid ?? 0;
+  const homeNoAsk = market0?.no_ask ?? 0;
+
   const awayAsk = market1?.yes_ask ?? 0;
+  const awayNoAsk = market1?.no_ask ?? 0;
 
-  const homeTeam = priceData?.home_team || (gameDetail as any)?.home_team || "";
-  const awayTeam = priceData?.away_team || (gameDetail as any)?.away_team || "";
-
-  // Auto-sync price to market
-  const selectedAsk = selectedSide === "yes" ? homeAsk : awayAsk;
-  const selectedBid = selectedSide === "yes" ? homeBid : awayBid;
+  // Auto-sync price to market — use correct Kalshi NBBO
+  // YES side uses market0 (home outcome), NO side uses market0's NO prices
+  const selectedAsk = selectedSide === "yes" ? homeAsk : homeNoAsk;
+  const selectedBid = selectedSide === "yes" ? homeBid : homeNoBid;
   const autoPrice = Math.round((buyTab === "buy" ? selectedAsk : selectedBid) * 100);
   const priceCents = limitPrice || autoPrice || 50;
 
@@ -126,6 +131,7 @@ export default function MarketPage() {
   const title = (gameDetail as any)?.title || `${awayTeam} at ${homeTeam}`;
   const league = (gameDetail as any)?.league || "NBA";
   const totalVolume = (market0?.volume ?? 0) + (market1?.volume ?? 0);
+  const volume24h = (market0?.volume_24h ?? 0) + (market1?.volume_24h ?? 0);
 
   return (
     <div className="flex h-full">
@@ -219,7 +225,10 @@ export default function MarketPage() {
 
           {/* Volume + period selector */}
           <div className="flex items-center justify-between py-4 border-b border-zinc-800/60 mt-2">
-            <span className="text-sm text-zinc-500 font-medium">${totalVolume.toLocaleString()} vol</span>
+            <span className="text-sm text-zinc-500 font-medium">
+              ${totalVolume.toLocaleString()} vol
+              {volume24h > 0 && <span className="text-zinc-600 ml-2">(${volume24h.toLocaleString()} 24h)</span>}
+            </span>
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {PERIODS.map((p) => (
                 <button
@@ -236,8 +245,14 @@ export default function MarketPage() {
           {/* ── Chance table ──────────────────────────────── */}
           <div className="pt-4 pb-2">
             <div className="text-sm text-zinc-400 font-medium mb-4">Chance</div>
-            <ChanceRow team={homeTeam} pct={homePct} bidCents={Math.round(homeBid * 100)} askCents={Math.round(homeAsk * 100)} color="red" />
-            <ChanceRow team={awayTeam} pct={awayPct} bidCents={Math.round(awayBid * 100)} askCents={Math.round(awayAsk * 100)} color="blue" />
+            <ChanceRow team={homeTeam} pct={homePct}
+              yesAskCents={Math.round(homeAsk * 100)}
+              noAskCents={Math.round(homeNoAsk * 100)}
+              color="red" />
+            <ChanceRow team={awayTeam} pct={awayPct}
+              yesAskCents={Math.round(awayAsk * 100)}
+              noAskCents={Math.round(awayNoAsk * 100)}
+              color="blue" />
           </div>
 
           {/* Orderbook depth */}
@@ -277,7 +292,7 @@ export default function MarketPage() {
             </button>
           </div>
 
-          {/* Yes / No — prices auto-sync from market */}
+          {/* Yes / No — prices from Kalshi NBBO */}
           <div className="flex gap-2 mb-5">
             <button onClick={() => { setSelectedSide("yes"); setLimitPrice(0); }}
               className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${selectedSide === "yes" ? "bg-green-500/15 text-green-400 ring-2 ring-green-500/60" : "bg-zinc-800/60 text-zinc-500 ring-1 ring-zinc-700 hover:ring-zinc-600"}`}>
@@ -285,7 +300,7 @@ export default function MarketPage() {
             </button>
             <button onClick={() => { setSelectedSide("no"); setLimitPrice(0); }}
               className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${selectedSide === "no" ? "bg-red-500/15 text-red-400 ring-2 ring-red-500/60" : "bg-zinc-800/60 text-zinc-500 ring-1 ring-zinc-700 hover:ring-zinc-600"}`}>
-              No {Math.round(awayAsk * 100)}¢
+              No {Math.round(homeNoAsk * 100)}¢
             </button>
           </div>
 
@@ -375,8 +390,8 @@ function Row({ label, value, color, bold, dim }: { label: string; value: string;
   );
 }
 
-function ChanceRow({ team, pct, bidCents, askCents, color }: {
-  team: string; pct: number; bidCents: number; askCents: number; color: "red" | "blue";
+function ChanceRow({ team, pct, yesAskCents, noAskCents, color }: {
+  team: string; pct: number; yesAskCents: number; noAskCents: number; color: "red" | "blue";
 }) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-zinc-800/40">
@@ -387,10 +402,10 @@ function ChanceRow({ team, pct, bidCents, askCents, color }: {
       </div>
       <div className="flex items-center gap-2">
         <span className="px-4 py-1.5 rounded-full bg-green-500/10 text-green-400 text-xs font-semibold ring-1 ring-green-500/20">
-          Yes {askCents}¢
+          Yes {yesAskCents}¢
         </span>
         <span className="px-4 py-1.5 rounded-full bg-red-500/10 text-red-400 text-xs font-semibold ring-1 ring-red-500/20">
-          No {100 - bidCents}¢
+          No {noAskCents}¢
         </span>
       </div>
     </div>
