@@ -50,9 +50,9 @@ export default function MarketPage() {
     { enabled: !!gameId },
   );
 
-  // Live countdown timer
+  // Live countdown timer — use game detail time (more accurate)
   useEffect(() => {
-    const gameTime = priceData?.game_time_utc;
+    const gameTime = (gameDetail as any)?.game_time_utc || priceData?.game_time_utc;
     if (!gameTime) return;
     const interval = setInterval(() => {
       const diff = new Date(gameTime).getTime() - Date.now();
@@ -155,8 +155,8 @@ export default function MarketPage() {
                 </span>
                 <span>·</span>
                 <span>
-                  {priceData?.game_time_utc
-                    ? new Date(priceData.game_time_utc).toLocaleString("en-US", {
+                  {((gameDetail as any)?.game_time_utc || priceData?.game_time_utc)
+                    ? new Date((gameDetail as any)?.game_time_utc || priceData?.game_time_utc).toLocaleString("en-US", {
                         month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
                       })
                     : "—"}

@@ -209,17 +209,29 @@ async def games_today():
         away_vol = int(float(away_market.get("volume_fp", 0) or 0)) if away_market else 0
         total_vol = home_vol + away_vol
 
-        # Expected game time
+        # Game start time = expected_expiration_time - 3 hours
+        # Kalshi's expected_expiration is when market settles (after game ends)
+        # NBA games typically last ~2.5h, so tipoff ≈ settlement - 3h
         exp_time = ""
         if home_market:
             exp_time = home_market.get("expected_expiration_time", "")
         if not exp_time:
             exp_time = e.get("close_time", "")
 
+        # Convert to actual game start time
+        game_start = exp_time
+        if exp_time:
+            try:
+                exp_dt = datetime.fromisoformat(exp_time.replace("Z", "+00:00"))
+                start_dt = exp_dt - timedelta(hours=3)
+                game_start = start_dt.isoformat()
+            except Exception:
+                game_start = exp_time
+
         games.append({
             "game_id": e.get("event_ticker", ""),
             "game_date": str(date.today()),
-            "game_time_utc": exp_time,
+            "game_time_utc": game_start,
             "home_team": home_team,
             "away_team": away_team,
             "venue": None,
@@ -315,12 +327,24 @@ async def game_detail(game_id: str):
         home_pct = round(m0["yes_mid"] * 100)
         away_pct = round(m1["yes_mid"] * 100)
 
+    # Compute game start time (settlement - 3h)
+    game_start = ""
+    if enriched_markets:
+        exp = enriched_markets[0].get("expected_expiration_time", "")
+        if exp:
+            try:
+                exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+                game_start = (exp_dt - timedelta(hours=3)).isoformat()
+            except Exception:
+                game_start = exp
+
     return {
         "game_id": game_id,
         "title": title,
         "home_team": home_team,
         "away_team": away_team,
         "league": event.get("_league", "NBA"),
+        "game_time_utc": game_start,
         "close_time": event.get("close_time", ""),
         "home_pct": home_pct,
         "away_pct": away_pct,
@@ -384,20 +408,25 @@ async def game_price_history(game_id: str, period: str = "1D"):
     yes_mid = (yes_bid + yes_ask) / 2 if yes_bid > 0 else (last_price or 0.5)
     no_mid = 1 - yes_mid
 
-    # Expected game time from market
-    exp_time = ""
+    # Game start time = expected_expiration - 3 hours
+    game_start = ""
     if home_ticker:
         try:
             m = await kalshi.get_market(home_ticker)
-            exp_time = m.get("expected_expiration_time", m.get("close_time", ""))
+            exp = m.get("expected_expiration_time", "")
+            if exp:
+                exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+                game_start = (exp_dt - timedelta(hours=3)).isoformat()
         except Exception:
             pass
+    if not game_start:
+        game_start = event.get("close_time", "")
 
     return {
         "game_id": game_id,
         "home_team": home_team,
         "away_team": away_team,
-        "game_time_utc": exp_time or event.get("close_time", ""),
+        "game_time_utc": game_start,
         "question": title,
         "yes_price": round(yes_mid, 2),
         "no_price": round(no_mid, 2),
