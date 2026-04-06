@@ -46,27 +46,63 @@ async def preload_data():
 async def _preload_background():
     global _startup_done
     try:
-        # 1. Pre-fetch NBA team stats (takes ~6s, cache for 5min)
+        # 1. Pre-fetch NBA team stats in a thread (it's sync and blocks event loop)
         from src.api.nba_data import get_all_team_stats
-        get_all_team_stats()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, get_all_team_stats)
         print("[PRELOAD] NBA stats loaded")
 
         # 2. Pre-fetch all basketball events from Kalshi
         await _get_all_basketball_events()
-        print(f"[PRELOAD] Kalshi events loaded")
+        print("[PRELOAD] Kalshi events loaded")
 
         # 3. Pre-run analysis for all NBA games
         try:
             await all_game_analyses()
             print("[PRELOAD] Analysis pre-warmed")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[PRELOAD] Analysis error (non-fatal): {e}")
 
         _startup_done = True
         print("[PRELOAD] All caches warm — ready for instant load")
+
+        # 4. Load extended NBA data in background (rest days, H2H, players)
+        # This is slow but non-blocking — pages work with basic data first
+        asyncio.create_task(_load_extended_data())
+
     except Exception as e:
         print(f"[PRELOAD] Error: {e}")
         _startup_done = True
+
+
+async def _load_extended_data():
+    """Load extended NBA data (rest days, H2H, player stats) in background."""
+    from src.api.nba_data import get_all_team_stats
+    from src.api.nba_extended import get_team_schedule_info, get_h2h_record, get_team_key_players
+
+    try:
+        all_nba = get_all_team_stats()
+        team_ids = [(name, stats.get("team_id", 0)) for name, stats in all_nba.items() if stats.get("team_id")]
+
+        loop = asyncio.get_event_loop()
+
+        for name, tid in team_ids:
+            try:
+                await loop.run_in_executor(None, get_team_schedule_info, tid)
+                await loop.run_in_executor(None, get_team_key_players, tid)
+            except Exception:
+                pass
+
+        print(f"[PRELOAD] Extended data loaded for {len(team_ids)} teams")
+
+        # Invalidate analysis cache so next request uses extended data
+        global _cache
+        for key in list(_cache.keys()):
+            if "analysis" in key:
+                del _cache[key]
+
+    except Exception as e:
+        print(f"[PRELOAD] Extended data error: {e}")
 
 # ── NBA only — Pro Basketball moneyline ──────────────────────────────
 BASKETBALL_SERIES = [
@@ -541,54 +577,43 @@ async def game_analysis(game_id: str):
         spread=round(m1["_best_yes_ask"] - m1["_best_yes_bid"], 4),
     )
 
-    # Build fundamentals from REAL NBA data
+    # Build fundamentals from REAL NBA data (sync calls run in thread pool)
     from src.api.nba_data import get_all_team_stats, find_team
 
     try:
-        all_nba = get_all_team_stats()
+        loop = asyncio.get_event_loop()
+        all_nba = await loop.run_in_executor(None, get_all_team_stats)
     except Exception:
         all_nba = {}
 
     home_nba = find_team(home_sub, all_nba) if all_nba else None
     away_nba = find_team(away_sub, all_nba) if all_nba else None
 
-    def _build_fund(name: str, is_home: bool, nba: dict | None, mkt_mid: float) -> FundamentalsProfile:
+    async def _build_fund(name: str, is_home: bool, nba: dict | None, mkt_mid: float) -> FundamentalsProfile:
         if nba:
-            # Get extended data (rest days, H2H, player data)
-            from src.api.nba_extended import get_team_schedule_info, get_h2h_record, get_team_key_players
             team_id = nba.get("team_id", 0)
 
-            try:
-                sched = get_team_schedule_info(team_id)
-            except Exception:
-                sched = {"rest_days": 2, "is_b2b": False}
+            # Extended data: try cache first, skip slow API calls if not cached
+            from src.api.nba_extended import _ext_cached
+            sched = _ext_cached(f"schedule_{team_id}") or {"rest_days": 2, "is_b2b": False}
 
-            # Get opponent team ID for H2H
             opp_name = away_sub if is_home else home_sub
             opp_nba = find_team(opp_name, all_nba) if all_nba else None
             opp_id = opp_nba.get("team_id", 0) if opp_nba else 0
 
-            h2h_wins, h2h_losses = 0, 0
-            if opp_id:
-                try:
-                    h2h = get_h2h_record(team_id, opp_id)
-                    h2h_wins = h2h.get("wins", 0)
-                    h2h_losses = h2h.get("losses", 0)
-                except Exception:
-                    pass
+            h2h_data = _ext_cached(f"h2h_{team_id}_{opp_id}") if opp_id else None
+            h2h_wins = h2h_data.get("wins", 0) if h2h_data else 0
+            h2h_losses = h2h_data.get("losses", 0) if h2h_data else 0
 
-            # Get key players and infer injury impact
             injury_impact = 0.0
             key_injuries = []
-            try:
-                players = get_team_key_players(team_id)
+            players = _ext_cached(f"players_{team_id}")
+            if players:
                 for p in players[:8]:
                     if p.get("possibly_injured"):
                         injury_impact += min(0.2, p["impact_score"] / 60)
                         key_injuries.append(f"{p['name']} (missed {p['games_missed']}G)")
                 injury_impact = min(1.0, injury_impact)
-            except Exception:
-                pass
 
             # Parse win streak
             streak_raw = nba.get("streak", 0)
@@ -623,8 +648,8 @@ async def game_analysis(game_id: str):
                 elo=1500 + (mkt_mid - 0.5) * 200 if mkt_mid > 0 else 1500,
             )
 
-    home_fund = _build_fund(home_sub, True, home_nba, (home_mkt.yes_bid + home_mkt.yes_ask) / 2)
-    away_fund = _build_fund(away_sub, False, away_nba, (away_mkt.yes_bid + away_mkt.yes_ask) / 2)
+    home_fund = await _build_fund(home_sub, True, home_nba, (home_mkt.yes_bid + home_mkt.yes_ask) / 2)
+    away_fund = await _build_fund(away_sub, False, away_nba, (away_mkt.yes_bid + away_mkt.yes_ask) / 2)
 
     # Time to game
     exp = m0.get("expected_expiration_time", "")
