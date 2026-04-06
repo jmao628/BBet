@@ -34,6 +34,8 @@ export interface PortfolioData {
 }
 
 export interface PositionItem {
+  id: string;
+  ticker: string;
   game_id: string;
   home_team: string;
   away_team: string;
@@ -48,6 +50,7 @@ export interface PositionItem {
   pnl: number;
   pnl_pct: number;
   market_question: string;
+  opened_at: string;
 }
 
 export interface PriceHistoryData {
