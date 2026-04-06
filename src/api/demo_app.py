@@ -41,6 +41,7 @@ async def preload_data():
     """Pre-fetch all data on server boot so first page load is instant."""
     global _startup_done
     asyncio.create_task(_preload_background())
+    asyncio.create_task(_price_streamer())  # Start WebSocket price streaming
 
 async def _preload_background():
     global _startup_done
@@ -726,7 +727,7 @@ async def all_game_analyses(league: str = ""):
             pass
         return None
 
-    tasks = [_analyze_one(e.get("event_ticker", "")) for e in filtered[:20]]
+    tasks = [_analyze_one(e.get("event_ticker", "")) for e in filtered]  # analyze ALL games
     batch = await _aio.gather(*tasks)
     results = [r for r in batch if r is not None]
 
@@ -1066,10 +1067,7 @@ async def ws_prices(websocket: WebSocket):
         _ws_clients.discard(websocket)
 
 
-@app.on_event("startup")
-async def start_streamer():
-    """Start the price streaming background task on server startup."""
-    asyncio.create_task(_price_streamer())
+# Price streamer is started by the main startup event (preload_data)
 
 
 @app.get("/api/prices/live")

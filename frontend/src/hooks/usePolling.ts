@@ -12,7 +12,10 @@ export function usePolling<T>(
     queryFn: fetcher,
     refetchInterval: intervalMs,
     staleTime: intervalMs / 2,
-    retry: 2,
+    retry: 3,
+    retryDelay: 2000,
+    // Keep previous data while refetching — prevents content from disappearing
+    placeholderData: (prev) => prev,
     ...options,
   });
 }
