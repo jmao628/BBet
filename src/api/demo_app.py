@@ -538,13 +538,45 @@ async def game_analysis(game_id: str):
 
     def _build_fund(name: str, is_home: bool, nba: dict | None, mkt_mid: float) -> FundamentalsProfile:
         if nba:
+            # Get extended data (rest days, H2H, player data)
+            from src.api.nba_extended import get_team_schedule_info, get_h2h_record, get_team_key_players
+            team_id = nba.get("team_id", 0)
+
+            try:
+                sched = get_team_schedule_info(team_id)
+            except Exception:
+                sched = {"rest_days": 2, "is_b2b": False}
+
+            # Get opponent team ID for H2H
+            opp_name = away_sub if is_home else home_sub
+            opp_nba = find_team(opp_name, all_nba) if all_nba else None
+            opp_id = opp_nba.get("team_id", 0) if opp_nba else 0
+
+            h2h_wins, h2h_losses = 0, 0
+            if opp_id:
+                try:
+                    h2h = get_h2h_record(team_id, opp_id)
+                    h2h_wins = h2h.get("wins", 0)
+                    h2h_losses = h2h.get("losses", 0)
+                except Exception:
+                    pass
+
+            # Get key players and infer injury impact
+            injury_impact = 0.0
+            key_injuries = []
+            try:
+                players = get_team_key_players(team_id)
+                for p in players[:8]:
+                    if p.get("possibly_injured"):
+                        injury_impact += min(0.2, p["impact_score"] / 60)
+                        key_injuries.append(f"{p['name']} (missed {p['games_missed']}G)")
+                injury_impact = min(1.0, injury_impact)
+            except Exception:
+                pass
+
             # Parse win streak
             streak_raw = nba.get("streak", 0)
             streak = int(streak_raw) if isinstance(streak_raw, (int, float)) else 0
-            if isinstance(streak_raw, str):
-                parts = streak_raw.split()
-                if len(parts) == 2:
-                    streak = int(parts[1]) if parts[0] == "W" else -int(parts[1])
 
             return FundamentalsProfile(
                 team_name=nba["team_name"],
@@ -560,7 +592,12 @@ async def game_analysis(game_id: str):
                 net_rating=nba.get("net_rating", 0),
                 elo=nba.get("elo", 1500),
                 win_streak=streak,
-                rest_days=2,  # TODO: compute from schedule
+                rest_days=sched.get("rest_days", 2),
+                is_b2b=sched.get("is_b2b", False),
+                injury_impact=injury_impact,
+                key_injuries=key_injuries,
+                h2h_wins_season=h2h_wins,
+                h2h_losses_season=h2h_losses,
             )
         else:
             # Fallback: estimate from market price
@@ -639,6 +676,13 @@ async def game_analysis(game_id: str):
         "away_team": analysis.away_team,
         "summary": analysis.summary(),
     }
+
+
+@app.get("/api/scores/live")
+async def live_scores():
+    """Real-time NBA scores from NBA Live API."""
+    from src.api.nba_extended import get_live_scores
+    return {"games": get_live_scores()}
 
 
 @app.get("/api/analysis/all")
