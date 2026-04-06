@@ -6,7 +6,7 @@ No database required. Run with: uvicorn src.api.demo_app:app --reload
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -309,7 +309,7 @@ async def health():
             {
                 "source": "sportsbook_lines",
                 "status": "ok",
-                "last_sync": (now - __import__("datetime").timedelta(minutes=8)).isoformat(),
+                "last_sync": (now - timedelta(minutes=8)).isoformat(),
                 "staleness_minutes": 8.0,
                 "threshold_minutes": 20,
                 "records_last_sync": 48,
@@ -318,7 +318,7 @@ async def health():
             {
                 "source": "player_injuries",
                 "status": "ok",
-                "last_sync": (now - __import__("datetime").timedelta(hours=2)).isoformat(),
+                "last_sync": (now - timedelta(hours=2)).isoformat(),
                 "staleness_minutes": 120.0,
                 "threshold_minutes": 240,
                 "records_last_sync": 23,
@@ -327,7 +327,7 @@ async def health():
             {
                 "source": "team_features",
                 "status": "ok",
-                "last_sync": (now - __import__("datetime").timedelta(hours=6)).isoformat(),
+                "last_sync": (now - timedelta(hours=6)).isoformat(),
                 "staleness_minutes": 360.0,
                 "threshold_minutes": 1440,
                 "records_last_sync": 30,
@@ -352,7 +352,7 @@ async def alerts():
                 "severity": "INFO",
                 "message": "New HIGH confidence signal: BOS vs MIA (edge 6.8%)",
                 "details": {},
-                "created_at": (now - __import__("datetime").timedelta(minutes=15)).isoformat(),
+                "created_at": (now - timedelta(minutes=15)).isoformat(),
                 "acknowledged": True,
             },
             {
@@ -361,12 +361,145 @@ async def alerts():
                 "severity": "WARNING",
                 "message": "Cross-platform basis > 10% on OKC-DEN market",
                 "details": {"basis": 0.112},
-                "created_at": (now - __import__("datetime").timedelta(minutes=45)).isoformat(),
+                "created_at": (now - timedelta(minutes=45)).isoformat(),
                 "acknowledged": False,
             },
         ],
         "total": 2,
         "unacknowledged": 1,
+    }
+
+
+# ── Portfolio ─────────────────────────────────────────────────────────
+
+@app.get("/api/portfolio")
+async def portfolio(period: str = "1W"):
+    """Robinhood-style portfolio value with equity curve."""
+    import math
+    import random as _rng
+
+    _rng.seed(42)  # deterministic
+
+    base_value = 5014.15
+    buying_power = 2805.57
+
+    # Generate equity curve based on period
+    period_map = {"1D": 24, "1W": 7 * 24, "1M": 30 * 24, "3M": 90 * 24, "1Y": 365, "ALL": 730}
+    n_points = min(period_map.get(period, 168), 500)
+
+    points = []
+    val = base_value * 0.88  # start lower
+    for i in range(n_points):
+        val += _rng.gauss(0.4, 8)  # upward drift with noise
+        val = max(val, base_value * 0.7)
+        t = datetime.now(timezone.utc) - timedelta(hours=n_points - i)
+        points.append({"time": t.isoformat(), "value": round(val, 2)})
+
+    # End at current value
+    points[-1]["value"] = base_value
+
+    start_val = points[0]["value"]
+    change = base_value - start_val
+    change_pct = (change / start_val) * 100
+
+    return {
+        "total_value": base_value,
+        "buying_power": buying_power,
+        "change": round(change, 2),
+        "change_pct": round(change_pct, 2),
+        "period": period,
+        "equity_curve": points,
+    }
+
+
+@app.get("/api/portfolio/positions")
+async def portfolio_positions():
+    """User's open positions (bets placed)."""
+    data = await get_demo_data()
+    games = data.get("games", [])
+
+    # Simulate some open positions on a few games
+    positions = []
+    for i, g in enumerate(games[:4]):  # user has bets on first 4 games
+        import random as _rng
+        _rng.seed(i + 100)
+        side = "YES" if _rng.random() > 0.3 else "NO"
+        entry_price = _rng.randint(30, 75) / 100
+        qty = _rng.randint(10, 80)
+        current_mid = g["signal"]["yes_mid"] if side == "YES" else (1 - g["signal"]["yes_mid"])
+        cost = round(entry_price * qty, 2)
+        current_val = round(current_mid * qty, 2)
+        pnl = round(current_val - cost, 2)
+
+        positions.append({
+            "game_id": g["game_id"],
+            "home_team": g["home_team"],
+            "away_team": g["away_team"],
+            "game_time_utc": g["game_time_utc"],
+            "side": side,
+            "team_bet": g["home_team"] if side == "YES" else g["away_team"],
+            "entry_price": entry_price,
+            "current_price": round(current_mid, 2),
+            "quantity": qty,
+            "cost": cost,
+            "current_value": current_val,
+            "pnl": pnl,
+            "pnl_pct": round((pnl / cost) * 100, 1) if cost > 0 else 0,
+            "market_question": g["market"]["question"],
+        })
+
+    return {"positions": positions, "total_positions": len(positions)}
+
+
+@app.get("/api/games/{game_id}/price_history")
+async def game_price_history(game_id: str, period: str = "1D"):
+    """Kalshi-style price history for YES and NO sides."""
+    import random as _rng
+
+    data = await get_demo_data()
+    game = next((g for g in data["games"] if g["game_id"] == game_id), None)
+    if not game:
+        return {"error": "not_found"}
+
+    yes_mid = game["signal"]["yes_mid"]
+    _rng.seed(hash(game_id))
+
+    period_map = {"1D": 48, "1W": 168, "1M": 120, "ALL": 200}
+    n = period_map.get(period, 48)
+
+    # Generate realistic price movement around current mid
+    points = []
+    val = yes_mid + _rng.gauss(0, 0.05)
+    for i in range(n):
+        val += _rng.gauss(0, 0.008)
+        val = max(0.05, min(0.95, val))
+        t = datetime.now(timezone.utc) - timedelta(hours=n - i)
+        points.append({
+            "time": t.isoformat(),
+            "yes_price": round(val, 4),
+            "no_price": round(1 - val, 4),
+        })
+
+    # End at current price
+    points[-1]["yes_price"] = round(yes_mid, 4)
+    points[-1]["no_price"] = round(1 - yes_mid, 4)
+
+    home_pct = round(yes_mid * 100)
+    away_pct = 100 - home_pct
+
+    return {
+        "game_id": game_id,
+        "home_team": game["home_team"],
+        "away_team": game["away_team"],
+        "game_time_utc": game["game_time_utc"],
+        "question": game["market"]["question"],
+        "yes_price": round(yes_mid, 2),
+        "no_price": round(1 - yes_mid, 2),
+        "home_pct": home_pct,
+        "away_pct": away_pct,
+        "volume": game["signal"]["volume_24h"] or 0,
+        "period": period,
+        "price_history": points,
     }
 
 
