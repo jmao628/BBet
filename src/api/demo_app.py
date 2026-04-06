@@ -78,7 +78,7 @@ def _save_portfolio(data: dict):
 # ── Cache for market data ────────────────────────────────────────────
 _cache: dict[str, Any] = {}
 _cache_ts: float = 0
-CACHE_TTL = 5  # seconds — fast refresh
+CACHE_TTL = 3  # seconds — real-time sync
 
 
 async def _get_all_basketball_events() -> list[dict]:
@@ -155,42 +155,59 @@ async def _get_market_with_orderbook(ticker: str) -> dict:
 
 @app.get("/api/games/today")
 async def games_today():
-    """All basketball games across all leagues."""
+    """All basketball games across all leagues with real-time odds."""
     events = await _get_all_basketball_events()
 
     games = []
     for e in events:
         markets = e.get("markets", [])
-        # For moneyline events, get the two outcomes
-        home_market = None
-        away_market = None
-
-        if len(markets) == 2:
-            # Extract team abbrevs from ticker suffix
-            home_market = markets[0]
-            away_market = markets[1]
-        elif len(markets) == 1:
-            home_market = markets[0]
+        home_market = markets[0] if len(markets) >= 1 else None
+        away_market = markets[1] if len(markets) >= 2 else None
 
         # Extract teams from event title (format: "Away at Home")
         title = e.get("title", "")
-        teams = title.split(" at ")
-        away_team = teams[0] if len(teams) == 2 else title
-        home_team = teams[1] if len(teams) == 2 else ""
+        parts = title.split(" at ")
+        away_team = parts[0].strip() if len(parts) == 2 else title
+        home_team = parts[1].strip() if len(parts) == 2 else ""
 
-        # Try to get pricing from individual markets
-        home_pct = 0
-        away_pct = 0
-        volume = 0
+        # Also get team names from market sub_titles (more accurate)
+        home_sub = home_market.get("yes_sub_title", "") if home_market else ""
+        away_sub = away_market.get("yes_sub_title", "") if away_market else ""
+        if home_sub:
+            home_team = home_sub
+        if away_sub:
+            away_team = away_sub
+
+        # Real-time prices from market dollar fields
+        home_bid = float(home_market.get("yes_bid_dollars", 0) or 0) if home_market else 0
+        home_ask = float(home_market.get("yes_ask_dollars", 0) or 0) if home_market else 0
+        home_last = float(home_market.get("last_price_dollars", 0) or 0) if home_market else 0
+        home_mid = (home_bid + home_ask) / 2 if home_bid > 0 else home_last
+
+        away_bid = float(away_market.get("yes_bid_dollars", 0) or 0) if away_market else 0
+        away_ask = float(away_market.get("yes_ask_dollars", 0) or 0) if away_market else 0
+        away_last = float(away_market.get("last_price_dollars", 0) or 0) if away_market else 0
+        away_mid = (away_bid + away_ask) / 2 if away_bid > 0 else away_last
+
+        home_pct = round(home_mid * 100) if home_mid > 0 else 0
+        away_pct = round(away_mid * 100) if away_mid > 0 else 0
+
+        # Volume from fp fields (more accurate)
+        home_vol = int(float(home_market.get("volume_fp", 0) or 0)) if home_market else 0
+        away_vol = int(float(away_market.get("volume_fp", 0) or 0)) if away_market else 0
+        total_vol = home_vol + away_vol
+
+        # Expected game time
+        exp_time = ""
         if home_market:
-            volume += home_market.get("volume") or 0
-        if away_market:
-            volume += away_market.get("volume") or 0
+            exp_time = home_market.get("expected_expiration_time", "")
+        if not exp_time:
+            exp_time = e.get("close_time", "")
 
         games.append({
             "game_id": e.get("event_ticker", ""),
             "game_date": str(date.today()),
-            "game_time_utc": e.get("close_time", ""),
+            "game_time_utc": exp_time,
             "home_team": home_team,
             "away_team": away_team,
             "venue": None,
@@ -204,7 +221,14 @@ async def games_today():
             "signal_edge": None,
             "signal_confidence_tier": None,
             "n_markets": len(markets),
-            "volume": volume,
+            "volume": total_vol,
+            # Real-time odds
+            "home_pct": home_pct,
+            "away_pct": away_pct,
+            "home_bid": round(home_bid, 2),
+            "home_ask": round(home_ask, 2),
+            "away_bid": round(away_bid, 2),
+            "away_ask": round(away_ask, 2),
             "home_market_ticker": home_market.get("ticker") if home_market else None,
             "away_market_ticker": away_market.get("ticker") if away_market else None,
             "event_ticker": e.get("event_ticker", ""),

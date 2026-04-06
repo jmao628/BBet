@@ -39,14 +39,14 @@ export default function MarketPage() {
   const { data: priceData, refetch: refetchPrice } = usePolling(
     ["price-history", gameId!, period],
     () => api.games.priceHistory(gameId!, period),
-    5_000,
+    3_000,
     { enabled: !!gameId },
   );
 
   const { data: gameDetail, refetch: refetchGame } = usePolling(
     ["game-detail", gameId!],
     () => api.games.detail(gameId!),
-    5_000,
+    3_000,
     { enabled: !!gameId },
   );
 

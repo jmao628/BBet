@@ -31,7 +31,7 @@ export default function HomePage() {
   const { data: games } = usePolling(
     ["games-today"],
     api.games.today,
-    5_000, // refresh every 5 seconds for real-time odds
+    3_000, // refresh every 3 seconds — real-time sync with Kalshi
   );
 
   // Group games by league
@@ -189,28 +189,56 @@ function LeagueTab({ label, count, active, onClick }: {
 
 
 function GameRow({ game }: { game: GameListItem }) {
-  // Extract real odds from game data (comes from Kalshi API)
-  const vol = (game as any).volume || 0;
+  const g = game as any;
+  const vol = g.volume || 0;
+  const homePct = g.home_pct || 0;
+  const awayPct = g.away_pct || 0;
+  const homeAsk = g.home_ask || 0;
+  const awayAsk = g.away_ask || 0;
+
+  // Format game time
+  const gameTime = g.game_time_utc
+    ? new Date(g.game_time_utc).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : "";
 
   return (
     <Link
       to={`/game/${game.game_id}`}
-      className="flex items-center justify-between py-3 px-2 -mx-2 rounded-lg hover:bg-zinc-900 transition-colors border-b border-zinc-800/50"
+      className="flex items-center py-3.5 px-3 -mx-3 rounded-xl hover:bg-zinc-900/70 transition-colors border-b border-zinc-800/30"
     >
+      {/* Teams + time */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-white truncate">
-          {game.away_team}
-          <span className="text-zinc-600 mx-1.5">vs</span>
-          {game.home_team}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-sm font-medium text-white">{game.away_team}</span>
+          <span className="text-xs text-zinc-600">at</span>
+          <span className="text-sm font-medium text-white">{game.home_team}</span>
         </div>
-        <div className="text-xs text-zinc-500 mt-0.5 flex items-center gap-2">
-          <span className="text-zinc-600">{(game as any).league || game.season_type}</span>
-          {vol > 0 && <span>${vol.toLocaleString()} vol</span>}
+        <div className="text-[11px] text-zinc-500 mt-1 flex items-center gap-2">
+          {gameTime && <span>{gameTime}</span>}
+          {vol > 0 && <span className="text-zinc-600">${vol.toLocaleString()} vol</span>}
         </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0 ml-2">
-        <span className="text-xs text-zinc-500">{game.n_markets} mkt{game.n_markets !== 1 ? "s" : ""}</span>
-        <span className="text-zinc-700">›</span>
+
+      {/* Away team odds */}
+      <div className="text-right mr-4 w-20">
+        <div className="text-xs text-zinc-500">{game.away_team?.split(" ").pop()}</div>
+        <div className={`text-sm font-bold tabular-nums ${awayPct > 50 ? "text-green-400" : "text-zinc-300"}`}>
+          {awayPct > 0 ? `${awayPct}%` : "—"}
+        </div>
+        {awayAsk > 0 && (
+          <div className="text-[10px] text-zinc-600 tabular-nums">{Math.round(awayAsk * 100)}¢</div>
+        )}
+      </div>
+
+      {/* Home team odds */}
+      <div className="text-right w-20">
+        <div className="text-xs text-zinc-500">{game.home_team?.split(" ").pop()}</div>
+        <div className={`text-sm font-bold tabular-nums ${homePct > 50 ? "text-green-400" : "text-zinc-300"}`}>
+          {homePct > 0 ? `${homePct}%` : "—"}
+        </div>
+        {homeAsk > 0 && (
+          <div className="text-[10px] text-zinc-600 tabular-nums">{Math.round(homeAsk * 100)}¢</div>
+        )}
       </div>
     </Link>
   );
