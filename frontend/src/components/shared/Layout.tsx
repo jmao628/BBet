@@ -10,10 +10,10 @@ import {
 import clsx from "clsx";
 
 const NAV = [
-  { to: "/", label: "Home", icon: LayoutDashboard },
+  { to: "/", label: "Terminal", icon: Zap },
+  { to: "/portfolio", label: "Portfolio", icon: LayoutDashboard },
   { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { to: "/signals", label: "Signals", icon: Zap },
-  { to: "/backtest", label: "Backtest", icon: FlaskConical },
+  { to: "/signals", label: "Signals", icon: FlaskConical },
   { to: "/risk", label: "Risk", icon: ShieldAlert },
   { to: "/system", label: "System", icon: Activity },
 ] as const;

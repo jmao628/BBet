@@ -440,6 +440,189 @@ async def game_price_history(game_id: str, period: str = "1D"):
     }
 
 
+# ── Pre-Game Analysis ────────────────────────────────────────────────
+
+@app.get("/api/games/{game_id}/analysis")
+async def game_analysis(game_id: str):
+    """Run pre-game decision engine on a specific game."""
+    from src.signals.pregame_engine import PreGameEngine, FundamentalsProfile, MarketData as PGMarketData
+
+    events = await _get_all_basketball_events()
+    event = next((e for e in events if e.get("event_ticker") == game_id), None)
+    if not event:
+        return {"error": "not_found"}
+
+    markets = event.get("markets", [])
+    if len(markets) < 2:
+        return {"error": "need_two_markets"}
+
+    title = event.get("title", "")
+    parts = title.split(" at ")
+    away_name = parts[0].strip() if len(parts) == 2 else title
+    home_name = parts[1].strip() if len(parts) == 2 else ""
+
+    # Fetch real market data
+    try:
+        m0 = await _get_market_with_orderbook(markets[0]["ticker"])
+        m1 = await _get_market_with_orderbook(markets[1]["ticker"])
+    except Exception:
+        return {"error": "market_fetch_failed"}
+
+    home_sub = m0.get("_yes_sub_title", "") or home_name
+    away_sub = m1.get("_yes_sub_title", "") or away_name
+
+    home_mkt = PGMarketData(
+        ticker=markets[0]["ticker"], team_name=home_sub,
+        yes_bid=m0["_best_yes_bid"], yes_ask=m0["_best_yes_ask"],
+        no_bid=float(m0.get("no_bid_dollars", 0) or 0),
+        no_ask=float(m0.get("no_ask_dollars", 0) or 0),
+        last_price=m0["_last_price"],
+        volume=m0["_volume"], volume_24h=int(float(m0.get("volume_24h_fp", 0) or 0)),
+        open_interest=m0["_open_interest"],
+        yes_depth=m0["_yes_depth"], no_depth=m0["_no_depth"],
+        spread=round(m0["_best_yes_ask"] - m0["_best_yes_bid"], 4),
+    )
+    away_mkt = PGMarketData(
+        ticker=markets[1]["ticker"], team_name=away_sub,
+        yes_bid=m1["_best_yes_bid"], yes_ask=m1["_best_yes_ask"],
+        no_bid=float(m1.get("no_bid_dollars", 0) or 0),
+        no_ask=float(m1.get("no_ask_dollars", 0) or 0),
+        last_price=m1["_last_price"],
+        volume=m1["_volume"], volume_24h=int(float(m1.get("volume_24h_fp", 0) or 0)),
+        open_interest=m1["_open_interest"],
+        yes_depth=m1["_yes_depth"], no_depth=m1["_no_depth"],
+        spread=round(m1["_best_yes_ask"] - m1["_best_yes_bid"], 4),
+    )
+
+    # Build fundamentals from market data (simplified — no external stats API yet)
+    # In production, this would pull from NBA API / team_features table
+    home_mid = home_mkt.yes_bid + home_mkt.yes_ask
+    away_mid = away_mkt.yes_bid + away_mkt.yes_ask
+
+    home_fund = FundamentalsProfile(
+        team_name=home_sub, is_home=True,
+        season_win_pct=home_mid / 2 if home_mid > 0 else 0.5,  # proxy from market
+        home_win_pct=min(0.85, (home_mid / 2 + 0.05)) if home_mid > 0 else 0.55,
+        last5_wins=3, last5_losses=2, last10_wins=6, last10_losses=4,
+        off_rating=110, def_rating=108, net_rating=2.0,
+        elo=1500 + (home_mid / 2 - 0.5) * 200 if home_mid > 0 else 1500,
+        rest_days=2,
+    )
+    away_fund = FundamentalsProfile(
+        team_name=away_sub, is_home=False,
+        season_win_pct=away_mid / 2 if away_mid > 0 else 0.5,
+        home_win_pct=min(0.85, (away_mid / 2 + 0.05)) if away_mid > 0 else 0.55,
+        last5_wins=3, last5_losses=2, last10_wins=5, last10_losses=5,
+        off_rating=110, def_rating=110, net_rating=0.0,
+        elo=1500 + (away_mid / 2 - 0.5) * 200 if away_mid > 0 else 1500,
+        rest_days=2,
+    )
+
+    # Time to game
+    exp = m0.get("expected_expiration_time", "")
+    ttg = 12.0
+    if exp:
+        try:
+            from datetime import datetime, timedelta, timezone
+            exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+            start_dt = exp_dt - timedelta(hours=3)
+            ttg = max(0, (start_dt - datetime.now(timezone.utc)).total_seconds() / 3600)
+        except Exception:
+            pass
+
+    pf = _load_portfolio()
+    exposure = sum(p.get("cost", 0) for p in pf.get("positions", []))
+
+    engine = PreGameEngine(bankroll=pf.get("cash", 10000) + exposure)
+    analysis = engine.analyze(home_mkt, away_mkt, home_fund, away_fund, ttg, exposure)
+
+    # Serialize to JSON-friendly dict
+    return {
+        "trade_decision": analysis.trade_decision,
+        "direction": analysis.direction,
+        "skip_reason": analysis.skip_reason,
+        "fundamental_prob": analysis.fundamental_prob,
+        "market_prob": analysis.market_prob,
+        "blended_fair_prob": analysis.blended_fair_prob,
+        "entry_price_cents": analysis.entry_price_cents,
+        "spread_cents": analysis.spread_cents,
+        "edge": round(analysis.edge, 4),
+        "edge_pct": analysis.edge_pct,
+        "expected_value": analysis.expected_value,
+        "ev_per_contract": analysis.expected_value_per_contract,
+        "kelly_full": analysis.kelly_fraction,
+        "kelly_quarter": analysis.kelly_quarter,
+        "suggested_stake_usd": analysis.suggested_stake_usd,
+        "suggested_contracts": analysis.suggested_contracts,
+        "entry_strategy": analysis.entry_strategy,
+        "scale_in_tranches": analysis.scale_in_tranches,
+        "stop_loss_price": analysis.stop_loss_price,
+        "stop_loss_pct": analysis.stop_loss_pct,
+        "take_profit_zones": [
+            {"price": z.price, "pct": z.pct_to_sell, "pnl": z.expected_pnl_per_contract, "label": z.label}
+            for z in analysis.take_profit_zones
+        ],
+        "hedge": {
+            "should_hedge": analysis.hedge.should_hedge,
+            "side": analysis.hedge.hedge_side,
+            "size_pct": analysis.hedge.hedge_size_pct,
+            "price": analysis.hedge.hedge_price,
+            "cost": analysis.hedge.hedge_cost,
+            "reason": analysis.hedge.reason,
+            "guaranteed_min_pnl": analysis.hedge.guaranteed_min_pnl,
+        },
+        "profit_if_correct": analysis.expected_profit_if_correct,
+        "profit_pregame": analysis.expected_profit_pregame,
+        "max_loss": analysis.max_loss,
+        "confidence_score": analysis.confidence_score,
+        "confidence_tier": analysis.confidence_tier,
+        "risk_alerts": analysis.risk_alerts,
+        "key_factors": analysis.key_factors,
+        "phase": analysis.phase,
+        "time_to_game_hours": round(ttg, 1),
+        "home_team": analysis.home_team,
+        "away_team": analysis.away_team,
+        "summary": analysis.summary(),
+    }
+
+
+@app.get("/api/analysis/all")
+async def all_game_analyses(league: str = ""):
+    """Run pre-game analysis on games. Cached to avoid hammering Kalshi."""
+    global _cache
+
+    cache_key = f"analysis_all_{league}"
+    if cache_key in _cache and (time.time() - _cache.get(f"{cache_key}_ts", 0)) < 15:
+        return _cache[cache_key]
+
+    events = await _get_all_basketball_events()
+    results = []
+
+    # Filter to requested league, default to NBA only for speed
+    target_leagues = {"NBA"} if not league else {league}
+    if league == "ALL":
+        target_leagues = set()  # no filter
+
+    filtered = [e for e in events if not target_leagues or e.get("_league") in target_leagues]
+
+    for e in filtered[:20]:  # cap at 20 games for speed
+        game_id = e.get("event_ticker", "")
+        try:
+            analysis = await game_analysis(game_id)
+            if isinstance(analysis, dict) and "error" not in analysis:
+                analysis["game_id"] = game_id
+                results.append(analysis)
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: x.get("edge", 0), reverse=True)
+    response = {"analyses": results, "total": len(results)}
+
+    _cache[cache_key] = response
+    _cache[f"{cache_key}_ts"] = time.time()
+    return response
+
+
 # ── Simulated Portfolio ─────────────────────────────────────────────
 
 @app.get("/api/portfolio")
