@@ -1,21 +1,22 @@
 """
-Standalone demo API — serves live Kalshi data + synthetic signals.
-No database required. Run with: uvicorn src.api.demo_app:app --reload
+BPMDE Terminal API — Real Kalshi data + simulated portfolio.
+Run with: PYTHONPATH=. uvicorn src.api.demo_app:app --reload --port 8000
 """
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
 
-from src.api.live_demo import get_demo_data
+from src.api.kalshi_real import KalshiRealClient
 
-app = FastAPI(title="BPMDE Terminal — Live Demo", version="0.1.0")
+app = FastAPI(title="BPMDE Terminal", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,270 +26,494 @@ app.add_middleware(
 )
 
 START = time.time()
+kalshi = KalshiRealClient()
+
+# ── All basketball series on Kalshi ──────────────────────────────────
+BASKETBALL_SERIES = [
+    "KXNBAGAME",           # NBA moneyline
+    "KXNBASPREAD",         # NBA spread
+    "KXNBATOTAL",          # NBA total points
+    "KXKBLGAME",           # Korea KBL
+    "KXCBAGAME",           # China CBA
+    "KXEUROLEAGUEGAME",    # EuroLeague
+    "KXJBLEAGUEGAME",      # Japan B.League
+    "KXNBLGAME",           # Australia NBL
+    "KXBUNDESLIGABBGAME",  # Germany Bundesliga Basketball
+    "KXITASERIEABBGAME",   # Italy Serie A Basketball
+    "KXLIGAACBGAME",       # Spain ACB
+    "KXTURKEYBSLGAME",     # Turkey BSL
+    "KXABABGAME",          # ABA League
+    "KXEUROCUPBBGAME",     # EuroCup Basketball
+    "KXFIBAGAME",          # FIBA
+    "KXFIBACHAMPGAME",     # FIBA Champions League
+    "KXFIBAEUROCUPGAME",   # FIBA Europe Cup
+    "KXNCAABGAME",         # NCAA Basketball
+    "KXWNBAGAME",          # WNBA
+    "KXLNBGAME",           # Argentina LNB
+    "KXLNBELITEGAME",      # France LNB Elite
+    "KXVTBGAME",           # VTB United League
+    "KXTNCBBGAME",         # TNC Basketball
+    "KXGBLBBGAME",         # GBL Basketball
+]
+
+# ── Simulated Portfolio (persisted to JSON file) ─────────────────────
+PORTFOLIO_FILE = Path(__file__).parent.parent.parent / "config" / "portfolio.json"
 
 
-# ── Dashboard ────────────────────────────────────────────────────────
-
-@app.get("/api/dashboard/summary")
-async def dashboard_summary():
-    data = await get_demo_data()
-    games = data.get("games", [])
-    signals = [g["signal"] for g in games]
-    actionable = [s for s in signals if s["is_actionable"]]
-    edges = [s["edge"] for s in signals if s["edge"] > 0]
-
+def _load_portfolio() -> dict:
+    if PORTFOLIO_FILE.exists():
+        return json.loads(PORTFOLIO_FILE.read_text())
     return {
-        "today_date": str(date.today()),
-        "total_games_today": len(games),
-        "games_with_markets": len(games),
-        "active_signals": len(signals),
-        "actionable_signals": len(actionable),
-        "skipped_signals": len(signals) - len(actionable),
-        "best_edge": max(edges) if edges else None,
-        "best_edge_game": next(
-            (g["game_id"] for g in games if g["signal"]["edge"] == max(edges)),
-            None,
-        ) if edges else None,
-        "avg_edge": sum(edges) / len(edges) if edges else None,
-        "total_exposure_usd": sum(s.get("suggested_size_usd") or 0 for s in actionable),
-        "daily_risk_pct": 4.2,
-        "system_healthy": True,
-        "data_sources_ok": 4,
-        "data_sources_total": 4,
-        "last_refresh": datetime.now(timezone.utc).isoformat(),
+        "initial_capital": 10000.0,
+        "cash": 10000.0,
+        "positions": [],
+        "trade_history": [],
     }
 
+
+def _save_portfolio(data: dict):
+    PORTFOLIO_FILE.write_text(json.dumps(data, indent=2, default=str))
+
+
+# ── Cache for market data ────────────────────────────────────────────
+_cache: dict[str, Any] = {}
+_cache_ts: float = 0
+CACHE_TTL = 5  # seconds — fast refresh
+
+
+async def _get_all_basketball_events() -> list[dict]:
+    """Fetch all basketball game events from all series. Cached for CACHE_TTL seconds."""
+    global _cache_ts
+    if "events" in _cache and (time.time() - _cache_ts) < CACHE_TTL:
+        return _cache["events"]
+
+    all_events: list[dict] = []
+    for series in BASKETBALL_SERIES:
+        try:
+            data = await kalshi._request("GET", "/trade-api/v2/events", params={
+                "series_ticker": series,
+                "limit": 100,
+                "status": "open",
+                "with_nested_markets": "true",
+            })
+            events = data.get("events", [])
+            for e in events:
+                e["_series"] = series
+                e["_league"] = _series_to_league(series)
+            all_events.extend(events)
+        except Exception:
+            continue
+
+    # Sort by event date (extract from ticker)
+    all_events.sort(key=lambda e: e.get("event_ticker", ""))
+    _cache["events"] = all_events
+    _cache_ts = time.time()
+    return all_events
+
+
+def _series_to_league(series: str) -> str:
+    mapping = {
+        "KXNBAGAME": "NBA", "KXNBASPREAD": "NBA Spread", "KXNBATOTAL": "NBA Total",
+        "KXKBLGAME": "KBL", "KXCBAGAME": "CBA", "KXEUROLEAGUEGAME": "EuroLeague",
+        "KXJBLEAGUEGAME": "B.League", "KXNBLGAME": "NBL", "KXBUNDESLIGABBGAME": "BBL",
+        "KXITASERIEABBGAME": "Serie A", "KXLIGAACBGAME": "ACB", "KXTURKEYBSLGAME": "BSL",
+        "KXABABGAME": "ABA", "KXEUROCUPBBGAME": "EuroCup", "KXFIBAGAME": "FIBA",
+        "KXNCAABGAME": "NCAA", "KXWNBAGAME": "WNBA",
+    }
+    return mapping.get(series, series.replace("KX", "").replace("GAME", ""))
+
+
+async def _get_market_with_orderbook(ticker: str) -> dict:
+    """Get market data + extract best bid/ask from orderbook."""
+    market = await kalshi.get_market(ticker)
+    ob = await kalshi.get_orderbook(ticker)
+    ob_fp = ob.get("orderbook_fp", ob.get("orderbook", {}))
+
+    yes_bids = ob_fp.get("yes_dollars", ob_fp.get("yes", []))
+    no_bids = ob_fp.get("no_dollars", ob_fp.get("no", []))
+
+    # Best YES bid = highest price someone will buy YES at
+    best_yes_bid = max((float(lvl[0]) for lvl in yes_bids), default=0) if yes_bids else 0
+    # Best YES ask = 1 - highest NO bid price
+    best_no_bid = max((float(lvl[0]) for lvl in no_bids), default=0) if no_bids else 0
+    best_yes_ask = 1 - (min((float(lvl[0]) for lvl in no_bids), default=1)) if no_bids else 1
+
+    # Calculate total depth
+    yes_depth = sum(float(lvl[1]) for lvl in yes_bids) if yes_bids else 0
+    no_depth = sum(float(lvl[1]) for lvl in no_bids) if no_bids else 0
+
+    market["_best_yes_bid"] = round(best_yes_bid, 4)
+    market["_best_yes_ask"] = round(best_yes_ask, 4)
+    market["_yes_mid"] = round((best_yes_bid + best_yes_ask) / 2, 4) if best_yes_bid > 0 else 0
+    market["_yes_depth"] = round(yes_depth, 2)
+    market["_no_depth"] = round(no_depth, 2)
+    market["_orderbook"] = {"yes": yes_bids, "no": no_bids}
+    return market
+
+
+# ── API Endpoints ────────────────────────────────────────────────────
 
 @app.get("/api/games/today")
 async def games_today():
-    data = await get_demo_data()
-    games = data.get("games", [])
-    return [
-        {
-            "game_id": g["game_id"],
-            "game_date": g["game_date"],
-            "game_time_utc": g["game_time_utc"],
-            "home_team": g["home_team"],
-            "away_team": g["away_team"],
-            "venue": g["venue"],
-            "season_type": g["season_type"],
-            "is_b2b_home": g["is_b2b_home"],
-            "is_b2b_away": g["is_b2b_away"],
-            "has_signal": True,
-            "signal_direction": g["signal"]["direction"],
-            "signal_edge": g["signal"]["edge"],
-            "signal_confidence_tier": g["signal"]["confidence"]["tier"],
-            "n_markets": 1,
-        }
-        for g in games
-    ]
+    """All basketball games across all leagues."""
+    events = await _get_all_basketball_events()
 
+    games = []
+    for e in events:
+        markets = e.get("markets", [])
+        # For moneyline events, get the two outcomes
+        home_market = None
+        away_market = None
 
-# ── Game Detail ──────────────────────────────────────────────────────
+        if len(markets) == 2:
+            # Extract team abbrevs from ticker suffix
+            home_market = markets[0]
+            away_market = markets[1]
+        elif len(markets) == 1:
+            home_market = markets[0]
+
+        # Extract teams from event title (format: "Away at Home")
+        title = e.get("title", "")
+        teams = title.split(" at ")
+        away_team = teams[0] if len(teams) == 2 else title
+        home_team = teams[1] if len(teams) == 2 else ""
+
+        # Try to get pricing from individual markets
+        home_pct = 0
+        away_pct = 0
+        volume = 0
+        if home_market:
+            volume += home_market.get("volume") or 0
+        if away_market:
+            volume += away_market.get("volume") or 0
+
+        games.append({
+            "game_id": e.get("event_ticker", ""),
+            "game_date": str(date.today()),
+            "game_time_utc": e.get("close_time", ""),
+            "home_team": home_team,
+            "away_team": away_team,
+            "venue": None,
+            "season_type": e.get("_league", "NBA"),
+            "league": e.get("_league", "NBA"),
+            "series": e.get("_series", ""),
+            "is_b2b_home": False,
+            "is_b2b_away": False,
+            "has_signal": False,
+            "signal_direction": None,
+            "signal_edge": None,
+            "signal_confidence_tier": None,
+            "n_markets": len(markets),
+            "volume": volume,
+            "home_market_ticker": home_market.get("ticker") if home_market else None,
+            "away_market_ticker": away_market.get("ticker") if away_market else None,
+            "event_ticker": e.get("event_ticker", ""),
+        })
+
+    return games
+
 
 @app.get("/api/games/{game_id}")
 async def game_detail(game_id: str):
-    data = await get_demo_data()
-    game = next((g for g in data["games"] if g["game_id"] == game_id), None)
-    if not game:
+    """Full game detail with real orderbook data."""
+    events = await _get_all_basketball_events()
+    event = next((e for e in events if e.get("event_ticker") == game_id), None)
+    if not event:
         return {"error": "not_found"}
 
-    sig = game["signal"]
-    return {
-        "game_id": game["game_id"],
-        "game_date": game["game_date"],
-        "game_time_utc": game["game_time_utc"],
-        "home_team": game["home_team"],
-        "away_team": game["away_team"],
-        "venue": game["venue"],
-        "season_type": game["season_type"],
-        "series_info": game["series_info"],
-        "home_stats": game["home_stats"],
-        "away_stats": game["away_stats"],
-        "home_injuries": game["home_injuries"],
-        "away_injuries": game["away_injuries"],
-        "markets": [game["market"]],
-        "probability": sig["probability"],
-        "decision": {
-            "direction": sig["direction"],
-            "edge": sig["edge"],
-            "expected_value": sig["expected_value"],
-            "kelly_full": sig["kelly_full"],
-            "kelly_suggested": sig["kelly_suggested"],
-            "suggested_size_usd": sig["suggested_size_usd"],
-            "max_size_usd": 200.0,
-        },
-        "confidence": sig["confidence"],
-        "key_drivers": sig["key_drivers"],
-        "risk_flags": sig["risk_flags"],
-        "filter_gates": sig["filter_gates"],
-        "is_actionable": sig["is_actionable"],
-        "skip_reason": sig["skip_reason"],
-    }
+    markets = event.get("markets", [])
+    title = event.get("title", "")
+    teams = title.split(" at ")
+    away_team = teams[0] if len(teams) == 2 else title
+    home_team = teams[1] if len(teams) == 2 else ""
 
+    # Fetch real orderbook data for each market
+    enriched_markets = []
+    for m in markets:
+        try:
+            full = await _get_market_with_orderbook(m["ticker"])
+            enriched_markets.append({
+                "ticker": m["ticker"],
+                "title": full.get("title", ""),
+                "subtitle": full.get("subtitle", ""),
+                "yes_bid": full["_best_yes_bid"],
+                "yes_ask": full["_best_yes_ask"],
+                "yes_mid": full["_yes_mid"],
+                "yes_depth": full["_yes_depth"],
+                "no_depth": full["_no_depth"],
+                "volume": full.get("volume") or 0,
+                "open_interest": full.get("open_interest") or 0,
+                "last_price": (full.get("last_price") or 0) / 100,
+                "status": full.get("status", ""),
+                "close_time": full.get("close_time", ""),
+                "orderbook": full["_orderbook"],
+            })
+        except Exception:
+            enriched_markets.append({
+                "ticker": m["ticker"],
+                "title": m.get("title", ""),
+                "yes_bid": 0, "yes_ask": 0, "yes_mid": 0,
+                "yes_depth": 0, "no_depth": 0,
+                "volume": 0, "open_interest": 0,
+                "last_price": 0, "status": "error",
+                "orderbook": {"yes": [], "no": []},
+            })
 
-@app.get("/api/games/{game_id}/markets")
-async def game_markets(game_id: str):
-    data = await get_demo_data()
-    game = next((g for g in data["games"] if g["game_id"] == game_id), None)
-    if not game:
-        return {"error": "not_found"}
-    return {
-        "game_id": game_id,
-        "contracts": [game["market"]],
-        "orderbooks": {},
-        "price_history": {},
-    }
+    # Compute game-level percentages from markets
+    home_pct = 0
+    away_pct = 0
+    if len(enriched_markets) >= 2:
+        # First market = home outcome, second = away outcome (or vice versa)
+        m0 = enriched_markets[0]
+        m1 = enriched_markets[1]
+        home_pct = round(m0["yes_mid"] * 100)
+        away_pct = round(m1["yes_mid"] * 100)
 
-
-@app.get("/api/games/{game_id}/features")
-async def game_features(game_id: str):
-    data = await get_demo_data()
-    game = next((g for g in data["games"] if g["game_id"] == game_id), None)
-    if not game:
-        return {"error": "not_found"}
     return {
         "game_id": game_id,
-        "home_stats": game["home_stats"],
-        "away_stats": game["away_stats"],
-        "matchup_features": {},
-        "home_injuries": game["home_injuries"],
-        "away_injuries": game["away_injuries"],
-        "home_injury_impact": game["home_stats"]["injury_impact"],
-        "away_injury_impact": game["away_stats"]["injury_impact"],
-        "injury_uncertainty": 0.15,
+        "title": title,
+        "home_team": home_team,
+        "away_team": away_team,
+        "league": event.get("_league", "NBA"),
+        "close_time": event.get("close_time", ""),
+        "home_pct": home_pct,
+        "away_pct": away_pct,
+        "markets": enriched_markets,
     }
 
 
-# ── Signals ──────────────────────────────────────────────────────────
+@app.get("/api/games/{game_id}/price_history")
+async def game_price_history(game_id: str, period: str = "1D"):
+    """Real price history from Kalshi."""
+    events = await _get_all_basketball_events()
+    event = next((e for e in events if e.get("event_ticker") == game_id), None)
+    if not event:
+        return {"error": "not_found"}
 
-@app.get("/api/signals")
-async def list_signals(
-    direction: str | None = None,
-    confidence_tier: str | None = None,
-    sort_by: str = "edge",
-    sort_dir: str = "desc",
+    markets = event.get("markets", [])
+    title = event.get("title", "")
+    teams = title.split(" at ")
+    away_team = teams[0] if len(teams) == 2 else title
+    home_team = teams[1] if len(teams) == 2 else ""
+
+    # Get history for first market (home team outcome)
+    price_history = []
+    home_ticker = markets[0]["ticker"] if markets else None
+    volume = 0
+
+    if home_ticker:
+        try:
+            # Compute min_ts based on period
+            now_ts = int(time.time())
+            period_secs = {"1D": 86400, "1W": 604800, "1M": 2592000, "ALL": 86400 * 365}.get(period, 86400)
+            history = await kalshi.get_market_history(home_ticker, limit=500, min_ts=now_ts - period_secs)
+
+            for h in history:
+                ts = h.get("ts") or h.get("end_period_ts")
+                yes_price = (h.get("yes_price") or h.get("yes_bid") or 0) / 100
+                price_history.append({
+                    "time": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if isinstance(ts, (int, float)) else str(ts),
+                    "yes_price": round(yes_price, 4),
+                    "no_price": round(1 - yes_price, 4),
+                })
+
+            # Get current volume
+            m = await kalshi.get_market(home_ticker)
+            volume = m.get("volume") or 0
+        except Exception:
+            pass
+
+    # Current prices
+    yes_price = price_history[-1]["yes_price"] if price_history else 0.5
+    no_price = 1 - yes_price
+
+    return {
+        "game_id": game_id,
+        "home_team": home_team,
+        "away_team": away_team,
+        "game_time_utc": event.get("close_time", ""),
+        "question": title,
+        "yes_price": round(yes_price, 2),
+        "no_price": round(no_price, 2),
+        "home_pct": round(yes_price * 100),
+        "away_pct": round(no_price * 100),
+        "volume": volume,
+        "period": period,
+        "price_history": price_history,
+    }
+
+
+# ── Simulated Portfolio ─────────────────────────────────────────────
+
+@app.get("/api/portfolio")
+async def portfolio(period: str = "1W"):
+    """Portfolio value with simulated equity curve."""
+    pf = _load_portfolio()
+
+    # Calculate current portfolio value from positions
+    total_position_value = 0.0
+    for pos in pf.get("positions", []):
+        total_position_value += pos.get("current_value", 0)
+
+    total_value = pf["cash"] + total_position_value
+    initial = pf["initial_capital"]
+    change = total_value - initial
+    change_pct = (change / initial) * 100 if initial > 0 else 0
+
+    # Generate equity curve from trade history
+    equity_curve = _build_equity_curve(pf, period)
+
+    return {
+        "total_value": round(total_value, 2),
+        "buying_power": round(pf["cash"], 2),
+        "change": round(change, 2),
+        "change_pct": round(change_pct, 2),
+        "period": period,
+        "equity_curve": equity_curve,
+    }
+
+
+@app.get("/api/portfolio/positions")
+async def portfolio_positions():
+    """All simulated positions."""
+    pf = _load_portfolio()
+    return {
+        "positions": pf.get("positions", []),
+        "total_positions": len(pf.get("positions", [])),
+    }
+
+
+@app.post("/api/portfolio/trade")
+async def execute_trade(
+    ticker: str,
+    side: str = Query(..., description="yes or no"),
+    action: str = Query(..., description="buy or sell"),
+    quantity: int = Query(..., ge=1),
+    price_cents: int = Query(..., ge=1, le=99, description="Price in cents"),
 ):
-    data = await get_demo_data()
-    signals = []
-    for g in data["games"]:
-        sig = g["signal"]
-        item = {
-            "signal_id": sig["signal_id"],
-            "game_id": g["game_id"],
-            "home_team": g["home_team"],
-            "away_team": g["away_team"],
-            "game_time_utc": g["game_time_utc"],
-            "platform": "kalshi",
-            "market_type": "moneyline",
-            "direction": sig["direction"],
-            "edge": sig["edge"],
-            "expected_value": sig["expected_value"],
-            "confidence_score": sig["confidence"]["score"],
-            "confidence_tier": sig["confidence"]["tier"],
-            "fair_prob": sig["probability"]["ensemble_fair"],
-            "market_mid": sig["probability"]["market_mid"],
-            "kelly_suggested": sig["kelly_suggested"],
-            "suggested_size_usd": sig["suggested_size_usd"],
-            "liquidity_score": sig["liquidity_score"],
-            "is_actionable": sig["is_actionable"],
-            "skip_reason": sig["skip_reason"],
-            "n_risk_flags": len(sig["risk_flags"]),
-            "signal_time": g["game_time_utc"],
+    """
+    Simulate a trade. Calculates cost and updates portfolio.
+
+    Buy YES at 20¢ × 10 contracts = $2.00 cost
+    If YES wins: payout = 10 × $1.00 = $10.00, profit = $8.00
+    If YES loses: loss = $2.00
+    Sell at 40¢: revenue = 10 × $0.40 = $4.00, profit = $2.00
+    """
+    pf = _load_portfolio()
+    price = price_cents / 100.0
+    cost = price * quantity
+
+    if action == "buy":
+        if cost > pf["cash"]:
+            return {"error": "insufficient_funds", "cash": pf["cash"], "cost": cost}
+
+        pf["cash"] -= cost
+        position = {
+            "id": f"pos-{int(time.time())}",
+            "ticker": ticker,
+            "side": side.upper(),
+            "quantity": quantity,
+            "entry_price": price,
+            "current_price": price,
+            "cost": round(cost, 2),
+            "current_value": round(cost, 2),
+            "pnl": 0.0,
+            "pnl_pct": 0.0,
+            "opened_at": datetime.now(timezone.utc).isoformat(),
         }
-
-        if direction and item["direction"] != direction:
-            continue
-        if confidence_tier and item["confidence_tier"] != confidence_tier:
-            continue
-        signals.append(item)
-
-    key = {"edge": "edge", "confidence": "confidence_score", "signal_time": "signal_time"}.get(sort_by, "edge")
-    reverse = sort_dir == "desc"
-    signals.sort(key=lambda s: s.get(key, 0) or 0, reverse=reverse)
-
-    actionable = sum(1 for s in signals if s["is_actionable"])
-    return {
-        "signals": signals,
-        "total": len(signals),
-        "actionable_count": actionable,
-        "skipped_count": len(signals) - actionable,
-    }
-
-
-# ── Backtest ─────────────────────────────────────────────────────────
-
-@app.get("/api/backtest/summary")
-async def backtest_summary():
-    data = await get_demo_data()
-    return data.get("backtest_runs", [])
-
-
-@app.get("/api/backtest/{run_id}/equity")
-async def backtest_equity(run_id: str):
-    data = await get_demo_data()
-    run = next((r for r in data.get("backtest_runs", []) if r["run_id"] == run_id), None)
-    if not run:
-        return {"error": "not_found"}
-    return {
-        "run_id": run_id,
-        "initial_capital": 10000,
-        "equity_curve": [],
-        "summary": run,
-    }
-
-
-# ── Risk ─────────────────────────────────────────────────────────────
-
-@app.get("/api/risk/exposure")
-async def risk_exposure():
-    data = await get_demo_data()
-    games = data.get("games", [])
-    actionable = [g for g in games if g["signal"]["is_actionable"]]
-
-    bankroll = 10000.0
-    daily_used = sum(g["signal"].get("suggested_size_usd") or 0 for g in actionable)
-    daily_limit = bankroll * 0.15
-
-    by_game = []
-    by_team: dict[str, float] = {}
-    for g in actionable:
-        size = g["signal"].get("suggested_size_usd") or 0
-        max_game = bankroll * 0.05
-        by_game.append({
-            "label": f"{g['away_team']}@{g['home_team']}",
-            "exposure_usd": size,
-            "limit_usd": max_game,
-            "utilization_pct": size / max_game * 100 if max_game else 0,
+        pf["positions"].append(position)
+        pf["trade_history"].append({
+            **position, "action": "buy", "executed_at": position["opened_at"],
         })
-        for t in (g["home_team"], g["away_team"]):
-            by_team[t] = by_team.get(t, 0) + size
 
-    max_team = bankroll * 0.08
-    teams = [
-        {
-            "label": t,
-            "exposure_usd": exp,
-            "limit_usd": max_team,
-            "utilization_pct": exp / max_team * 100 if max_team else 0,
-        }
-        for t, exp in sorted(by_team.items(), key=lambda x: -x[1])
-    ]
+    elif action == "sell":
+        # Find matching position
+        pos_idx = next(
+            (i for i, p in enumerate(pf["positions"]) if p["ticker"] == ticker and p["side"] == side.upper()),
+            None,
+        )
+        if pos_idx is None:
+            return {"error": "no_position_found"}
+
+        pos = pf["positions"][pos_idx]
+        sell_qty = min(quantity, pos["quantity"])
+        revenue = price * sell_qty
+        pf["cash"] += revenue
+
+        entry_cost = pos["entry_price"] * sell_qty
+        pnl = revenue - entry_cost
+
+        pf["trade_history"].append({
+            "ticker": ticker, "side": side.upper(), "action": "sell",
+            "quantity": sell_qty, "entry_price": pos["entry_price"],
+            "exit_price": price, "pnl": round(pnl, 2),
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        pos["quantity"] -= sell_qty
+        if pos["quantity"] <= 0:
+            pf["positions"].pop(pos_idx)
+        else:
+            pos["cost"] = round(pos["entry_price"] * pos["quantity"], 2)
+
+    _save_portfolio(pf)
 
     return {
-        "bankroll_usd": bankroll,
-        "daily_risk_used_usd": round(daily_used, 2),
-        "daily_risk_limit_usd": daily_limit,
-        "daily_utilization_pct": round(daily_used / daily_limit * 100, 1) if daily_limit else 0,
-        "by_game": by_game,
-        "by_team": teams,
-        "by_series": [],
-        "open_positions": len(actionable),
-        "risk_rule_hits": [],
+        "status": "ok",
+        "action": action,
+        "ticker": ticker,
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "cost": round(cost, 2),
+        "cash_remaining": round(pf["cash"], 2),
     }
 
 
-# ── Monitoring ───────────────────────────────────────────────────────
+@app.post("/api/portfolio/reset")
+async def reset_portfolio(initial_capital: float = 10000.0):
+    """Reset simulated portfolio to starting state."""
+    pf = {
+        "initial_capital": initial_capital,
+        "cash": initial_capital,
+        "positions": [],
+        "trade_history": [],
+    }
+    _save_portfolio(pf)
+    return {"status": "reset", "cash": initial_capital}
+
+
+def _build_equity_curve(pf: dict, period: str) -> list[dict]:
+    """Build equity curve from trade history."""
+    history = pf.get("trade_history", [])
+    initial = pf["initial_capital"]
+
+    if not history:
+        # No trades yet — flat line
+        now = datetime.now(timezone.utc)
+        return [
+            {"time": (now - timedelta(hours=24)).isoformat(), "value": initial},
+            {"time": now.isoformat(), "value": initial},
+        ]
+
+    # Reconstruct equity over time
+    points = [{"time": history[0].get("executed_at", ""), "value": initial}]
+    running = initial
+    for trade in history:
+        if trade.get("action") == "buy":
+            running -= trade.get("cost", 0)
+        elif trade.get("action") == "sell":
+            running += trade.get("exit_price", 0) * trade.get("quantity", 0)
+        points.append({"time": trade.get("executed_at", ""), "value": round(running, 2)})
+
+    # Add current value
+    current = pf["cash"] + sum(p.get("current_value", 0) for p in pf.get("positions", []))
+    points.append({"time": datetime.now(timezone.utc).isoformat(), "value": round(current, 2)})
+
+    return points
+
+
+# ── Other existing endpoints (monitoring, etc.) ──────────────────────
 
 @app.get("/api/monitoring/health")
 async def health():
@@ -297,42 +522,8 @@ async def health():
         "overall_status": "healthy",
         "timestamp": now.isoformat(),
         "data_sources": [
-            {
-                "source": "kalshi_markets",
-                "status": "ok",
-                "last_sync": now.isoformat(),
-                "staleness_minutes": 0.5,
-                "threshold_minutes": 5,
-                "records_last_sync": 12,
-                "error_message": None,
-            },
-            {
-                "source": "sportsbook_lines",
-                "status": "ok",
-                "last_sync": (now - timedelta(minutes=8)).isoformat(),
-                "staleness_minutes": 8.0,
-                "threshold_minutes": 20,
-                "records_last_sync": 48,
-                "error_message": None,
-            },
-            {
-                "source": "player_injuries",
-                "status": "ok",
-                "last_sync": (now - timedelta(hours=2)).isoformat(),
-                "staleness_minutes": 120.0,
-                "threshold_minutes": 240,
-                "records_last_sync": 23,
-                "error_message": None,
-            },
-            {
-                "source": "team_features",
-                "status": "ok",
-                "last_sync": (now - timedelta(hours=6)).isoformat(),
-                "staleness_minutes": 360.0,
-                "threshold_minutes": 1440,
-                "records_last_sync": 30,
-                "error_message": None,
-            },
+            {"source": "kalshi_api", "status": "ok", "last_sync": now.isoformat(),
+             "staleness_minutes": 0, "threshold_minutes": 5, "records_last_sync": 0, "error_message": None},
         ],
         "model_version": "v0.1",
         "db_connected": True,
@@ -343,163 +534,31 @@ async def health():
 
 @app.get("/api/monitoring/alerts")
 async def alerts():
-    now = datetime.now(timezone.utc)
-    return {
-        "alerts": [
-            {
-                "alert_id": "a1",
-                "alert_type": "signal",
-                "severity": "INFO",
-                "message": "New HIGH confidence signal: BOS vs MIA (edge 6.8%)",
-                "details": {},
-                "created_at": (now - timedelta(minutes=15)).isoformat(),
-                "acknowledged": True,
-            },
-            {
-                "alert_id": "a2",
-                "alert_type": "anomaly",
-                "severity": "WARNING",
-                "message": "Cross-platform basis > 10% on OKC-DEN market",
-                "details": {"basis": 0.112},
-                "created_at": (now - timedelta(minutes=45)).isoformat(),
-                "acknowledged": False,
-            },
-        ],
-        "total": 2,
-        "unacknowledged": 1,
-    }
+    return {"alerts": [], "total": 0, "unacknowledged": 0}
 
 
-# ── Portfolio ─────────────────────────────────────────────────────────
-
-@app.get("/api/portfolio")
-async def portfolio(period: str = "1W"):
-    """Robinhood-style portfolio value with equity curve."""
-    import math
-    import random as _rng
-
-    _rng.seed(42)  # deterministic
-
-    base_value = 5014.15
-    buying_power = 2805.57
-
-    # Generate equity curve based on period
-    period_map = {"1D": 24, "1W": 7 * 24, "1M": 30 * 24, "3M": 90 * 24, "1Y": 365, "ALL": 730}
-    n_points = min(period_map.get(period, 168), 500)
-
-    points = []
-    val = base_value * 0.88  # start lower
-    for i in range(n_points):
-        val += _rng.gauss(0.4, 8)  # upward drift with noise
-        val = max(val, base_value * 0.7)
-        t = datetime.now(timezone.utc) - timedelta(hours=n_points - i)
-        points.append({"time": t.isoformat(), "value": round(val, 2)})
-
-    # End at current value
-    points[-1]["value"] = base_value
-
-    start_val = points[0]["value"]
-    change = base_value - start_val
-    change_pct = (change / start_val) * 100
+@app.get("/api/dashboard/summary")
+async def dashboard_summary():
+    events = await _get_all_basketball_events()
+    pf = _load_portfolio()
+    total_value = pf["cash"] + sum(p.get("current_value", 0) for p in pf.get("positions", []))
 
     return {
-        "total_value": base_value,
-        "buying_power": buying_power,
-        "change": round(change, 2),
-        "change_pct": round(change_pct, 2),
-        "period": period,
-        "equity_curve": points,
-    }
-
-
-@app.get("/api/portfolio/positions")
-async def portfolio_positions():
-    """User's open positions (bets placed)."""
-    data = await get_demo_data()
-    games = data.get("games", [])
-
-    # Simulate some open positions on a few games
-    positions = []
-    for i, g in enumerate(games[:4]):  # user has bets on first 4 games
-        import random as _rng
-        _rng.seed(i + 100)
-        side = "YES" if _rng.random() > 0.3 else "NO"
-        entry_price = _rng.randint(30, 75) / 100
-        qty = _rng.randint(10, 80)
-        current_mid = g["signal"]["yes_mid"] if side == "YES" else (1 - g["signal"]["yes_mid"])
-        cost = round(entry_price * qty, 2)
-        current_val = round(current_mid * qty, 2)
-        pnl = round(current_val - cost, 2)
-
-        positions.append({
-            "game_id": g["game_id"],
-            "home_team": g["home_team"],
-            "away_team": g["away_team"],
-            "game_time_utc": g["game_time_utc"],
-            "side": side,
-            "team_bet": g["home_team"] if side == "YES" else g["away_team"],
-            "entry_price": entry_price,
-            "current_price": round(current_mid, 2),
-            "quantity": qty,
-            "cost": cost,
-            "current_value": current_val,
-            "pnl": pnl,
-            "pnl_pct": round((pnl / cost) * 100, 1) if cost > 0 else 0,
-            "market_question": g["market"]["question"],
-        })
-
-    return {"positions": positions, "total_positions": len(positions)}
-
-
-@app.get("/api/games/{game_id}/price_history")
-async def game_price_history(game_id: str, period: str = "1D"):
-    """Kalshi-style price history for YES and NO sides."""
-    import random as _rng
-
-    data = await get_demo_data()
-    game = next((g for g in data["games"] if g["game_id"] == game_id), None)
-    if not game:
-        return {"error": "not_found"}
-
-    yes_mid = game["signal"]["yes_mid"]
-    _rng.seed(hash(game_id))
-
-    period_map = {"1D": 48, "1W": 168, "1M": 120, "ALL": 200}
-    n = period_map.get(period, 48)
-
-    # Generate realistic price movement around current mid
-    points = []
-    val = yes_mid + _rng.gauss(0, 0.05)
-    for i in range(n):
-        val += _rng.gauss(0, 0.008)
-        val = max(0.05, min(0.95, val))
-        t = datetime.now(timezone.utc) - timedelta(hours=n - i)
-        points.append({
-            "time": t.isoformat(),
-            "yes_price": round(val, 4),
-            "no_price": round(1 - val, 4),
-        })
-
-    # End at current price
-    points[-1]["yes_price"] = round(yes_mid, 4)
-    points[-1]["no_price"] = round(1 - yes_mid, 4)
-
-    home_pct = round(yes_mid * 100)
-    away_pct = 100 - home_pct
-
-    return {
-        "game_id": game_id,
-        "home_team": game["home_team"],
-        "away_team": game["away_team"],
-        "game_time_utc": game["game_time_utc"],
-        "question": game["market"]["question"],
-        "yes_price": round(yes_mid, 2),
-        "no_price": round(1 - yes_mid, 2),
-        "home_pct": home_pct,
-        "away_pct": away_pct,
-        "volume": game["signal"]["volume_24h"] or 0,
-        "period": period,
-        "price_history": points,
+        "today_date": str(date.today()),
+        "total_games_today": len(events),
+        "games_with_markets": len(events),
+        "active_signals": 0,
+        "actionable_signals": 0,
+        "skipped_signals": 0,
+        "best_edge": None,
+        "best_edge_game": None,
+        "avg_edge": None,
+        "total_exposure_usd": sum(p.get("cost", 0) for p in pf.get("positions", [])),
+        "daily_risk_pct": 0,
+        "system_healthy": True,
+        "data_sources_ok": 1,
+        "data_sources_total": 1,
+        "last_refresh": datetime.now(timezone.utc).isoformat(),
     }
 
 
