@@ -18,9 +18,9 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 # ── Configuration ────────────────────────────────────────────────────
 
-KALSHI_API_KEY = "a952bcbe-ec3b-4b5b-b8f9-11dae589608c"
+KALSHI_API_KEY = "5ce679c0-46dd-42c6-8f46-4311f8321034"
 KALSHI_KEY_FILE = Path(__file__).parent.parent.parent / "config" / "kalshi-key.pem"
-KALSHI_BASE_URL = "https://demo-api.kalshi.co"  # demo environment
+KALSHI_BASE_URL = "https://trading-api.kalshi.com"  # production environment
 
 BASKETBALL_KEYWORDS = [
     "NBA", "basketball", "Lakers", "Warriors", "Celtics", "Bucks",
