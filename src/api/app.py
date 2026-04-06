@@ -14,7 +14,7 @@ from datetime import date, datetime, timezone
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import dashboard, games, signals, backtest, risk, monitoring
+from src.api.routes import dashboard, decisions, games, signals, backtest, risk, monitoring
 
 START_TIME = time.time()
 
@@ -48,6 +48,7 @@ app.include_router(signals.router, prefix="/api", tags=["Signals"])
 app.include_router(backtest.router, prefix="/api", tags=["Backtest"])
 app.include_router(risk.router, prefix="/api", tags=["Risk"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
+app.include_router(decisions.router, prefix="/api", tags=["Decisions"])
 
 
 @app.get("/api/ping")
