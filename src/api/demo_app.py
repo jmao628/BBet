@@ -525,29 +525,53 @@ async def game_analysis(game_id: str):
         spread=round(m1["_best_yes_ask"] - m1["_best_yes_bid"], 4),
     )
 
-    # Build fundamentals from market data (simplified — no external stats API yet)
-    # In production, this would pull from NBA API / team_features table
-    home_mid = home_mkt.yes_bid + home_mkt.yes_ask
-    away_mid = away_mkt.yes_bid + away_mkt.yes_ask
+    # Build fundamentals from REAL NBA data
+    from src.api.nba_data import get_all_team_stats, find_team
 
-    home_fund = FundamentalsProfile(
-        team_name=home_sub, is_home=True,
-        season_win_pct=home_mid / 2 if home_mid > 0 else 0.5,  # proxy from market
-        home_win_pct=min(0.85, (home_mid / 2 + 0.05)) if home_mid > 0 else 0.55,
-        last5_wins=3, last5_losses=2, last10_wins=6, last10_losses=4,
-        off_rating=110, def_rating=108, net_rating=2.0,
-        elo=1500 + (home_mid / 2 - 0.5) * 200 if home_mid > 0 else 1500,
-        rest_days=2,
-    )
-    away_fund = FundamentalsProfile(
-        team_name=away_sub, is_home=False,
-        season_win_pct=away_mid / 2 if away_mid > 0 else 0.5,
-        home_win_pct=min(0.85, (away_mid / 2 + 0.05)) if away_mid > 0 else 0.55,
-        last5_wins=3, last5_losses=2, last10_wins=5, last10_losses=5,
-        off_rating=110, def_rating=110, net_rating=0.0,
-        elo=1500 + (away_mid / 2 - 0.5) * 200 if away_mid > 0 else 1500,
-        rest_days=2,
-    )
+    try:
+        all_nba = get_all_team_stats()
+    except Exception:
+        all_nba = {}
+
+    home_nba = find_team(home_sub, all_nba) if all_nba else None
+    away_nba = find_team(away_sub, all_nba) if all_nba else None
+
+    def _build_fund(name: str, is_home: bool, nba: dict | None, mkt_mid: float) -> FundamentalsProfile:
+        if nba:
+            # Parse win streak
+            streak_raw = nba.get("streak", 0)
+            streak = int(streak_raw) if isinstance(streak_raw, (int, float)) else 0
+            if isinstance(streak_raw, str):
+                parts = streak_raw.split()
+                if len(parts) == 2:
+                    streak = int(parts[1]) if parts[0] == "W" else -int(parts[1])
+
+            return FundamentalsProfile(
+                team_name=nba["team_name"],
+                is_home=is_home,
+                season_win_pct=nba.get("win_pct", 0.5),
+                home_win_pct=nba.get("home_win_pct", 0.5) if is_home else nba.get("road_win_pct", 0.5),
+                last5_wins=nba.get("last5_wins", 3),
+                last5_losses=nba.get("last5_losses", 2),
+                last10_wins=nba.get("last10_wins", 5),
+                last10_losses=nba.get("last10_losses", 5),
+                off_rating=nba.get("off_rating", 110),
+                def_rating=nba.get("def_rating", 110),
+                net_rating=nba.get("net_rating", 0),
+                elo=nba.get("elo", 1500),
+                win_streak=streak,
+                rest_days=2,  # TODO: compute from schedule
+            )
+        else:
+            # Fallback: estimate from market price
+            return FundamentalsProfile(
+                team_name=name, is_home=is_home,
+                season_win_pct=mkt_mid if mkt_mid > 0 else 0.5,
+                elo=1500 + (mkt_mid - 0.5) * 200 if mkt_mid > 0 else 1500,
+            )
+
+    home_fund = _build_fund(home_sub, True, home_nba, (home_mkt.yes_bid + home_mkt.yes_ask) / 2)
+    away_fund = _build_fund(away_sub, False, away_nba, (away_mkt.yes_bid + away_mkt.yes_ask) / 2)
 
     # Time to game
     exp = m0.get("expected_expiration_time", "")
