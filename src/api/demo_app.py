@@ -123,6 +123,33 @@ def _series_to_league(series: str) -> str:
     return mapping.get(series, series.replace("KX", "").replace("GAME", ""))
 
 
+async def _get_market_fast(ticker: str) -> dict:
+    """Get market data using direct dollar fields — no orderbook call needed."""
+    market = await kalshi.get_market(ticker)
+    best_yes_bid = float(market.get("yes_bid_dollars", 0) or 0)
+    best_yes_ask = float(market.get("yes_ask_dollars", 0) or 0)
+    last_price = float(market.get("last_price_dollars", 0) or 0)
+    prev_price = float(market.get("previous_price_dollars", 0) or 0)
+    yes_mid = (best_yes_bid + best_yes_ask) / 2 if best_yes_bid > 0 and best_yes_ask > 0 else last_price
+
+    market["_best_yes_bid"] = round(best_yes_bid, 4)
+    market["_best_yes_ask"] = round(best_yes_ask, 4)
+    market["_yes_mid"] = round(yes_mid, 4)
+    market["_last_price"] = round(last_price, 4)
+    market["_prev_price"] = round(prev_price, 4)
+    market["_yes_depth"] = float(market.get("yes_ask_size_fp", 0) or 0)
+    market["_no_depth"] = float(market.get("no_ask_size_fp", 0) or 0) if market.get("no_ask_size_fp") else 0
+    market["_orderbook"] = {"yes": [], "no": []}
+    market["_volume"] = int(float(market.get("volume_fp", 0) or 0))
+    market["_volume_24h"] = int(float(market.get("volume_24h_fp", 0) or 0))
+    market["_open_interest"] = int(float(market.get("open_interest_fp", 0) or 0))
+    market["_no_bid"] = float(market.get("no_bid_dollars", 0) or 0)
+    market["_no_ask"] = float(market.get("no_ask_dollars", 0) or 0)
+    market["_yes_sub_title"] = market.get("yes_sub_title", "")
+    market["_no_sub_title"] = market.get("no_sub_title", "")
+    return market
+
+
 async def _get_market_with_orderbook(ticker: str) -> dict:
     """Get market data with real Kalshi bid/ask + orderbook depth."""
     market = await kalshi.get_market(ticker)
@@ -461,10 +488,13 @@ async def game_analysis(game_id: str):
     away_name = parts[0].strip() if len(parts) == 2 else title
     home_name = parts[1].strip() if len(parts) == 2 else ""
 
-    # Fetch real market data
+    # Fetch real market data — parallel for speed
+    import asyncio as _aio
     try:
-        m0 = await _get_market_with_orderbook(markets[0]["ticker"])
-        m1 = await _get_market_with_orderbook(markets[1]["ticker"])
+        m0, m1 = await _aio.gather(
+            _get_market_fast(markets[0]["ticker"]),
+            _get_market_fast(markets[1]["ticker"]),
+        )
     except Exception:
         return {"error": "market_fetch_failed"}
 
@@ -605,15 +635,22 @@ async def all_game_analyses(league: str = ""):
 
     filtered = [e for e in events if not target_leagues or e.get("_league") in target_leagues]
 
-    for e in filtered[:20]:  # cap at 20 games for speed
-        game_id = e.get("event_ticker", "")
+    # Parallel analysis for all games — much faster
+    import asyncio as _aio
+
+    async def _analyze_one(event_ticker: str):
         try:
-            analysis = await game_analysis(game_id)
-            if isinstance(analysis, dict) and "error" not in analysis:
-                analysis["game_id"] = game_id
-                results.append(analysis)
+            a = await game_analysis(event_ticker)
+            if isinstance(a, dict) and "error" not in a:
+                a["game_id"] = event_ticker
+                return a
         except Exception:
-            continue
+            pass
+        return None
+
+    tasks = [_analyze_one(e.get("event_ticker", "")) for e in filtered[:20]]
+    batch = await _aio.gather(*tasks)
+    results = [r for r in batch if r is not None]
 
     results.sort(key=lambda x: x.get("edge", 0), reverse=True)
     response = {"analyses": results, "total": len(results)}
