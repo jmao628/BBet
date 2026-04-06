@@ -147,6 +147,15 @@ class KalshiRealClient:
             params={"depth": depth},
         )
 
+    async def get_market_trades(
+        self, ticker: str, limit: int = 500, cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Get public trade history for a market."""
+        params: dict[str, Any] = {"ticker": ticker, "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        return await self._request("GET", "/trade-api/v2/markets/trades", params=params)
+
     async def get_market_history(
         self, ticker: str, limit: int = 100, min_ts: int | None = None,
     ) -> list[dict[str, Any]]:

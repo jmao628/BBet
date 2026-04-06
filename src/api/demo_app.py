@@ -284,7 +284,7 @@ async def game_detail(game_id: str):
 
 @app.get("/api/games/{game_id}/price_history")
 async def game_price_history(game_id: str, period: str = "1D"):
-    """Real price history from Kalshi."""
+    """Real price history from Kalshi trade data."""
     events = await _get_all_basketball_events()
     event = next((e for e in events if e.get("event_ticker") == game_id), None)
     if not event:
@@ -296,47 +296,69 @@ async def game_price_history(game_id: str, period: str = "1D"):
     away_team = teams[0] if len(teams) == 2 else title
     home_team = teams[1] if len(teams) == 2 else ""
 
-    # Get history for first market (home team outcome)
+    # Get trade history for first market (home team outcome)
     price_history = []
     home_ticker = markets[0]["ticker"] if markets else None
     volume = 0
+    yes_bid = 0.0
+    yes_ask = 0.0
+    last_price = 0.0
 
     if home_ticker:
         try:
-            # Compute min_ts based on period
-            now_ts = int(time.time())
-            period_secs = {"1D": 86400, "1W": 604800, "1M": 2592000, "ALL": 86400 * 365}.get(period, 86400)
-            history = await kalshi.get_market_history(home_ticker, limit=500, min_ts=now_ts - period_secs)
+            # Fetch real trades
+            trades_data = await kalshi.get_market_trades(home_ticker, limit=500)
+            trades = trades_data.get("trades", [])
 
-            for h in history:
-                ts = h.get("ts") or h.get("end_period_ts")
-                yes_price = (h.get("yes_price") or h.get("yes_bid") or 0) / 100
+            # Trades come newest first — reverse for chronological order
+            trades.reverse()
+
+            for t in trades:
+                ts = t.get("created_time", "")
+                yes_p = float(t.get("yes_price_dollars", 0))
+                no_p = float(t.get("no_price_dollars", 0))
+                size = float(t.get("count_fp", "0").replace(",", ""))
                 price_history.append({
-                    "time": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if isinstance(ts, (int, float)) else str(ts),
-                    "yes_price": round(yes_price, 4),
-                    "no_price": round(1 - yes_price, 4),
+                    "time": ts,
+                    "yes_price": round(yes_p, 4),
+                    "no_price": round(no_p, 4),
+                    "size": size,
                 })
 
-            # Get current volume
+            # Get current market data
             m = await kalshi.get_market(home_ticker)
-            volume = m.get("volume") or 0
+            volume = int(float(m.get("volume_fp", 0)))
+            yes_bid = float(m.get("yes_bid_dollars", 0))
+            yes_ask = float(m.get("yes_ask_dollars", 0))
+            last_price = float(m.get("last_price_dollars", 0))
         except Exception:
             pass
 
     # Current prices
-    yes_price = price_history[-1]["yes_price"] if price_history else 0.5
-    no_price = 1 - yes_price
+    yes_mid = (yes_bid + yes_ask) / 2 if yes_bid > 0 else (last_price or 0.5)
+    no_mid = 1 - yes_mid
+
+    # Expected game time from market
+    exp_time = ""
+    if home_ticker:
+        try:
+            m = await kalshi.get_market(home_ticker)
+            exp_time = m.get("expected_expiration_time", m.get("close_time", ""))
+        except Exception:
+            pass
 
     return {
         "game_id": game_id,
         "home_team": home_team,
         "away_team": away_team,
-        "game_time_utc": event.get("close_time", ""),
+        "game_time_utc": exp_time or event.get("close_time", ""),
         "question": title,
-        "yes_price": round(yes_price, 2),
-        "no_price": round(no_price, 2),
-        "home_pct": round(yes_price * 100),
-        "away_pct": round(no_price * 100),
+        "yes_price": round(yes_mid, 2),
+        "no_price": round(no_mid, 2),
+        "yes_bid": round(yes_bid, 2),
+        "yes_ask": round(yes_ask, 2),
+        "home_pct": round(yes_mid * 100),
+        "away_pct": round(no_mid * 100),
         "volume": volume,
         "period": period,
         "price_history": price_history,
