@@ -26,29 +26,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve frontend static files in production
+# Frontend static files are mounted AFTER all API routes (see bottom of file)
 import os
 FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
-if FRONTEND_DIR.exists():
-    from starlette.staticfiles import StaticFiles
-    from starlette.responses import FileResponse
-
-    @app.get("/assets/{path:path}")
-    async def static_assets(path: str):
-        file = FRONTEND_DIR / "assets" / path
-        if file.exists():
-            return FileResponse(str(file))
-        return {"error": "not_found"}
-
-    @app.get("/{path:path}")
-    async def catch_all(path: str):
-        """Serve frontend for all non-API routes."""
-        if path.startswith("api/") or path.startswith("ws/"):
-            return {"error": "not_found"}
-        file = FRONTEND_DIR / path
-        if file.exists() and file.is_file():
-            return FileResponse(str(file))
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 START = time.time()
 kalshi = KalshiRealClient()
@@ -1095,3 +1075,29 @@ async def live_prices():
         "count": len(_live_prices),
         "ts": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Frontend static file serving — MUST be AFTER all /api routes
+# ══════════════════════════════════════════════════════════════════════
+
+if FRONTEND_DIR.exists():
+    from starlette.responses import FileResponse
+    from starlette.staticfiles import StaticFiles
+
+    # Mount assets directory
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="static-assets")
+
+    # Serve index.html for all non-API routes (SPA client-side routing)
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        # Don't interfere with API or WebSocket routes
+        if path.startswith("api") or path.startswith("ws"):
+            return {"error": "not_found"}
+        # Try to serve the exact file
+        file = FRONTEND_DIR / path
+        if file.exists() and file.is_file():
+            return FileResponse(str(file))
+        # Otherwise serve index.html for client-side routing
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
+

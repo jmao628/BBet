@@ -1,15 +1,11 @@
 services:
   - type: web
     name: bpmde-terminal
-    runtime: python
-    buildCommand: |
-      pip install -r requirements.txt
-      cd frontend && npm install && npm run build
-    startCommand: PYTHONPATH=. uvicorn src.api.demo_app:app --host 0.0.0.0 --port $PORT
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11"
       - key: KALSHI_API_KEY
         value: 5ce679c0-46dd-42c6-8f46-4311f8321034
       - key: KALSHI_PRIVATE_KEY
-        sync: false  # must be set manually in Render dashboard
+        sync: false
