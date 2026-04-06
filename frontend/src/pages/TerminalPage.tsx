@@ -15,8 +15,8 @@ export default function TerminalPage() {
   const [selectedGameId, setSelectedGameId] = useState<string>("");
   const { connected: wsConnected, getGamePrices } = useLivePrices();
 
-  const { data: games } = usePolling(["games-today"], api.games.today, 5_000);
-  const { data: analysisData } = usePolling(["analysis-all"], api.analysis.all, 30_000);
+  const { data: games } = usePolling(["games-today"], api.games.today, 10_000);
+  const { data: analysisData, isLoading: analysisLoading } = usePolling(["analysis-all"], api.analysis.all, 60_000);
 
   const analyses = analysisData?.analyses ?? [];
 
@@ -70,9 +70,15 @@ export default function TerminalPage() {
               />
             );
           })}
-          {analyses.length === 0 && (
-            <div className="text-zinc-600 text-xs text-center py-12">
-              Loading signals...
+          {analyses.length === 0 && analysisLoading && (
+            <div className="text-zinc-600 text-xs text-center py-8">
+              <div className="animate-pulse mb-2">Analyzing {(games ?? []).length} games...</div>
+              <div className="text-zinc-700 text-[10px]">First load takes ~10s</div>
+            </div>
+          )}
+          {analyses.length === 0 && !analysisLoading && (games ?? []).length > 0 && (
+            <div className="text-zinc-600 text-xs text-center py-8">
+              No signals available
             </div>
           )}
         </div>

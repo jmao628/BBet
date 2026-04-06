@@ -33,6 +33,40 @@ FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 START = time.time()
 kalshi = KalshiRealClient()
 
+# ── Pre-warm caches on startup ───────────────────────────────────────
+_startup_done = False
+
+@app.on_event("startup")
+async def preload_data():
+    """Pre-fetch all data on server boot so first page load is instant."""
+    global _startup_done
+    asyncio.create_task(_preload_background())
+
+async def _preload_background():
+    global _startup_done
+    try:
+        # 1. Pre-fetch NBA team stats (takes ~6s, cache for 5min)
+        from src.api.nba_data import get_all_team_stats
+        get_all_team_stats()
+        print("[PRELOAD] NBA stats loaded")
+
+        # 2. Pre-fetch all basketball events from Kalshi
+        await _get_all_basketball_events()
+        print(f"[PRELOAD] Kalshi events loaded")
+
+        # 3. Pre-run analysis for all NBA games
+        try:
+            await all_game_analyses()
+            print("[PRELOAD] Analysis pre-warmed")
+        except Exception:
+            pass
+
+        _startup_done = True
+        print("[PRELOAD] All caches warm — ready for instant load")
+    except Exception as e:
+        print(f"[PRELOAD] Error: {e}")
+        _startup_done = True
+
 # ── All basketball series on Kalshi ──────────────────────────────────
 BASKETBALL_SERIES = [
     "KXNBAGAME",           # NBA moneyline
@@ -83,7 +117,7 @@ def _save_portfolio(data: dict):
 # ── Cache for market data ────────────────────────────────────────────
 _cache: dict[str, Any] = {}
 _cache_ts: float = 0
-CACHE_TTL = 3  # seconds — real-time sync
+CACHE_TTL = 30  # seconds — events cache (markets update via WebSocket anyway)
 
 
 async def _get_all_basketball_events() -> list[dict]:
@@ -695,7 +729,7 @@ async def all_game_analyses(league: str = ""):
     global _cache
 
     cache_key = f"analysis_all_{league}"
-    if cache_key in _cache and (time.time() - _cache.get(f"{cache_key}_ts", 0)) < 15:
+    if cache_key in _cache and (time.time() - _cache.get(f"{cache_key}_ts", 0)) < 60:
         return _cache[cache_key]
 
     events = await _get_all_basketball_events()
