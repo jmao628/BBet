@@ -285,7 +285,7 @@ function DecisionPanel({ analysis: a, gameId, livePrices }: {
                   activeDot={{ r: 5, fill: "#f87171", stroke: "#0a0a0f", strokeWidth: 2 }} />
                 <Line type="stepAfter" dataKey="no_price" stroke="#60a5fa" strokeWidth={2} dot={false}
                   activeDot={{ r: 5, fill: "#60a5fa", stroke: "#0a0a0f", strokeWidth: 2 }} />
-                {/* Pulsing live dot — rendered at last data point */}
+                {/* Pulsing live dot — YES line (red) */}
                 <Line type="stepAfter" dataKey="yes_price" stroke="none" dot={(props: any) => {
                   if (props.index !== chartData.length - 1) return <></>;
                   return (
@@ -295,6 +295,19 @@ function DecisionPanel({ analysis: a, gameId, livePrices }: {
                         <animate attributeName="opacity" values="0.4;0.1;0.4" dur="1.5s" repeatCount="indefinite" />
                       </circle>
                       <circle cx={props.cx} cy={props.cy} r={3} fill="#f87171" />
+                    </g>
+                  );
+                }} />
+                {/* Pulsing live dot — NO line (blue) */}
+                <Line type="stepAfter" dataKey="no_price" stroke="none" dot={(props: any) => {
+                  if (props.index !== chartData.length - 1) return <></>;
+                  return (
+                    <g>
+                      <circle cx={props.cx} cy={props.cy} r={6} fill="#60a5fa" opacity={0.3}>
+                        <animate attributeName="r" values="4;8;4" dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" values="0.4;0.1;0.4" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle cx={props.cx} cy={props.cy} r={3} fill="#60a5fa" />
                     </g>
                   );
                 }} />
