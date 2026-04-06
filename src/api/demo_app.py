@@ -5,13 +5,14 @@ Run with: PYTHONPATH=. uvicorn src.api.demo_app:app --reload --port 8000
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.kalshi_real import KalshiRealClient
@@ -882,3 +883,123 @@ async def dashboard_summary():
 @app.get("/api/ping")
 async def ping():
     return {"status": "ok", "uptime_s": round(time.time() - START, 1)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# WebSocket — Real-time price streaming (1-2 second updates)
+# ══════════════════════════════════════════════════════════════════════
+
+_ws_clients: set[WebSocket] = set()
+_live_prices: dict[str, dict] = {}  # ticker -> latest price data
+_streamer_running = False
+
+
+async def _price_streamer():
+    """Background task: polls Kalshi every 1.5s and pushes to all WebSocket clients."""
+    global _live_prices, _streamer_running
+    _streamer_running = True
+
+    while True:
+        try:
+            events = await _get_all_basketball_events()
+            # Only stream NBA games (most active)
+            nba = [e for e in events if e.get("_league") == "NBA"]
+
+            # Parallel fetch all NBA market prices
+            tickers = []
+            for e in nba:
+                markets = e.get("markets", [])
+                for m in markets:
+                    tickers.append((e.get("event_ticker", ""), m.get("ticker", ""), e.get("title", "")))
+
+            async def _fetch_price(event_id: str, ticker: str, title: str):
+                try:
+                    m = await kalshi.get_market(ticker)
+                    return {
+                        "event_id": event_id,
+                        "ticker": ticker,
+                        "title": title,
+                        "team": m.get("yes_sub_title", ""),
+                        "yes_bid": float(m.get("yes_bid_dollars", 0) or 0),
+                        "yes_ask": float(m.get("yes_ask_dollars", 0) or 0),
+                        "no_bid": float(m.get("no_bid_dollars", 0) or 0),
+                        "no_ask": float(m.get("no_ask_dollars", 0) or 0),
+                        "last_price": float(m.get("last_price_dollars", 0) or 0),
+                        "volume": int(float(m.get("volume_fp", 0) or 0)),
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }
+                except Exception:
+                    return None
+
+            results = await asyncio.gather(*[_fetch_price(eid, t, title) for eid, t, title in tickers[:40]])
+            updates = [r for r in results if r is not None]
+
+            # Store latest prices
+            for u in updates:
+                _live_prices[u["ticker"]] = u
+
+            # Push to all connected clients
+            if _ws_clients and updates:
+                msg = json.dumps({
+                    "type": "price_update",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "prices": updates,
+                })
+                dead = set()
+                for ws in _ws_clients.copy():
+                    try:
+                        await ws.send_text(msg)
+                    except Exception:
+                        dead.add(ws)
+                _ws_clients -= dead
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(1.5)  # Poll every 1.5 seconds
+
+
+@app.websocket("/ws/prices")
+async def ws_prices(websocket: WebSocket):
+    """WebSocket endpoint for real-time price streaming."""
+    await websocket.accept()
+    _ws_clients.add(websocket)
+
+    # Send current cached prices immediately
+    if _live_prices:
+        await websocket.send_text(json.dumps({
+            "type": "price_update",
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "prices": list(_live_prices.values()),
+        }))
+
+    # Start streamer if not running
+    global _streamer_running
+    if not _streamer_running:
+        asyncio.create_task(_price_streamer())
+
+    try:
+        while True:
+            # Keep connection alive, handle client messages
+            data = await websocket.receive_text()
+            # Client can request specific game subscription
+            if data.startswith("subscribe:"):
+                pass  # future: per-game subscriptions
+    except WebSocketDisconnect:
+        _ws_clients.discard(websocket)
+
+
+@app.on_event("startup")
+async def start_streamer():
+    """Start the price streaming background task on server startup."""
+    asyncio.create_task(_price_streamer())
+
+
+@app.get("/api/prices/live")
+async def live_prices():
+    """REST fallback: get latest cached prices (for clients that can't use WebSocket)."""
+    return {
+        "prices": list(_live_prices.values()),
+        "count": len(_live_prices),
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }

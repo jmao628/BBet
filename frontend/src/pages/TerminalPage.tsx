@@ -5,15 +5,17 @@ import {
 import { api } from "../lib/api";
 import type { GameAnalysis } from "../lib/api";
 import { usePolling } from "../hooks/usePolling";
+import { useLivePrices } from "../hooks/useLivePrices";
 import type { GameListItem } from "../types/api";
 import {
-  AlertTriangle, Shield, Clock, Activity, Target, Zap,
+  AlertTriangle, Shield, Clock, Activity, Target, Zap, WifiOff,
 } from "lucide-react";
 
 export default function TerminalPage() {
   const [selectedGameId, setSelectedGameId] = useState<string>("");
+  const { connected: wsConnected, getGamePrices } = useLivePrices();
 
-  const { data: games } = usePolling(["games-today"], api.games.today, 3_000);
+  const { data: games } = usePolling(["games-today"], api.games.today, 5_000);
   const { data: analysisData } = usePolling(["analysis-all"], api.analysis.all, 30_000);
 
   const analyses = analysisData?.analyses ?? [];
@@ -36,18 +38,38 @@ export default function TerminalPage() {
         <div className="px-4 py-3 border-b border-zinc-800/50 flex items-center gap-2">
           <Zap size={14} className="text-green-400" />
           <span className="text-xs font-semibold tracking-wider uppercase text-zinc-400">Signal Feed</span>
-          <span className="ml-auto text-[10px] text-zinc-600">{analyses.length} games</span>
+          <div className="ml-auto flex items-center gap-2">
+            {wsConnected ? (
+              <div className="flex items-center gap-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>
+                <span className="text-[9px] text-green-500">LIVE</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <WifiOff size={10} className="text-zinc-600" />
+                <span className="text-[9px] text-zinc-600">OFFLINE</span>
+              </div>
+            )}
+            <span className="text-[10px] text-zinc-600">{analyses.length}</span>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {analyses.map(a => (
-            <SignalCard
-              key={a.game_id}
-              analysis={a}
-              game={(games ?? []).find(g => g.game_id === a.game_id)}
-              isSelected={a.game_id === selectedGameId}
-              onClick={() => setSelectedGameId(a.game_id)}
-            />
-          ))}
+          {analyses.map(a => {
+            const lp = getGamePrices(a.game_id);
+            return (
+              <SignalCard
+                key={a.game_id}
+                analysis={a}
+                game={(games ?? []).find(g => g.game_id === a.game_id)}
+                livePrices={lp}
+                isSelected={a.game_id === selectedGameId}
+                onClick={() => setSelectedGameId(a.game_id)}
+              />
+            );
+          })}
           {analyses.length === 0 && (
             <div className="text-zinc-600 text-xs text-center py-12">
               Loading signals...
@@ -59,7 +81,7 @@ export default function TerminalPage() {
       {/* CENTER: Decision Engine */}
       <div className="flex-1 overflow-y-auto">
         {selected ? (
-          <DecisionPanel analysis={selected} gameId={selectedGameId} />
+          <DecisionPanel analysis={selected} gameId={selectedGameId} livePrices={getGamePrices(selectedGameId)} />
         ) : (
           <div className="flex items-center justify-center h-full text-zinc-600">
             Select a game from the signal feed
@@ -86,9 +108,12 @@ export default function TerminalPage() {
    LEFT PANEL — SIGNAL CARD
    ══════════════════════════════════════════════════════════════════════ */
 
-function SignalCard({ analysis: a, game, isSelected, onClick }: {
-  analysis: GameAnalysis; game?: GameListItem; isSelected: boolean; onClick: () => void;
+function SignalCard({ analysis: a, game, livePrices, isSelected, onClick }: {
+  analysis: GameAnalysis; game?: GameListItem; livePrices: { yes_bid: number; yes_ask: number; team: string }[]; isSelected: boolean; onClick: () => void;
 }) {
+  // Use live WebSocket prices if available, fall back to analysis data
+  const lp0 = livePrices[0];
+  const lp1 = livePrices[1];
   const edgeColor = a.edge > 0.06 ? "text-green-400" : a.edge > 0.03 ? "text-yellow-400" : a.edge > 0 ? "text-zinc-400" : "text-red-400";
   const actionColor = a.trade_decision ? (a.direction === "YES" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400") : "bg-zinc-800 text-zinc-500";
   const action = a.trade_decision ? (a.direction === "YES" ? "BUY" : "SELL") : "SKIP";
@@ -136,9 +161,11 @@ function SignalCard({ analysis: a, game, isSelected, onClick }: {
         {a.risk_alerts.length > 0 && (
           <AlertTriangle size={10} className="text-yellow-500 ml-auto" />
         )}
-        {g?.home_pct > 0 && (
+        {(lp0 || g?.home_pct > 0) && (
           <span className="text-[10px] text-zinc-600 tabular-nums">
-            {g.home_pct}¢/{g.away_pct}¢
+            {lp0 ? `${Math.round(lp0.yes_ask * 100)}¢` : `${g?.home_pct}¢`}
+            /
+            {lp1 ? `${Math.round(lp1.yes_ask * 100)}¢` : `${g?.away_pct}¢`}
           </span>
         )}
       </div>
@@ -151,17 +178,41 @@ function SignalCard({ analysis: a, game, isSelected, onClick }: {
    CENTER PANEL — DECISION ENGINE
    ══════════════════════════════════════════════════════════════════════ */
 
-function DecisionPanel({ analysis: a, gameId }: { analysis: GameAnalysis; gameId: string }) {
+function DecisionPanel({ analysis: a, gameId, livePrices }: {
+  analysis: GameAnalysis; gameId: string;
+  livePrices: { yes_bid: number; yes_ask: number; no_bid?: number; no_ask?: number; last_price: number; team: string; ts: string }[];
+}) {
   const [period, setPeriod] = useState("1D");
   const { data: priceData } = usePolling(
     ["price-history", gameId, period],
     () => api.games.priceHistory(gameId, period),
-    5_000,
+    10_000,  // slower polling since WebSocket handles live updates
     { enabled: !!gameId },
   );
 
+  // Append live price point to chart data
+  const liveHome = livePrices[0];
+  const chartData = [...(priceData?.price_history ?? [])];
+  if (liveHome && chartData.length > 0) {
+    // Add or update the last point with live data
+    const livePoint = {
+      time: liveHome.ts,
+      yes_price: liveHome.last_price || (liveHome.yes_bid + liveHome.yes_ask) / 2,
+      no_price: 1 - (liveHome.last_price || (liveHome.yes_bid + liveHome.yes_ask) / 2),
+    };
+    // If last chart point is older than live, append
+    const lastChart = chartData[chartData.length - 1];
+    if (lastChart && new Date(liveHome.ts) > new Date(lastChart.time)) {
+      chartData.push(livePoint);
+    }
+  }
+
   const isActionable = a.trade_decision;
   const dirColor = a.direction === "YES" ? "text-green-400" : a.direction === "NO" ? "text-red-400" : "text-zinc-500";
+
+  // Live price display
+  const liveYesBid = liveHome?.yes_bid ? Math.round(liveHome.yes_bid * 100) : null;
+  const liveYesAsk = liveHome?.yes_ask ? Math.round(liveHome.yes_ask * 100) : null;
 
   return (
     <div className="p-5 max-w-[900px] mx-auto">
@@ -204,10 +255,25 @@ function DecisionPanel({ analysis: a, gameId }: { analysis: GameAnalysis; gameId
             ))}
           </div>
         </div>
+        {/* Live price ticker */}
+        {liveYesBid != null && (
+          <div className="flex items-center gap-3 mb-2 text-[11px]">
+            <span className="flex items-center gap-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+              </span>
+              <span className="text-zinc-500">LIVE</span>
+            </span>
+            <span className="text-red-400 tabular-nums">{a.home_team} {liveYesBid}/{liveYesAsk}¢</span>
+            <span className="text-blue-400 tabular-nums">{a.away_team} {liveHome ? Math.round(liveHome.no_bid! * 100) : "—"}/{liveHome ? Math.round(liveHome.no_ask! * 100) : "—"}¢</span>
+            <span className="text-zinc-600 ml-auto">{liveHome?.ts ? new Date(liveHome.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : ""}</span>
+          </div>
+        )}
         <div className="h-48">
-          {priceData && priceData.price_history.length > 0 ? (
+          {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={priceData.price_history}>
+              <LineChart data={chartData}>
                 <XAxis dataKey="time" hide />
                 <YAxis domain={["auto","auto"]} tickFormatter={v => `${Math.round(v*100)}%`}
                   tick={{ fill: "#3f3f46", fontSize: 9 }} axisLine={false} tickLine={false} width={35} />
@@ -215,8 +281,23 @@ function DecisionPanel({ analysis: a, gameId }: { analysis: GameAnalysis; gameId
                 <Tooltip contentStyle={{ background: "#09090b", border: "1px solid #27272a", borderRadius: 8, fontSize: 11 }}
                   labelFormatter={t => new Date(t as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
                   formatter={(v, name) => [`${Math.round(Number(v)*100)}¢`, name === "yes_price" ? a.home_team : a.away_team]} />
-                <Line type="stepAfter" dataKey="yes_price" stroke="#f87171" strokeWidth={2} dot={false} />
-                <Line type="stepAfter" dataKey="no_price" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                <Line type="stepAfter" dataKey="yes_price" stroke="#f87171" strokeWidth={2} dot={false}
+                  activeDot={{ r: 5, fill: "#f87171", stroke: "#0a0a0f", strokeWidth: 2 }} />
+                <Line type="stepAfter" dataKey="no_price" stroke="#60a5fa" strokeWidth={2} dot={false}
+                  activeDot={{ r: 5, fill: "#60a5fa", stroke: "#0a0a0f", strokeWidth: 2 }} />
+                {/* Pulsing live dot — rendered at last data point */}
+                <Line type="stepAfter" dataKey="yes_price" stroke="none" dot={(props: any) => {
+                  if (props.index !== chartData.length - 1) return <></>;
+                  return (
+                    <g>
+                      <circle cx={props.cx} cy={props.cy} r={6} fill="#f87171" opacity={0.3}>
+                        <animate attributeName="r" values="4;8;4" dur="1.5s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" values="0.4;0.1;0.4" dur="1.5s" repeatCount="indefinite" />
+                      </circle>
+                      <circle cx={props.cx} cy={props.cy} r={3} fill="#f87171" />
+                    </g>
+                  );
+                }} />
               </LineChart>
             </ResponsiveContainer>
           ) : (
