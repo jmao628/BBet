@@ -144,10 +144,13 @@ _HOME_WIDGETS_JS = r"""
   for (const h of heads) {
     const x = lc(h.textContent);
     if (x.length < 5 || x.length >= 90) continue;
-    if (!(EXPLICIT.some((t) => x.includes(t)) || /\bideas$/.test(x))) continue;
-    const title = norm(h.textContent);
-    if (seen.has(title)) continue;
-    seen.add(title);
+    const raw = norm(h.textContent);
+    // A real "… IDEAS" widget heading is an all-caps section title; this
+    // excludes author names / nav links that merely end in "Ideas".
+    const isIdeas = /\bideas$/.test(x) && /[A-Z]/.test(raw) && raw === raw.toUpperCase();
+    if (!(EXPLICIT.some((t) => x.includes(t)) || isIdeas)) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
     targets.push(h);
   }
 

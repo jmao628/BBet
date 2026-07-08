@@ -51,7 +51,7 @@ class SeekingAlphaConfig:
     top_n_analysts: int = 15
     # "My Analysts" feed: pull recent Buy/Strong Buy articles from the analysts
     # you follow, within this many days.
-    my_analysts_url: str = "https://seekingalpha.com/my-analysts"
+    my_analysts_url: str = "https://seekingalpha.com/account/people"
     my_analysts_lookback_days: int = 60
 
 
@@ -127,7 +127,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             fetch_full_text=sa.get("fetch_full_text", True),
             cookie=os.environ.get("SA_COOKIE"),
             top_n_analysts=sa.get("top_n_analysts", 15),
-            my_analysts_url=sa.get("my_analysts_url", "https://seekingalpha.com/my-analysts"),
+            my_analysts_url=sa.get("my_analysts_url", "https://seekingalpha.com/account/people"),
             my_analysts_lookback_days=sa.get("my_analysts_lookback_days", 60),
         ),
         substack=SubstackConfig(
