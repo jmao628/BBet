@@ -298,11 +298,21 @@ class SeekingAlphaScraper:
     async def _scrape_homepage(self, page, result: SAScrapeResult) -> None:
         await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60_000)
         await _settle(page)
-        # Scroll the page so lazy-rendered widgets lower down actually mount.
-        await self._scroll_through(page)
-        await self._save_debug(page, "homepage")
 
-        result.home_widgets = await self._extract_home_widgets(page)
+        # The homepage widgets are lazy-rendered as you scroll, so a single
+        # pass often catches nothing. Scroll + extract, and retry until we get
+        # widgets (or give up) so runs are deterministic.
+        widgets: list[dict] = []
+        for attempt in range(1, 8):
+            await self._scroll_through(page)
+            widgets = await self._extract_home_widgets(page)
+            if widgets:
+                break
+            logger.info("homepage: no widgets yet (attempt %d/7), waiting…", attempt)
+            await page.wait_for_timeout(2500)
+
+        await self._save_debug(page, "homepage")
+        result.home_widgets = widgets
         rows = sum(len(g["rows"]) for w in result.home_widgets for g in w["groups"])
         logger.info(
             "homepage: %d widgets, %d total rows", len(result.home_widgets), rows
@@ -477,15 +487,31 @@ async def _settle(page, quiet_ms: int = 800) -> None:
     await page.wait_for_timeout(quiet_ms)
 
 
+def _is_empty(result_dict: dict) -> bool:
+    c = result_dict.get("counts", {})
+    return not (c.get("home_widget_rows") or c.get("analyst_picks") or c.get("top_analysts"))
+
+
 def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    # The web page always reads this stable filename.
+    payload = result.to_dict()
     latest = output_dir / "seekingalpha_latest.json"
-    latest.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
-    # Also keep a dated snapshot.
+
+    # Safety net: never let an empty scrape (e.g. widgets didn't render this
+    # run) clobber a previously-good latest.json the web page is showing.
+    if _is_empty(payload) and latest.exists():
+        try:
+            prev = json.loads(latest.read_text())
+            if not _is_empty(prev):
+                logger.warning("scrape came back empty; keeping previous seekingalpha_latest.json")
+                return latest
+        except (ValueError, OSError):
+            pass
+
+    latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     day = result.generated_at.date().isoformat()
     (output_dir / f"seekingalpha_{day}.json").write_text(
-        json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+        json.dumps(payload, ensure_ascii=False, indent=2)
     )
     return latest
 
