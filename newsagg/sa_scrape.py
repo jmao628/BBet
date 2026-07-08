@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from newsagg.config import Settings, load_settings
@@ -37,6 +37,80 @@ TOP_ANALYSTS_URL = "https://seekingalpha.com/top-performing-analysts"
 HOME_URL = "https://seekingalpha.com/"
 
 _AUTHOR_HREF = re.compile(r"/author/([a-z0-9\-]+)")
+
+# Extractor for the "My Analysts" article feed: one record per article link,
+# pulling its rating badge, ticker, author, title and date text from the row.
+_MY_ANALYSTS_JS = r"""
+() => {
+  const norm = s => (s || "").replace(/\s+/g, " ").trim();
+  const out = [];
+  const seen = new Set();
+  document.querySelectorAll('a[href*="/article/"]').forEach(a => {
+    const title = norm(a.textContent);
+    const href = a.getAttribute("href") || "";
+    if (title.length < 8 || seen.has(href)) return;
+
+    let card = a.closest("article") || a.parentElement;
+    for (let i = 0; i < 5 && card && !card.querySelector('a[href*="/symbol/"]')
+                     && card.parentElement; i++) {
+      card = card.parentElement;
+    }
+    if (!card) return;
+    const text = norm(card.innerText);
+    const symA = card.querySelector('a[href*="/symbol/"]');
+    const authA = card.querySelector('a[href*="/author/"]');
+    const tick = symA && (symA.getAttribute("href").match(/\/symbol\/([A-Z][A-Z.:\-]{0,7})/) || [])[1];
+    const rating = (text.match(/strong buy|buy|hold|sell/i) || [""])[0];
+    const dateM = text.match(/yesterday|today|(?:sun|mon|tue|wed|thu|fri|sat),?\s+[a-z]{3}\s+\d{1,2}|[a-z]{3}\s+\d{1,2}/i);
+
+    seen.add(href);
+    out.push({
+      title, href,
+      ticker: tick || null,
+      rating: rating || null,
+      author: authA ? norm(authA.textContent) : null,
+      date: dateM ? dateM[0] : null,
+    });
+  });
+  return out;
+}
+"""
+
+_MONTHS = {
+    m: i
+    for i, m in enumerate(
+        ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"],
+        start=1,
+    )
+}
+
+
+def parse_feed_date(text: str | None, now: datetime) -> date | None:
+    """Parse SA's relative feed dates ('Yesterday', 'Mon, Jul 6', 'Jun 15')."""
+    if not text:
+        return None
+    t = text.strip().lower()
+    if "today" in t:
+        return now.date()
+    if "yesterday" in t:
+        return (now - timedelta(days=1)).date()
+    m = re.search(r"([a-z]{3})\s+(\d{1,2})", t)
+    if not m:
+        return None
+    mon = _MONTHS.get(m.group(1))
+    if not mon:
+        return None
+    try:
+        d = date(now.year, mon, int(m.group(2)))
+    except ValueError:
+        return None
+    # A month ahead of "now" means it's last year's article.
+    if d > now.date():
+        try:
+            d = date(now.year - 1, mon, int(m.group(2)))
+        except ValueError:
+            return None
+    return d
 
 # In-page extractor for the SA logged-in homepage widgets. Walks the DOM in
 # document order per widget: it tracks the current cap-size column header
@@ -285,6 +359,7 @@ class SeekingAlphaScraper:
 
             try:
                 await self._scrape_homepage(page, result)
+                await self._scrape_my_analysts(page, result)
                 await self._scrape_top_analysts(page, result)
             except Exception as exc:  # noqa: BLE001 — keep whatever we got
                 logger.exception("scrape error")
@@ -370,6 +445,60 @@ class SeekingAlphaScraper:
             await page.wait_for_timeout(600)
         except Exception:  # noqa: BLE001
             pass
+
+    # --- My Analysts feed --------------------------------------------------
+    async def _scrape_my_analysts(self, page, result: SAScrapeResult) -> None:
+        """Extract recent Buy/Strong Buy articles from the analysts you follow."""
+        cfg = self.settings.seekingalpha
+        await page.goto(cfg.my_analysts_url, wait_until="domcontentloaded", timeout=60_000)
+        await _settle(page)
+        # The feed is infinite-scroll; load enough to cover the lookback window.
+        for _ in range(14):
+            await page.mouse.wheel(0, 2200)
+            await page.wait_for_timeout(450)
+        await self._save_debug(page, "my_analysts")
+
+        try:
+            items = await page.evaluate(_MY_ANALYSTS_JS)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("my-analysts extraction failed: %s", exc)
+            return
+
+        now = datetime.now(timezone.utc)
+        picks: list[dict] = []
+        seen: set[str] = set()
+        for it in items or []:
+            rating = (it.get("rating") or "").strip().lower()
+            ticker = (it.get("ticker") or "").strip().upper()
+            if rating not in ("buy", "strong buy") or not ticker:
+                continue
+            d = parse_feed_date(it.get("date"), now)
+            if d is not None and (now.date() - d).days > cfg.my_analysts_lookback_days:
+                continue
+            href = it.get("href") or ""
+            key = f"{ticker}|{href}"
+            if key in seen:
+                continue
+            seen.add(key)
+            picks.append(
+                {
+                    "ticker": ticker,
+                    "rating": "Strong Buy" if rating == "strong buy" else "Buy",
+                    "article_title": it.get("title", ""),
+                    "article_url": href
+                    if href.startswith("http")
+                    else f"https://seekingalpha.com{href}",
+                    "author": it.get("author"),
+                    "published": d.isoformat() if d else None,
+                }
+            )
+
+        result.my_analyst_picks = picks
+        logger.info(
+            "my analysts: %d Buy/Strong-Buy picks (≤%dd)",
+            len(picks),
+            cfg.my_analysts_lookback_days,
+        )
 
     async def _extract_home_widgets(self, page) -> list[dict]:
         try:

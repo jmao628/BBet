@@ -130,6 +130,41 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
     }
   }
 
+  // Merge in the "My Analysts" feed — recent Buy/Strong Buy articles from the
+  // analysts you follow. These are always ★ thesis seeds (author + article).
+  for (const p of data.my_analyst_picks ?? []) {
+    const cur: SeedRow =
+      map.get(p.ticker) ??
+      {
+        src: "SeekingAlpha",
+        date: p.published,
+        author: null,
+        followers: null,
+        ticker: p.ticker,
+        company: cmap.get(p.ticker) ?? "",
+        reasoning: "",
+        articleUrl: null,
+        evidence: null,
+        catalyst: "unknown",
+        role: "unknown",
+        weight: null,
+        rating: null,
+        quant: null,
+        tags: [],
+        hasThesis: false,
+      };
+    cur.hasThesis = true;
+    if (p.author) cur.author = p.author;
+    if (p.article_title && !cur.reasoning) {
+      cur.reasoning = p.article_title;
+      cur.articleUrl = p.article_url;
+    }
+    if (p.rating) cur.rating = p.rating;
+    if (p.published) cur.date = p.published;
+    if (!cur.tags.includes("MyAnalyst")) cur.tags.push("MyAnalyst");
+    map.set(p.ticker, cur);
+  }
+
   return [...map.values()].sort((a, b) => {
     if (a.hasThesis !== b.hasThesis) return a.hasThesis ? -1 : 1;
     return (b.quant ?? -1) - (a.quant ?? -1);

@@ -89,6 +89,10 @@ class SAScrapeResult:
     # This captures the SA layout: a widget title, its cap-size columns
     # (Large/Mid/Small Cap, S&P 500, ...), and each row's ticker + rating.
     home_widgets: list[dict] = field(default_factory=list)
+    # Buy/Strong Buy articles from the analysts you follow ("My Analysts" feed),
+    # extracted from text, within the lookback window. Each is:
+    #   {ticker, rating, article_title, article_url, author, published}
+    my_analyst_picks: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -97,6 +101,7 @@ class SAScrapeResult:
             "top_analysts": [a.to_dict() for a in self.top_analysts],
             "analyst_picks": [p.to_dict() for p in self.analyst_picks],
             "home_widgets": self.home_widgets,
+            "my_analyst_picks": self.my_analyst_picks,
             "errors": self.errors,
             "counts": {
                 "top_analysts": len(self.top_analysts),
@@ -105,5 +110,6 @@ class SAScrapeResult:
                 "home_widget_rows": sum(
                     len(g.get("rows", [])) for w in self.home_widgets for g in w.get("groups", [])
                 ),
+                "my_analyst_picks": len(self.my_analyst_picks),
             },
         }

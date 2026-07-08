@@ -31,10 +31,20 @@ export interface AnalystPick {
   rank: number | null;
 }
 
+export interface MyAnalystPick {
+  ticker: string;
+  rating: string; // Buy | Strong Buy
+  article_title: string;
+  article_url: string;
+  author: string | null;
+  published: string | null;
+}
+
 export interface SAData {
   generated_at: string | null;
   home_widgets: HomeWidget[];
   analyst_picks: AnalystPick[];
+  my_analyst_picks?: MyAnalystPick[];
   top_analysts: { name: string; profile_url: string; rank: number | null }[];
   counts?: Record<string, number>;
   errors?: string[];
