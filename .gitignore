@@ -3,6 +3,9 @@
 *.pem
 *.key
 
+# newsagg — user-specific config (watchlists); example is tracked
+newsagg/config.yaml
+
 # Python
 __pycache__/
 *.py[cod]
