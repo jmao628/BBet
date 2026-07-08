@@ -8,6 +8,7 @@ newsagg/config.yaml
 # newsagg — saved login session (contains auth tokens; never commit)
 **/sa_auth.json
 **/sa_profile/
+**/sa_cookies.json
 
 # Python
 __pycache__/

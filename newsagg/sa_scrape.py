@@ -88,27 +88,36 @@ class SeekingAlphaScraper:
         result = SAScrapeResult(generated_at=datetime.now(timezone.utc))
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
-        from newsagg.sa_browser import launch_context, profile_dir
+        from newsagg.sa_browser import (
+            COOKIE_FILE,
+            import_cookie_file,
+            launch_context,
+            profile_dir,
+        )
 
         async with async_playwright() as pw:
-            # Reuse the persistent low-detection profile created by sa_login,
-            # so we're already logged in and don't trip SA's bot wall.
             from pathlib import Path
 
-            if not Path(profile_dir(self.settings)).exists():
-                logger.warning(
-                    "no saved session — run `python -m newsagg.sa_login` first "
-                    "(paywalled/personalized data will be missing otherwise)"
-                )
             context = await launch_context(pw, self.settings, headless=not self.headed)
 
-            # Legacy fallback: seed a raw SA_COOKIE if provided and no profile.
+            # Auth, most-preferred first:
+            # 1) cookie export file (sa_cookies.json) — the reliable path,
+            # 2) persistent profile from a prior manual sa_login,
+            # 3) a raw SA_COOKIE header.
+            imported = await import_cookie_file(context, self.settings)
+            profile_ok = Path(profile_dir(self.settings)).joinpath("Default").exists()
             cookie = self.settings.seekingalpha.cookie
-            if cookie and not Path(profile_dir(self.settings)).joinpath("Default").exists():
+            if not imported and not profile_ok and cookie:
                 try:
                     await context.add_cookies(parse_cookie_header(cookie))
                 except Exception:  # noqa: BLE001
                     pass
+            elif not imported and not profile_ok and not cookie:
+                logger.warning(
+                    "no auth found — drop a Cookie-Editor export at %s "
+                    "(see README) for paywalled/personalized data",
+                    self.settings.output_dir / COOKIE_FILE,
+                )
 
             page = context.pages[0] if context.pages else await context.new_page()
             page.on("response", self._on_response)

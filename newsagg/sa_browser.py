@@ -17,11 +17,16 @@ blocked; installing Chrome is the fix).
 
 from __future__ import annotations
 
+import json
 import logging
 
 from newsagg.config import Settings
 
 logger = logging.getLogger("newsagg.sa_browser")
+
+# A Cookie-Editor / EditThisCookie JSON export dropped here logs us in without
+# any automated login (which SA blocks). See README "Log in via cookie export".
+COOKIE_FILE = "sa_cookies.json"
 
 _STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -59,3 +64,64 @@ async def launch_context(pw, settings: Settings, *, headless: bool):
 
     await context.add_init_script(_STEALTH_JS)
     return context
+
+
+_SAMESITE = {"lax": "Lax", "strict": "Strict", "no_restriction": "None", "none": "None"}
+
+
+def _to_playwright_cookie(c: dict) -> dict | None:
+    """Convert one Cookie-Editor / EditThisCookie record to Playwright's shape."""
+    name, value = c.get("name"), c.get("value")
+    domain = c.get("domain")
+    if not name or value is None or not domain:
+        return None
+    out: dict = {
+        "name": name,
+        "value": value,
+        "domain": domain,
+        "path": c.get("path", "/"),
+        "httpOnly": bool(c.get("httpOnly", False)),
+        "secure": bool(c.get("secure", False)),
+    }
+    exp = c.get("expirationDate") or c.get("expires")
+    if exp and not c.get("session"):
+        out["expires"] = float(exp)
+    ss = _SAMESITE.get(str(c.get("sameSite") or "").lower())
+    if ss:
+        out["sameSite"] = ss
+    return out
+
+
+async def import_cookie_file(context, settings: Settings) -> int:
+    """Load a cookie-export JSON (if present) into the context. Returns count.
+
+    Accepts the Cookie-Editor / EditThisCookie export format (a JSON array of
+    cookie objects). The file stays on the user's machine and is gitignored.
+    """
+    path = settings.output_dir / COOKIE_FILE
+    if not path.exists():
+        return 0
+    try:
+        raw = json.loads(path.read_text())
+    except (ValueError, OSError) as exc:
+        logger.warning("could not read %s: %s", path, exc)
+        return 0
+
+    records = raw.get("cookies", raw) if isinstance(raw, dict) else raw
+    cookies = [pc for c in records if (pc := _to_playwright_cookie(c))]
+    if not cookies:
+        logger.warning("%s had no usable cookies", path)
+        return 0
+
+    try:
+        await context.add_cookies(cookies)
+    except Exception as exc:  # noqa: BLE001 — retry without sameSite, which is finicky
+        for c in cookies:
+            c.pop("sameSite", None)
+        try:
+            await context.add_cookies(cookies)
+        except Exception as exc2:  # noqa: BLE001
+            logger.warning("add_cookies failed: %s / %s", exc, exc2)
+            return 0
+    logger.info("imported %d cookies from %s", len(cookies), path)
+    return len(cookies)

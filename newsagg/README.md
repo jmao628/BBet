@@ -70,20 +70,25 @@ pip install -r newsagg/requirements.txt
 python -m playwright install chromium        # downloads the browser (~150MB)
 ```
 
-### Connect your paid account (once)
+### Connect your paid account (via cookie export — most reliable)
 
-Log in once in a real browser window; the session is saved locally and reused:
+SA blocks automated *login*, so instead log in with your **normal browser** and
+hand the scraper your session cookies:
 
-```bash
-python -m newsagg.sa_login
-```
+1. In your everyday Chrome, make sure you're logged into SeekingAlpha.
+2. Install the **Cookie-Editor** extension (Chrome Web Store).
+3. On any seekingalpha.com page, click Cookie-Editor → **Export** → **Export as
+   JSON** (this copies all SA cookies to your clipboard).
+4. Save them to `data/newsagg/sa_cookies.json` in this project.
+5. Run the scraper — it imports that file automatically.
 
-A browser opens — log into SeekingAlpha yourself (captcha / 2FA are fine), then
-press Enter in the terminal. Your session is saved to
-`data/newsagg/sa_auth.json` on your machine only (gitignored, never
-transmitted). The scraper picks it up automatically. Re-run this whenever the
-session expires. (Alternatively, set a raw `SA_COOKIE` in `.env`, but the login
-helper is easier and more reliable.)
+The file stays on your machine only (gitignored, never transmitted), and it
+includes the HttpOnly auth cookies a manual copy would miss.
+
+_Alternative:_ `python -m newsagg.sa_login` opens a real-Chrome window to log in
+manually and persists the session in `data/newsagg/sa_profile/`. Works when SA
+doesn't challenge the automated login; the cookie-export path above is the
+fallback when it does.
 
 ### Scrape
 
