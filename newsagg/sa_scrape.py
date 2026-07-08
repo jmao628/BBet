@@ -49,11 +49,10 @@ _HOME_WIDGETS_JS = r"""
   const norm = s => (s || "").replace(/\s+/g, " ").trim();
   const lc = s => norm(s).toLowerCase();
 
-  const TITLES = [
+  const EXPLICIT = [
     "latest quant ratings",
     "latest analyst coverage",
     "top quant stocks by market cap",
-    "most compelling analyst ideas",
     "latest strong buys",
   ];
   const GROUPS = new Set([
@@ -63,18 +62,24 @@ _HOME_WIDGETS_JS = r"""
   ]);
 
   const heads = [...document.querySelectorAll("h1,h2,h3,h4,h5,strong,div,span,a")];
-  const widgets = [];
-  const seen = new Set();
 
-  for (const want of TITLES) {
-    const head = heads.find(h => {
-      const x = lc(h.textContent);
-      return x.includes(want) && x.length < 90;
-    });
-    if (!head) continue;
-    const title = norm(head.textContent);
+  // Target every whitelisted widget plus any "… Ideas" analyst-thesis widget
+  // (Most Compelling / Latest Value / Dividend Growth / Latest Growth / …).
+  const targets = [];
+  const seen = new Set();
+  for (const h of heads) {
+    const x = lc(h.textContent);
+    if (x.length < 5 || x.length >= 90) continue;
+    if (!(EXPLICIT.some((t) => x.includes(t)) || /\bideas$/.test(x))) continue;
+    const title = norm(h.textContent);
     if (seen.has(title)) continue;
     seen.add(title);
+    targets.push(h);
+  }
+
+  const widgets = [];
+  for (const head of targets) {
+    const title = norm(head.textContent);
 
     // Climb to the widget container (an ancestor holding several ticker links).
     let box = head;

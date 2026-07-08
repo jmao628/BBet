@@ -51,6 +51,12 @@ function shortTag(title: string): string {
   if (t.includes("top quant")) return "TopQuant";
   if (t.includes("compelling")) return "Ideas";
   if (t.includes("strong buy")) return "StrongBuy";
+  if (t.includes("value idea")) return "Value";
+  if (t.includes("dividend")) return "Dividend";
+  if (t.includes("growth idea")) return "Growth";
+  if (t.includes("momentum")) return "Momentum";
+  if (t.includes("profitab")) return "Profit";
+  if (t.includes("eps revision")) return "EPS";
   return title.split(" ").slice(0, 2).join(" ");
 }
 
@@ -74,7 +80,6 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
 
   for (const w of data.home_widgets) {
     const tag = shortTag(w.title);
-    const isIdeas = w.title.toLowerCase().includes("compelling");
     for (const g of w.groups) {
       for (const r of g.rows) {
         const cur: SeedRow =
@@ -108,10 +113,12 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
             cur.rating = r.rating; // BUY / STRONG BUY wins for display
           }
         }
-        if (isIdeas) {
+        // Any row an analyst wrote a thesis for (author + article) is a ★ seed,
+        // regardless of which "… Ideas" widget it came from.
+        if (r.analyst || r.article) {
           cur.hasThesis = true;
           if (r.analyst) cur.author = r.analyst;
-          if (r.article) cur.reasoning = r.article;
+          if (r.article && !cur.reasoning) cur.reasoning = r.article;
         }
         map.set(r.ticker, cur);
       }
