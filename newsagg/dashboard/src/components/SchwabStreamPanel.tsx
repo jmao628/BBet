@@ -3,6 +3,7 @@ import { Panel, EmptyState } from "./Panel";
 
 interface DashCfg {
   schwabChannelId?: string; // YouTube channel id (UC...) of Schwab Network
+  schwabVideoId?: string | null; // resolved current live video id (null = offline)
 }
 
 // Embeds the Schwab Network YouTube live stream. The channel id comes from a
@@ -22,21 +23,36 @@ export function SchwabStreamPanel() {
   }, []);
 
   const channel = cfg?.schwabChannelId?.trim();
+  const videoId = cfg?.schwabVideoId?.trim();
+  // The resolver (newsagg.schwab_live) sets schwabVideoId — a value when live,
+  // null when it ran and found no live broadcast. We only fall back to the
+  // flaky channel embed when the resolver hasn't run at all.
+  const resolverRan = cfg != null && "schwabVideoId" in cfg;
+
+  // Prefer the resolved live video (reliable); else the channel embed; else setup.
+  const src = videoId
+    ? `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1`
+    : !resolverRan && channel
+      ? `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(channel)}&autoplay=1&mute=1`
+      : null;
 
   return (
     <Panel title="Schwab Live Stream" accent="#38bdf8">
-      {!loaded ? null : channel ? (
+      {!loaded ? null : src ? (
         <div className="h-full w-full bg-black">
           <iframe
             title="Schwab Network Live"
             className="h-full w-full border-0"
-            src={`https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(
-              channel,
-            )}&autoplay=1&mute=1`}
+            src={src}
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
           />
         </div>
+      ) : resolverRan && !videoId ? (
+        <EmptyState
+          label="Schwab Network is offline right now"
+          hint="no live broadcast (usually live during US market hours)"
+        />
       ) : (
         <EmptyState
           label="Set your Schwab channel to embed the live stream"
