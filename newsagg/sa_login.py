@@ -35,15 +35,16 @@ async def _prompt(message: str) -> None:
 
 async def _main(args: argparse.Namespace) -> int:
     settings = load_settings(args.config)
-    settings.output_dir.mkdir(parents=True, exist_ok=True)
-    auth_path = settings.output_dir / "sa_auth.json"
 
     from playwright.async_api import async_playwright
 
+    from newsagg.sa_browser import launch_context, profile_dir
+
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=False)
-        context = await browser.new_context(user_agent=settings.user_agent)
-        page = await context.new_page()
+        # Persistent + real-Chrome context so SA doesn't flag us as a bot and
+        # the login survives for later scrapes.
+        context = await launch_context(pw, settings, headless=False)
+        page = context.pages[0] if context.pages else await context.new_page()
         await page.goto(LOGIN_URL, wait_until="domcontentloaded")
 
         print("\n" + "=" * 64)
@@ -54,10 +55,13 @@ async def _main(args: argparse.Namespace) -> int:
         print("=" * 64)
         await _prompt("Press Enter to save your session... ")
 
+        # The persistent profile already holds the session; this file is just a
+        # portable backup the scraper can also read.
+        auth_path = settings.output_dir / "sa_auth.json"
         await context.storage_state(path=str(auth_path))
-        print(f"\n✓ Saved your SeekingAlpha session -> {auth_path}")
+        print(f"\n✓ Saved your SeekingAlpha session (profile: {profile_dir(settings)})")
         print("  Now run:  python -m newsagg.sa_scrape")
-        await browser.close()
+        await context.close()
     return 0
 
 

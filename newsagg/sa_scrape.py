@@ -88,32 +88,29 @@ class SeekingAlphaScraper:
         result = SAScrapeResult(generated_at=datetime.now(timezone.utc))
         self.debug_dir.mkdir(parents=True, exist_ok=True)
 
+        from newsagg.sa_browser import launch_context, profile_dir
+
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=not self.headed)
-            # Prefer a saved login session (from `python -m newsagg.sa_login`);
-            # fall back to a raw SA_COOKIE header if that's all we have.
-            auth_path = self.settings.output_dir / "sa_auth.json"
-            ctx_kwargs: dict = {
-                "user_agent": self.settings.user_agent,
-                "viewport": {"width": 1440, "height": 2200},
-            }
-            using_saved = auth_path.exists()
-            if using_saved:
-                ctx_kwargs["storage_state"] = str(auth_path)
-            context = await browser.new_context(**ctx_kwargs)
+            # Reuse the persistent low-detection profile created by sa_login,
+            # so we're already logged in and don't trip SA's bot wall.
+            from pathlib import Path
 
-            cookie = self.settings.seekingalpha.cookie
-            if using_saved:
-                logger.info("using saved SA session: %s", auth_path)
-            elif cookie:
-                await context.add_cookies(parse_cookie_header(cookie))
-            else:
+            if not Path(profile_dir(self.settings)).exists():
                 logger.warning(
-                    "no saved session and SA_COOKIE unset — "
-                    "run `python -m newsagg.sa_login` first for paywalled data"
+                    "no saved session — run `python -m newsagg.sa_login` first "
+                    "(paywalled/personalized data will be missing otherwise)"
                 )
+            context = await launch_context(pw, self.settings, headless=not self.headed)
 
-            page = await context.new_page()
+            # Legacy fallback: seed a raw SA_COOKIE if provided and no profile.
+            cookie = self.settings.seekingalpha.cookie
+            if cookie and not Path(profile_dir(self.settings)).joinpath("Default").exists():
+                try:
+                    await context.add_cookies(parse_cookie_header(cookie))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            page = context.pages[0] if context.pages else await context.new_page()
             page.on("response", self._on_response)
 
             try:
@@ -124,7 +121,7 @@ class SeekingAlphaScraper:
                 result.errors.append(str(exc))
             finally:
                 self._dump_api_captures()
-                await browser.close()
+                await context.close()
 
         return result
 
