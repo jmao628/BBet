@@ -82,11 +82,13 @@ class SAScrapeResult:
     generated_at: datetime
     top_analysts: list[AnalystProfile] = field(default_factory=list)
     analyst_picks: list[AnalystPick] = field(default_factory=list)
-    tech_quant_tickers: list[TechTicker] = field(default_factory=list)
-    tech_analyst_tickers: list[TechTicker] = field(default_factory=list)
-    # Named homepage stock baskets (SA "key comparisons"): list of
-    # {"name": str, "tickers": [{"ticker": str, "company": str}]}.
-    homepage_comparisons: list[dict] = field(default_factory=list)
+    # Structured homepage widgets. Each is:
+    #   {"title": str, "description": str, "groups": [
+    #       {"label": str, "rows": [
+    #           {"ticker","company","rating","article","article_url","analyst"}]}]}
+    # This captures the SA layout: a widget title, its cap-size columns
+    # (Large/Mid/Small Cap, S&P 500, ...), and each row's ticker + rating.
+    home_widgets: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -94,15 +96,14 @@ class SAScrapeResult:
             "generated_at": _iso(self.generated_at),
             "top_analysts": [a.to_dict() for a in self.top_analysts],
             "analyst_picks": [p.to_dict() for p in self.analyst_picks],
-            "tech_quant_tickers": [t.to_dict() for t in self.tech_quant_tickers],
-            "tech_analyst_tickers": [t.to_dict() for t in self.tech_analyst_tickers],
-            "homepage_comparisons": self.homepage_comparisons,
+            "home_widgets": self.home_widgets,
             "errors": self.errors,
             "counts": {
                 "top_analysts": len(self.top_analysts),
                 "analyst_picks": len(self.analyst_picks),
-                "tech_quant_tickers": len(self.tech_quant_tickers),
-                "tech_analyst_tickers": len(self.tech_analyst_tickers),
-                "homepage_comparisons": len(self.homepage_comparisons),
+                "home_widgets": len(self.home_widgets),
+                "home_widget_rows": sum(
+                    len(g.get("rows", [])) for w in self.home_widgets for g in w.get("groups", [])
+                ),
             },
         }

@@ -29,24 +29,118 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from newsagg.config import Settings, load_settings
-from newsagg.sa_models import (
-    AnalystPick,
-    AnalystProfile,
-    SAScrapeResult,
-    TechTicker,
-)
+from newsagg.sa_models import AnalystPick, AnalystProfile, SAScrapeResult
 
 logger = logging.getLogger("newsagg.sa_scrape")
 
 TOP_ANALYSTS_URL = "https://seekingalpha.com/top-performing-analysts"
 HOME_URL = "https://seekingalpha.com/"
 
-# Homepage widget headings we want tickers from (matched case-insensitively).
-QUANT_WIDGET_HEADING = "latest quant ratings"
-ANALYST_WIDGET_HEADING = "latest analyst coverage"
-
-_TICKER_HREF = re.compile(r"/symbol/([A-Z][A-Z.\-]{0,6})\b")
 _AUTHOR_HREF = re.compile(r"/author/([a-z0-9\-]+)")
+
+# In-page extractor for the SA logged-in homepage widgets. Walks the DOM in
+# document order per widget: it tracks the current cap-size column header
+# (Large/Mid/Small Cap, S&P 500, ...) and, for every ticker link, emits a row
+# with the ticker plus the company / rating / article / analyst read from the
+# row's own text. Structure-based (not class-name-based) so it survives SA's
+# frequent CSS churn.
+_HOME_WIDGETS_JS = r"""
+() => {
+  const norm = s => (s || "").replace(/\s+/g, " ").trim();
+  const lc = s => norm(s).toLowerCase();
+
+  const TITLES = [
+    "latest quant ratings",
+    "latest analyst coverage",
+    "top quant stocks by market cap",
+    "most compelling analyst ideas",
+    "latest strong buys",
+  ];
+  const GROUPS = new Set([
+    "large cap", "mid cap", "small cap",
+    "s&p 500", "mid cap 400", "small cap 600",
+    "quant strong buys", "analyst strong buys",
+  ]);
+
+  const heads = [...document.querySelectorAll("h1,h2,h3,h4,h5,strong,div,span,a")];
+  const widgets = [];
+  const seen = new Set();
+
+  for (const want of TITLES) {
+    const head = heads.find(h => {
+      const x = lc(h.textContent);
+      return x.includes(want) && x.length < 90;
+    });
+    if (!head) continue;
+    const title = norm(head.textContent);
+    if (seen.has(title)) continue;
+    seen.add(title);
+
+    // Climb to the widget container (an ancestor holding several ticker links).
+    let box = head;
+    for (let i = 0; i < 10 && box.parentElement; i++) {
+      box = box.parentElement;
+      if (box.querySelectorAll('a[href*="/symbol/"]').length >= 4) break;
+    }
+
+    // Short description line under the title.
+    let description = "";
+    const descEl = [...box.querySelectorAll("p,div,span")].find(e => {
+      const x = norm(e.textContent);
+      return x.length > 25 && x.length < 160
+        && !e.querySelector('a[href*="/symbol/"]') && x !== title;
+    });
+    if (descEl) description = norm(descEl.textContent);
+
+    // Document-order walk: switch column on a group header, emit a row per ticker.
+    const groups = [];
+    let cur = null;
+    const rowSeen = new Set();
+    for (const el of box.querySelectorAll("*")) {
+      if (el.children.length === 0 && GROUPS.has(lc(el.textContent))) {
+        cur = { label: norm(el.textContent), rows: [] };
+        groups.push(cur);
+        continue;
+      }
+      if (!(el.matches && el.matches('a[href*="/symbol/"]'))) continue;
+      const m = el.getAttribute("href").match(/\/symbol\/([A-Z][A-Z.:\-]{0,7})/);
+      if (!m) continue;
+      const ticker = m[1];
+
+      let row = el.closest("tr") || el.closest("li") || el.parentElement;
+      for (let i = 0; i < 3 && row && norm(row.innerText).length < ticker.length + 3
+                       && row.parentElement; i++) {
+        row = row.parentElement;
+      }
+      const text = norm(row ? row.innerText : el.textContent);
+      const key = ticker + "|" + (cur ? cur.label : "") + "|" + text.slice(0, 24);
+      if (rowSeen.has(key)) continue;
+      rowSeen.add(key);
+
+      const rating = (text.match(/\b[0-5]\.\d{2}\b/)
+        || text.match(/strong buy|buy|hold|sell/i) || [""])[0];
+      const artA = row && row.querySelector('a[href*="/article/"], a[href*="/news/"]');
+      const authA = row && row.querySelector('a[href*="/author/"]');
+      let company = text;
+      [ticker, rating].forEach(s => { if (s) company = company.replace(s, "").trim(); });
+
+      if (!cur) { cur = { label: "", rows: [] }; groups.push(cur); }
+      cur.rows.push({
+        ticker,
+        company: artA ? null : norm(company).slice(0, 60),
+        rating: rating || null,
+        article: artA ? norm(artA.textContent) : null,
+        article_url: artA ? artA.href : null,
+        analyst: authA ? norm(authA.textContent) : null,
+      });
+    }
+
+    const nonEmpty = groups.filter(g => g.rows.length);
+    if (nonEmpty.length) widgets.push({ title, description, groups: nonEmpty });
+  }
+  return widgets;
+}
+"""
 
 
 def parse_key_comparisons(captures: list[tuple[str, dict]]) -> list[dict]:
@@ -204,68 +298,51 @@ class SeekingAlphaScraper:
     async def _scrape_homepage(self, page, result: SAScrapeResult) -> None:
         await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60_000)
         await _settle(page)
-        # Let any in-flight API responses finish being captured before parsing.
-        await page.wait_for_timeout(1500)
+        # Scroll the page so lazy-rendered widgets lower down actually mount.
+        await self._scroll_through(page)
         await self._save_debug(page, "homepage")
 
-        # Primary: parse the captured key_comparisons API (robust, structured).
-        result.homepage_comparisons = parse_key_comparisons(self._api_captures)
-
-        # Secondary: the two named widgets, via DOM (may be logged-in only).
-        result.tech_quant_tickers = await self._extract_widget_tickers(
-            page, QUANT_WIDGET_HEADING, "quant"
-        )
-        result.tech_analyst_tickers = await self._extract_widget_tickers(
-            page, ANALYST_WIDGET_HEADING, "analyst"
-        )
+        result.home_widgets = await self._extract_home_widgets(page)
+        rows = sum(len(g["rows"]) for w in result.home_widgets for g in w["groups"])
         logger.info(
-            "homepage: %d comparison baskets, %d quant tickers, %d analyst tickers",
-            len(result.homepage_comparisons),
-            len(result.tech_quant_tickers),
-            len(result.tech_analyst_tickers),
+            "homepage: %d widgets, %d total rows", len(result.home_widgets), rows
         )
-
-    async def _extract_widget_tickers(self, page, heading: str, widget: str) -> list[TechTicker]:
-        """Find the widget by its heading text, then pull ticker links near it."""
-        # Locate the heading, walk up to its section, collect /symbol/ links.
-        js = """
-        (headingText) => {
-          const norm = s => (s || '').trim().toLowerCase();
-          const heads = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,div,span'));
-          const head = heads.find(el => norm(el.textContent).includes(headingText));
-          if (!head) return [];
-          // climb a few levels to the widget container
-          let box = head;
-          for (let i = 0; i < 5 && box.parentElement; i++) box = box.parentElement;
-          const seen = new Set();
-          const out = [];
-          box.querySelectorAll('a[href*="/symbol/"]').forEach(a => {
-            const m = a.getAttribute('href').match(/\\/symbol\\/([A-Z][A-Z.\\-]{0,6})/);
-            if (!m) return;
-            const t = m[1];
-            if (seen.has(t)) return;
-            seen.add(t);
-            const row = a.closest('tr,li,div');
-            out.push({ticker: t, text: row ? row.innerText.replace(/\\n/g,' ').trim() : ''});
-          });
-          return out;
-        }
-        """
-        try:
-            rows = await page.evaluate(js, heading)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("widget '%s' extraction failed: %s", heading, exc)
-            return []
-        out: list[TechTicker] = []
-        for r in rows[:40]:
-            out.append(
-                TechTicker(
-                    ticker=r["ticker"],
-                    widget=widget,
-                    rating=_first_rating(r.get("text", "")),
-                )
+        for w in result.home_widgets:
+            logger.info(
+                "  widget %r: %d groups, %d rows",
+                w["title"][:48],
+                len(w["groups"]),
+                sum(len(g["rows"]) for g in w["groups"]),
             )
-        return out
+
+    async def _scroll_through(self, page) -> None:
+        """Scroll top→bottom to trigger lazy rendering, then back to top."""
+        try:
+            for _ in range(8):
+                await page.mouse.wheel(0, 1600)
+                await page.wait_for_timeout(400)
+            await page.evaluate("window.scrollTo(0, 0)")
+            await page.wait_for_timeout(600)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _extract_home_widgets(self, page) -> list[dict]:
+        try:
+            widgets = await page.evaluate(_HOME_WIDGETS_JS)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("home widget extraction failed: %s", exc)
+            return []
+        # Drop widgets/groups with no rows; cap runaway rows defensively.
+        clean = []
+        for w in widgets or []:
+            groups = [g for g in w.get("groups", []) if g.get("rows")]
+            for g in groups:
+                g["rows"] = g["rows"][:60]
+            if groups:
+                clean.append(
+                    {"title": w.get("title", ""), "description": w.get("description", ""), "groups": groups}
+                )
+        return clean
 
     # --- top analysts + their picks ----------------------------------------
     async def _scrape_top_analysts(self, page, result: SAScrapeResult) -> None:
@@ -398,11 +475,6 @@ async def _settle(page, quiet_ms: int = 800) -> None:
     except Exception:  # noqa: BLE001
         pass
     await page.wait_for_timeout(quiet_ms)
-
-
-def _first_rating(text: str) -> str | None:
-    m = re.search(r"strong buy|buy|hold|sell", text, re.IGNORECASE)
-    return m.group(0).title() if m else None
 
 
 def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
