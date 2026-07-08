@@ -40,6 +40,13 @@ export interface SAData {
   errors?: string[];
 }
 
+export interface Health {
+  last_attempt: string | null;
+  last_success: string | null;
+  auth_ok: boolean;
+  widgets: number;
+}
+
 // One aggregated row for the ranking table.
 export interface RankRow {
   ticker: string;

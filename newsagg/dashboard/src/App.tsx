@@ -2,6 +2,7 @@ import { useStore } from "./store";
 import { usePoller } from "./lib/usePoller";
 import { TopBar } from "./sb/TopBar";
 import { FunnelRail } from "./sb/FunnelRail";
+import { Banner } from "./sb/Banner";
 import { OverviewView } from "./sb/views/OverviewView";
 import { SeedsView } from "./sb/views/SeedsView";
 import {
@@ -34,6 +35,7 @@ export default function App() {
       <TopBar />
       <FunnelRail />
       <main className="overflow-y-auto px-7 py-6">
+        <Banner />
         <View />
       </main>
     </div>

@@ -1,16 +1,18 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { SAData } from "../types";
+import type { Health, SAData } from "../types";
 
 // The scraped snapshot. Served same-origin by the local http.server (built) or
 // proxied by Vite in dev. Data updates daily today; polling is the pragmatic
 // "realtime" until a streaming source (Schwab/X) is wired to a WS/SSE endpoint.
 const DATA_URL = "/data/newsagg/seekingalpha_latest.json";
+const HEALTH_URL = "/data/newsagg/health.json";
 const POLL_MS = 15_000;
 const STALE_MS = 36 * 60 * 60 * 1000; // flag data older than ~1.5 days
 
 export function usePoller() {
   const setData = useStore((s) => s.setData);
+  const setHealth = useStore((s) => s.setHealth);
   const setStatus = useStore((s) => s.setStatus);
 
   useEffect(() => {
@@ -30,6 +32,13 @@ export function usePoller() {
       } catch {
         if (alive) setStatus("error");
       }
+      // Health is best-effort; absent file just means no banner.
+      try {
+        const hres = await fetch(`${HEALTH_URL}?t=${Date.now()}`);
+        if (alive) setHealth(hres.ok ? ((await hres.json()) as Health) : null);
+      } catch {
+        /* ignore */
+      }
     }
 
     tick();
@@ -38,5 +47,5 @@ export function usePoller() {
       alive = false;
       clearInterval(id);
     };
-  }, [setData, setStatus]);
+  }, [setData, setHealth, setStatus]);
 }

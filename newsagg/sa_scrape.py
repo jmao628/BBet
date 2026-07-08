@@ -551,10 +551,42 @@ def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
     return latest
 
 
+def write_health(result: SAScrapeResult, output_dir: Path) -> None:
+    """Record scrape health so the dashboard can warn when login expires.
+
+    ``auth_ok`` is false when a run produced no logged-in widgets — the usual
+    sign the SeekingAlpha session cookie has expired and needs refreshing.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "health.json"
+    prev: dict = {}
+    if path.exists():
+        try:
+            prev = json.loads(path.read_text())
+        except (ValueError, OSError):
+            prev = {}
+
+    widgets = len(result.home_widgets)
+    auth_ok = widgets > 0
+    now = result.generated_at.isoformat()
+    path.write_text(
+        json.dumps(
+            {
+                "last_attempt": now,
+                "last_success": now if auth_ok else prev.get("last_success"),
+                "auth_ok": auth_ok,
+                "widgets": widgets,
+            },
+            indent=2,
+        )
+    )
+
+
 async def _run_once(settings: Settings, args: argparse.Namespace) -> SAScrapeResult:
     scraper = SeekingAlphaScraper(settings, headed=args.headed, recon=args.recon)
     result = await scraper.run()
     path = write_result(result, settings.output_dir)
+    write_health(result, settings.output_dir)
     print("\n=== SeekingAlpha scrape ===")
     print(json.dumps(result.to_dict()["counts"], indent=2))
     if result.errors:

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HomeWidget, SAData } from "./types";
+import type { Health, HomeWidget, SAData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 
@@ -15,11 +15,13 @@ export type ViewKey =
 
 interface DashboardState {
   data: SAData | null;
+  health: Health | null;
   status: ConnStatus;
   lastUpdated: number | null; // epoch ms of last successful fetch
   view: ViewKey; // active view in the funnel
   ticker: string; // focused ticker (search / row click)
   setData: (d: SAData) => void;
+  setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
   setView: (v: ViewKey) => void;
   setTicker: (t: string) => void;
@@ -27,11 +29,13 @@ interface DashboardState {
 
 export const useStore = create<DashboardState>((set) => ({
   data: null,
+  health: null,
   status: "connecting",
   lastUpdated: null,
   view: "overview",
   ticker: "",
   setData: (d) => set({ data: d, status: "live", lastUpdated: Date.now() }),
+  setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),
   setView: (v) => set({ view: v }),
   setTicker: (t) => set({ ticker: t.toUpperCase().replace(/[^A-Z.:-]/g, "") }),
