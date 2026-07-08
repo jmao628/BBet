@@ -83,7 +83,20 @@ export function SeedsView() {
                     <td className="px-3 py-2.5 text-right font-mono text-muted2">{r.followers ?? "—"}</td>
                     <td className="max-w-[300px] px-3 py-2.5">
                       {r.reasoning ? (
-                        <div className="truncate text-[12.5px]">{r.reasoning}</div>
+                        r.articleUrl ? (
+                          <a
+                            href={r.articleUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={r.reasoning}
+                            onClick={(e) => e.stopPropagation()}
+                            className="block truncate text-[12.5px] text-signal hover:underline"
+                          >
+                            {r.reasoning} ↗
+                          </a>
+                        ) : (
+                          <div className="truncate text-[12.5px]">{r.reasoning}</div>
+                        )
                       ) : (
                         <span className="text-muted2">—</span>
                       )}

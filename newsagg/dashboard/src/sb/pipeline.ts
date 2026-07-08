@@ -24,6 +24,7 @@ export interface SeedRow {
   ticker: string;
   company: string;
   reasoning: string; // article thesis / summary (only for analyst-thesis rows)
+  articleUrl: string | null; // link to the analyst's SeekingAlpha article
   evidence: string | null;
   catalyst: CatalystType; // pending real LLM classification
   role: Role; // pending real LLM classification
@@ -92,6 +93,7 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
             ticker: r.ticker,
             company: r.company ?? cmap.get(r.ticker) ?? "",
             reasoning: "",
+            articleUrl: null,
             evidence: null,
             catalyst: "unknown",
             role: "unknown",
@@ -118,7 +120,10 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
         if (r.analyst || r.article) {
           cur.hasThesis = true;
           if (r.analyst) cur.author = r.analyst;
-          if (r.article && !cur.reasoning) cur.reasoning = r.article;
+          if (r.article && !cur.reasoning) {
+            cur.reasoning = r.article;
+            cur.articleUrl = r.article_url;
+          }
         }
         map.set(r.ticker, cur);
       }
