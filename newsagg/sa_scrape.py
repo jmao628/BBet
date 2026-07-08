@@ -91,6 +91,10 @@ _HOME_WIDGETS_JS = r"""
         && !e.querySelector('a[href*="/symbol/"]') && x !== title;
     });
     if (descEl) description = norm(descEl.textContent);
+    // The description element sometimes prepends a copy of the title.
+    if (description.toLowerCase().startsWith(title.toLowerCase())) {
+      description = norm(description.slice(title.length));
+    }
 
     // Document-order walk: switch column on a group header, emit a row per ticker.
     const groups = [];
@@ -123,6 +127,14 @@ _HOME_WIDGETS_JS = r"""
       const authA = row && row.querySelector('a[href*="/author/"]');
       let company = text;
       [ticker, rating].forEach(s => { if (s) company = company.replace(s, "").trim(); });
+      // Strip trailing "RATING: STRONG BUY" / bare "STRONG BUY" labels SA
+      // appends to the row text, leaving just the company name.
+      company = company
+        .replace(/rating:\s*(strong buy|buy|hold|sell)/i, "")
+        .replace(/\b(strong buy|buy|hold|sell)\b/i, "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/[·|,\s]+$/, "")
+        .trim();
 
       if (!cur) { cur = { label: "", rows: [] }; groups.push(cur); }
       cur.rows.push({
