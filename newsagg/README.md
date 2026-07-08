@@ -53,6 +53,52 @@ Output lands in `data/newsagg/`:
 - `raw_items_YYYY-MM-DD.json` — the documents (feeds the step-2 LLM)
 - `mentions_YYYY-MM-DD.json` — per-ticker social mention counts
 
+## SeekingAlpha tracker + live web page
+
+A separate track from the RSS pipeline: scrape the **Top Performing Analysts**
+page for their **Buy / Strong Buy** calls, plus the homepage **Tech &
+Communication** ticker widgets (Latest Quant Ratings + Latest Analyst
+Coverage), and show it all on an auto-refreshing web page.
+
+These SA pages are JS-rendered and personalized behind the paywall, so we drive
+a real headless browser (Playwright) with your login cookie.
+
+### One-time setup
+
+```bash
+pip install -r newsagg/requirements.txt
+python -m playwright install chromium        # downloads the browser (~150MB)
+```
+
+Make sure `SA_COOKIE` is set in `.env` — without it, paywalled/personalized
+data may be missing.
+
+### Scrape
+
+```bash
+python -m newsagg.sa_scrape             # one scrape -> data/newsagg/seekingalpha_latest.json
+python -m newsagg.sa_scrape --watch 15  # keep re-scraping every 15 min (for the live page)
+python -m newsagg.sa_scrape --recon     # capture debug artifacts only (first run / fixing selectors)
+python -m newsagg.sa_scrape --headed    # watch the browser work (debugging)
+```
+
+Every run also writes recon artifacts to `data/newsagg/sa_debug/` — screenshots,
+rendered HTML, and every SA `/api/` JSON response. SA changes its markup often;
+if a section comes back empty, those artifacts are how we lock in exact
+extraction.
+
+### View the live page
+
+Serve the repo root and open the page — it reads
+`seekingalpha_latest.json` and auto-refreshes every 60s:
+
+```bash
+python -m http.server 8000        # run from the BBet repo root
+```
+
+Then open <http://localhost:8000/newsagg/web/>. For a truly live board, run the
+scraper in `--watch` mode in one terminal and the web server in another.
+
 ### Notes on robustness
 
 - Each collector is isolated: one failing source doesn't sink the run (errors

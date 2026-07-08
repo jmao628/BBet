@@ -5,3 +5,7 @@ beautifulsoup4>=4.12
 PyYAML>=6.0
 # Optional — only needed when schwab_youtube.fetch_transcripts is true:
 yt-dlp>=2024.1
+
+# SeekingAlpha scraper (top analysts + tech widgets + live page).
+# After installing, run once: python -m playwright install chromium
+playwright>=1.44

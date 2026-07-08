@@ -46,6 +46,9 @@ class SeekingAlphaConfig:
     fetch_full_text: bool = True
     # Login cookie string (from env SA_COOKIE). Enables paywalled full text.
     cookie: str | None = None
+    # Scraper (top-analysts page): how many top analysts to open for their
+    # Buy/Strong Buy picks. Higher = slower.
+    top_n_analysts: int = 15
 
 
 @dataclass
@@ -119,6 +122,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             tickers=[t.upper() for t in sa.get("tickers", [])],
             fetch_full_text=sa.get("fetch_full_text", True),
             cookie=os.environ.get("SA_COOKIE"),
+            top_n_analysts=sa.get("top_n_analysts", 15),
         ),
         substack=SubstackConfig(
             publications=sub.get("publications", []),

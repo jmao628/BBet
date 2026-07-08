@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SeekingAlpha Tracker</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --border: #2a313c; --text: #e6edf3;
+      --muted: #8b949e; --accent: #2f81f7; --green: #2ea043; --greenbg: #12351f;
+      --strong: #3fb950; --strongbg: #113526; --chip: #21262d;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f8fa; --panel: #ffffff; --border: #d0d7de; --text: #1f2328;
+        --muted: #636c76; --accent: #0969da; --green: #1a7f37; --greenbg: #dafbe1;
+        --strong: #1a7f37; --strongbg: #caf0d8; --chip: #eef1f4;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      position: sticky; top: 0; z-index: 10; background: var(--panel);
+      border-bottom: 1px solid var(--border); padding: 14px 20px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    }
+    header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+    .meta { color: var(--muted); font-size: 12.5px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+      display: inline-block; margin-right: 5px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    button {
+      margin-left: auto; background: var(--accent); color: #fff; border: 0;
+      padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 20px; overflow: hidden;
+    }
+    .panel > h2 {
+      font-size: 14px; margin: 0; padding: 12px 16px; font-weight: 620;
+      border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center;
+    }
+    .count { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 550; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: rgba(127,127,127,.06); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .tk { font-weight: 650; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .rank { color: var(--muted); font-variant-numeric: tabular-nums; width: 34px; }
+    .badge { font-size: 11.5px; padding: 2px 8px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+    .b-buy { background: var(--greenbg); color: var(--green); }
+    .b-strong { background: var(--strongbg); color: var(--strong); }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; padding: 14px 16px; }
+    .chip { background: var(--chip); border: 1px solid var(--border); border-radius: 7px;
+      padding: 5px 10px; font-size: 13px; display: inline-flex; gap: 7px; align-items: center; }
+    .chip .r { color: var(--muted); font-size: 11.5px; }
+    .empty { padding: 22px 16px; color: var(--muted); }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+    .err { color: #f85149; font-size: 12.5px; }
+    .truncate { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📈 SeekingAlpha Tracker</h1>
+    <span class="meta"><span class="dot"></span><span id="status">loading…</span></span>
+    <span class="meta" id="updated"></span>
+    <button id="refresh" onclick="load()">Refresh</button>
+  </header>
+
+  <main>
+    <div id="errors"></div>
+
+    <div class="panel">
+      <h2>Analyst Buy / Strong Buy Calls <span class="count" id="picks-count"></span></h2>
+      <div id="picks"></div>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h2>Tech &amp; Comm — Latest Quant Ratings <span class="count" id="quant-count"></span></h2>
+        <div id="quant"></div>
+      </div>
+      <div class="panel">
+        <h2>Tech &amp; Comm — Latest Analyst Coverage <span class="count" id="analyst-count"></span></h2>
+        <div id="analyst"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Top Performing Analysts <span class="count" id="top-count"></span></h2>
+      <div id="top"></div>
+    </div>
+  </main>
+
+  <script>
+    // Where the scraper writes its output (served from the repo root by
+    // `python -m http.server`). Adjust if you serve from a different root.
+    const DATA_URL = "/data/newsagg/seekingalpha_latest.json";
+    const REFRESH_MS = 60_000;
+
+    const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+    function ratingBadge(r) {
+      const cls = /strong/i.test(r) ? "b-strong" : "b-buy";
+      return `<span class="badge ${cls}">${esc(r)}</span>`;
+    }
+
+    function renderPicks(picks) {
+      document.getElementById("picks-count").textContent = picks.length ? `(${picks.length})` : "";
+      const el = document.getElementById("picks");
+      if (!picks.length) { el.innerHTML = `<div class="empty">No Buy/Strong Buy calls yet — run the scraper.</div>`; return; }
+      const rows = picks.map(p => `
+        <tr>
+          <td class="rank">${p.rank ?? ""}</td>
+          <td>${p.profile_url ? `<a href="${esc(p.profile_url)}" target="_blank">${esc(p.analyst)}</a>` : esc(p.analyst)}</td>
+          <td><span class="tk">${esc(p.ticker)}</span></td>
+          <td>${ratingBadge(p.rating)}</td>
+          <td class="truncate">${p.article_url ? `<a href="${esc(p.article_url)}" target="_blank">${esc(p.article_title || "article")}</a>` : esc(p.article_title || "")}</td>
+          <td class="meta">${p.published ? esc(p.published.slice(0, 10)) : ""}</td>
+        </tr>`).join("");
+      el.innerHTML = `<table><thead><tr>
+        <th>#</th><th>Analyst</th><th>Ticker</th><th>Rating</th><th>Article</th><th>Date</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderChips(id, countId, items) {
+      document.getElementById(countId).textContent = items.length ? `(${items.length})` : "";
+      const el = document.getElementById(id);
+      if (!items.length) { el.innerHTML = `<div class="empty">No tickers found.</div>`; return; }
+      el.innerHTML = `<div class="chips">${items.map(t =>
+        `<span class="chip"><a href="https://seekingalpha.com/symbol/${esc(t.ticker)}" target="_blank" class="tk">${esc(t.ticker)}</a>${t.rating ? `<span class="r">${esc(t.rating)}</span>` : ""}</span>`
+      ).join("")}</div>`;
+    }
+
+    function renderTop(analysts) {
+      document.getElementById("top-count").textContent = analysts.length ? `(${analysts.length})` : "";
+      const el = document.getElementById("top");
+      if (!analysts.length) { el.innerHTML = `<div class="empty">No analysts found.</div>`; return; }
+      const rows = analysts.slice(0, 50).map(a => `
+        <tr>
+          <td class="rank">${a.rank ?? ""}</td>
+          <td><a href="${esc(a.profile_url)}" target="_blank">${esc(a.name)}</a></td>
+        </tr>`).join("");
+      el.innerHTML = `<table><thead><tr><th>#</th><th>Analyst</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    async function load() {
+      const btn = document.getElementById("refresh");
+      btn.disabled = true;
+      try {
+        const res = await fetch(DATA_URL + "?t=" + Date.now());
+        if (!res.ok) throw new Error("no data file yet (run the scraper first)");
+        const d = await res.json();
+        renderPicks(d.analyst_picks || []);
+        renderChips("quant", "quant-count", d.tech_quant_tickers || []);
+        renderChips("analyst", "analyst-count", d.tech_analyst_tickers || []);
+        renderTop(d.top_analysts || []);
+        document.getElementById("status").textContent = "live";
+        document.getElementById("updated").textContent =
+          d.generated_at ? "updated " + new Date(d.generated_at).toLocaleString() : "";
+        document.getElementById("errors").innerHTML = (d.errors && d.errors.length)
+          ? `<div class="panel"><div class="empty err">scrape warnings: ${esc(d.errors.join("; "))}</div></div>` : "";
+      } catch (e) {
+        document.getElementById("status").textContent = "waiting for data";
+        document.getElementById("errors").innerHTML =
+          `<div class="panel"><div class="empty err">${esc(e.message)}</div></div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    load();
+    setInterval(load, REFRESH_MS);
+  </script>
+</body>
+</html>
