@@ -144,6 +144,19 @@ Then open <http://localhost:8000/newsagg/web/dashboard/> (the launchd web job
 already serves the repo root). Rebuild after pulling dashboard changes. For
 live-editing the UI: `npm run dev` (Vite on :5173, proxies data from :8000).
 
+### Schwab live stream embed
+
+The middle-top panel embeds the Schwab Network YouTube live stream. Point it at
+the channel by creating `data/newsagg/dashboard.json` (local, no rebuild needed):
+
+```json
+{ "schwabChannelId": "UCxxxxxxxxxxxxxxxxxxxxxx" }
+```
+
+Get the channel id: open the Schwab Network YouTube channel → any video → the
+channel link → the `UC…` id is in that URL (or use a "find YouTube channel id"
+site with `@SchwabNetwork`). Refresh the dashboard and the live stream appears.
+
 ## Run it daily on your Mac (local automation)
 
 Instead of running commands by hand, install two launchd jobs — a daily scrape
