@@ -238,12 +238,30 @@ class SeekingAlphaScraper:
 
             context = await launch_context(pw, self.settings, headless=not self.headed)
 
-            # Auth, most-preferred first:
-            # 1) cookie export file (sa_cookies.json) — the reliable path,
-            # 2) persistent profile from a prior manual sa_login,
-            # 3) a raw SA_COOKIE header.
-            imported = await import_cookie_file(context, self.settings)
+            # Auth strategy — keep the session self-renewing:
+            # The persistent profile stores whatever cookies SA hands back on
+            # each visit, so a session that gets rolled forward stays alive by
+            # itself as long as we scrape regularly. We therefore import the
+            # sa_cookies.json export ONLY when there's no session yet, or when
+            # the user has dropped a fresh export (file newer than our marker).
+            # Re-importing every run would keep resetting to the aging export
+            # and defeat the self-renewal.
             profile_ok = Path(profile_dir(self.settings)).joinpath("Default").exists()
+            cookies_path = self.settings.output_dir / COOKIE_FILE
+            marker = self.settings.output_dir / ".sa_cookies_imported"
+
+            fresh_export = cookies_path.exists() and (
+                not marker.exists()
+                or cookies_path.stat().st_mtime > marker.stat().st_mtime
+            )
+            imported = 0
+            if not profile_ok or fresh_export:
+                imported = await import_cookie_file(context, self.settings)
+                if imported:
+                    marker.write_text(str(cookies_path.stat().st_mtime))
+            elif profile_ok:
+                logger.info("reusing self-renewing session from persistent profile")
+
             cookie = self.settings.seekingalpha.cookie
             if not imported and not profile_ok and cookie:
                 try:
@@ -254,7 +272,7 @@ class SeekingAlphaScraper:
                 logger.warning(
                     "no auth found — drop a Cookie-Editor export at %s "
                     "(see README) for paywalled/personalized data",
-                    self.settings.output_dir / COOKIE_FILE,
+                    cookies_path,
                 )
 
             page = context.pages[0] if context.pages else await context.new_page()
