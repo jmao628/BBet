@@ -23,12 +23,15 @@ export interface SeedRow {
   followers: string | null; // pending until we join follower counts
   ticker: string;
   company: string;
-  reasoning: string; // article thesis / summary
+  reasoning: string; // article thesis / summary (only for analyst-thesis rows)
   evidence: string | null;
   catalyst: CatalystType; // pending real LLM classification
   role: Role; // pending real LLM classification
   weight: number | null; // author weight — pending whitelist join
-  rating: string | null; // raw SA rating if any
+  rating: string | null; // best display rating (BUY/STRONG BUY or quant score)
+  quant: number | null; // best numeric quant score
+  tags: string[]; // SA widgets it appears in (Quant/Coverage/Ideas/...)
+  hasThesis: boolean; // appears in "Most Compelling Analyst Ideas" (analyst wrote a bull thesis)
 }
 
 export interface UniStock {
@@ -59,36 +62,66 @@ export function companyMap(data: SAData | null): Map<string, string> {
   return m;
 }
 
-// Real Stage-1 seeds we can build today: the "Most Compelling Analyst Ideas"
-// widget gives analyst + article + Buy/Strong Buy per ticker — the closest
-// thing to a normalized bullish seed before the LLM step is wired.
+// Stage-1 seeds: every bullish SeekingAlpha ticker across all widgets, one
+// deduped row per ticker. Rows that appear in "Most Compelling Analyst Ideas"
+// (an analyst actually wrote a bull thesis) are flagged hasThesis and carry
+// the author + article; the rest are quant/coverage-list bulls. Thesis rows
+// sort first, then by quant score.
 export function buildSeeds(data: SAData | null): SeedRow[] {
   if (!data) return [];
   const cmap = companyMap(data);
-  const seeds: SeedRow[] = [];
+  const map = new Map<string, SeedRow>();
 
   for (const w of data.home_widgets) {
-    if (!w.title.toLowerCase().includes("compelling")) continue;
+    const tag = shortTag(w.title);
+    const isIdeas = w.title.toLowerCase().includes("compelling");
     for (const g of w.groups) {
       for (const r of g.rows) {
-        seeds.push({
-          src: "SeekingAlpha",
-          date: data.generated_at ? data.generated_at.slice(0, 10) : null,
-          author: r.analyst,
-          followers: null,
-          ticker: r.ticker,
-          company: r.company ?? cmap.get(r.ticker) ?? "",
-          reasoning: r.article ?? "",
-          evidence: null,
-          catalyst: "unknown",
-          role: "unknown",
-          weight: null,
-          rating: r.rating,
-        });
+        const cur: SeedRow =
+          map.get(r.ticker) ??
+          {
+            src: "SeekingAlpha",
+            date: data.generated_at ? data.generated_at.slice(0, 10) : null,
+            author: null,
+            followers: null,
+            ticker: r.ticker,
+            company: r.company ?? cmap.get(r.ticker) ?? "",
+            reasoning: "",
+            evidence: null,
+            catalyst: "unknown",
+            role: "unknown",
+            weight: null,
+            rating: null,
+            quant: null,
+            tags: [],
+            hasThesis: false,
+          };
+
+        if (!cur.tags.includes(tag)) cur.tags.push(tag);
+        if (r.company && !cur.company) cur.company = r.company;
+        if (r.rating) {
+          if (NUM_RE.test(r.rating)) {
+            const n = parseFloat(r.rating);
+            cur.quant = cur.quant == null ? n : Math.max(cur.quant, n);
+            if (!cur.rating) cur.rating = r.rating;
+          } else {
+            cur.rating = r.rating; // BUY / STRONG BUY wins for display
+          }
+        }
+        if (isIdeas) {
+          cur.hasThesis = true;
+          if (r.analyst) cur.author = r.analyst;
+          if (r.article) cur.reasoning = r.article;
+        }
+        map.set(r.ticker, cur);
       }
     }
   }
-  return seeds;
+
+  return [...map.values()].sort((a, b) => {
+    if (a.hasThesis !== b.hasThesis) return a.hasThesis ? -1 : 1;
+    return (b.quant ?? -1) - (a.quant ?? -1);
+  });
 }
 
 export function buildUniverse(data: SAData | null): UniStock[] {

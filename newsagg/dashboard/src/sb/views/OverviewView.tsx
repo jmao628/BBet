@@ -19,7 +19,11 @@ export function OverviewView() {
 
       <StatStrip
         stats={[
-          { k: "种子条数 seeds", v: seeds.length, d: "SeekingAlpha 已接入" },
+          {
+            k: "种子条数 seeds",
+            v: seeds.length,
+            d: `其中 ${seeds.filter((s) => s.hasThesis).length} 只有分析师论点`,
+          },
           { k: "热度点火 ignition", v: "—", d: "待接 X / Ape Wisdom", color: "#f2a73c" },
           { k: "通关候选 finalists", v: "—", d: "五闸全过", color: "#3dd6c4" },
           { k: "覆盖标的 universe", v: universe.length, d: "去重后 tickers" },
