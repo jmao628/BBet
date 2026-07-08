@@ -5,6 +5,8 @@
 
 # newsagg — user-specific config (watchlists); example is tracked
 newsagg/config.yaml
+# newsagg — saved login session (contains auth tokens; never commit)
+**/sa_auth.json
 
 # Python
 __pycache__/

@@ -90,15 +90,28 @@ class SeekingAlphaScraper:
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=not self.headed)
-            context = await browser.new_context(
-                user_agent=self.settings.user_agent,
-                viewport={"width": 1440, "height": 2200},
-            )
+            # Prefer a saved login session (from `python -m newsagg.sa_login`);
+            # fall back to a raw SA_COOKIE header if that's all we have.
+            auth_path = self.settings.output_dir / "sa_auth.json"
+            ctx_kwargs: dict = {
+                "user_agent": self.settings.user_agent,
+                "viewport": {"width": 1440, "height": 2200},
+            }
+            using_saved = auth_path.exists()
+            if using_saved:
+                ctx_kwargs["storage_state"] = str(auth_path)
+            context = await browser.new_context(**ctx_kwargs)
+
             cookie = self.settings.seekingalpha.cookie
-            if cookie:
+            if using_saved:
+                logger.info("using saved SA session: %s", auth_path)
+            elif cookie:
                 await context.add_cookies(parse_cookie_header(cookie))
             else:
-                logger.warning("SA_COOKIE unset — paywalled/personalized data may be missing")
+                logger.warning(
+                    "no saved session and SA_COOKIE unset — "
+                    "run `python -m newsagg.sa_login` first for paywalled data"
+                )
 
             page = await context.new_page()
             page.on("response", self._on_response)

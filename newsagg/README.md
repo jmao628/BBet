@@ -70,8 +70,20 @@ pip install -r newsagg/requirements.txt
 python -m playwright install chromium        # downloads the browser (~150MB)
 ```
 
-Make sure `SA_COOKIE` is set in `.env` — without it, paywalled/personalized
-data may be missing.
+### Connect your paid account (once)
+
+Log in once in a real browser window; the session is saved locally and reused:
+
+```bash
+python -m newsagg.sa_login
+```
+
+A browser opens — log into SeekingAlpha yourself (captcha / 2FA are fine), then
+press Enter in the terminal. Your session is saved to
+`data/newsagg/sa_auth.json` on your machine only (gitignored, never
+transmitted). The scraper picks it up automatically. Re-run this whenever the
+session expires. (Alternatively, set a raw `SA_COOKIE` in `.env`, but the login
+helper is easier and more reliable.)
 
 ### Scrape
 
