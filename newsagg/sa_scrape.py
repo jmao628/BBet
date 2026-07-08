@@ -446,12 +446,40 @@ class SeekingAlphaScraper:
         except Exception:  # noqa: BLE001
             pass
 
+    async def _load_past_block(self, page, url: str, label: str, tries: int = 3) -> bool:
+        """Navigate to a deep SA page, retrying through PerimeterX blocks.
+
+        Deep pages (my-analysts, top-analysts) are more aggressively bot-walled
+        than the homepage. A little human-like mouse movement plus a
+        reload-after-wait often clears the challenge once the session cookie is
+        present. Returns True if we landed on real content.
+        """
+        for attempt in range(1, tries + 1):
+            try:
+                for x, y in [(320, 280), (640, 520), (900, 380), (480, 680)]:
+                    await page.mouse.move(x, y)
+                    await page.wait_for_timeout(200)
+            except Exception:  # noqa: BLE001
+                pass
+            await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            await _settle(page, quiet_ms=1800)
+            title = (await page.title() or "").lower()
+            html_len = len(await page.content())
+            if "denied" not in title and "access to this page" not in title and html_len > 20_000:
+                return True
+            logger.info("%s blocked by bot wall (attempt %d/%d); waiting…", label, attempt, tries)
+            await page.wait_for_timeout(6000)
+        return False
+
     # --- My Analysts feed --------------------------------------------------
     async def _scrape_my_analysts(self, page, result: SAScrapeResult) -> None:
         """Extract recent Buy/Strong Buy articles from the analysts you follow."""
         cfg = self.settings.seekingalpha
-        await page.goto(cfg.my_analysts_url, wait_until="domcontentloaded", timeout=60_000)
-        await _settle(page)
+        if not await self._load_past_block(page, cfg.my_analysts_url, "my-analysts"):
+            await self._save_debug(page, "my_analysts")
+            logger.warning("my-analysts blocked; skipping (see sa_debug/my_analysts.*)")
+            result.errors.append("my-analysts blocked by bot wall")
+            return
         # The feed is infinite-scroll; load enough to cover the lookback window.
         for _ in range(14):
             await page.mouse.wheel(0, 2200)
