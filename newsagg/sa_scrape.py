@@ -49,6 +49,38 @@ _TICKER_HREF = re.compile(r"/symbol/([A-Z][A-Z.\-]{0,6})\b")
 _AUTHOR_HREF = re.compile(r"/author/([a-z0-9\-]+)")
 
 
+def parse_key_comparisons(captures: list[tuple[str, dict]]) -> list[dict]:
+    """Parse SA's homepage ``key_comparisons`` API response into named baskets.
+
+    The response is JSON:API: ``data`` holds each comparison (name + ticker id
+    refs), ``included`` holds the ticker objects. We resolve the refs to real
+    symbols + company names. Returns [{"name", "tickers": [{ticker, company}]}].
+    """
+    for url, body in captures:
+        if "key_comparisons?" not in url or not isinstance(body, dict):
+            continue
+        included = {
+            (i.get("type"), i.get("id")): i for i in body.get("included", []) if isinstance(i, dict)
+        }
+        baskets: list[dict] = []
+        for item in body.get("data", []):
+            name = (item.get("attributes") or {}).get("name")
+            refs = (item.get("relationships") or {}).get("tickers", {}).get("data", [])
+            tickers = []
+            for ref in refs:
+                inc = included.get(("ticker", ref.get("id")))
+                if not inc:
+                    continue
+                attrs = inc.get("attributes") or {}
+                sym = attrs.get("name")
+                if sym:
+                    tickers.append({"ticker": sym, "company": attrs.get("companyName")})
+            if name and tickers:
+                baskets.append({"name": name, "tickers": tickers})
+        return baskets
+    return []
+
+
 # --------------------------------------------------------------------------
 # cookie handling
 # --------------------------------------------------------------------------
@@ -172,8 +204,14 @@ class SeekingAlphaScraper:
     async def _scrape_homepage(self, page, result: SAScrapeResult) -> None:
         await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=60_000)
         await _settle(page)
+        # Let any in-flight API responses finish being captured before parsing.
+        await page.wait_for_timeout(1500)
         await self._save_debug(page, "homepage")
 
+        # Primary: parse the captured key_comparisons API (robust, structured).
+        result.homepage_comparisons = parse_key_comparisons(self._api_captures)
+
+        # Secondary: the two named widgets, via DOM (may be logged-in only).
         result.tech_quant_tickers = await self._extract_widget_tickers(
             page, QUANT_WIDGET_HEADING, "quant"
         )
@@ -181,7 +219,8 @@ class SeekingAlphaScraper:
             page, ANALYST_WIDGET_HEADING, "analyst"
         )
         logger.info(
-            "homepage: %d quant tickers, %d analyst tickers",
+            "homepage: %d comparison baskets, %d quant tickers, %d analyst tickers",
+            len(result.homepage_comparisons),
             len(result.tech_quant_tickers),
             len(result.tech_analyst_tickers),
         )

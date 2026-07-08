@@ -84,6 +84,9 @@ class SAScrapeResult:
     analyst_picks: list[AnalystPick] = field(default_factory=list)
     tech_quant_tickers: list[TechTicker] = field(default_factory=list)
     tech_analyst_tickers: list[TechTicker] = field(default_factory=list)
+    # Named homepage stock baskets (SA "key comparisons"): list of
+    # {"name": str, "tickers": [{"ticker": str, "company": str}]}.
+    homepage_comparisons: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -93,11 +96,13 @@ class SAScrapeResult:
             "analyst_picks": [p.to_dict() for p in self.analyst_picks],
             "tech_quant_tickers": [t.to_dict() for t in self.tech_quant_tickers],
             "tech_analyst_tickers": [t.to_dict() for t in self.tech_analyst_tickers],
+            "homepage_comparisons": self.homepage_comparisons,
             "errors": self.errors,
             "counts": {
                 "top_analysts": len(self.top_analysts),
                 "analyst_picks": len(self.analyst_picks),
                 "tech_quant_tickers": len(self.tech_quant_tickers),
                 "tech_analyst_tickers": len(self.tech_analyst_tickers),
+                "homepage_comparisons": len(self.homepage_comparisons),
             },
         }

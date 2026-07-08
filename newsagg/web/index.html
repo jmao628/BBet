@@ -101,6 +101,11 @@
       <h2>Top Performing Analysts <span class="count" id="top-count"></span></h2>
       <div id="top"></div>
     </div>
+
+    <div class="panel">
+      <h2>Homepage Stock Baskets <span class="count" id="baskets-count"></span></h2>
+      <div id="baskets"></div>
+    </div>
   </main>
 
   <script>
@@ -156,6 +161,19 @@
       el.innerHTML = `<table><thead><tr><th>#</th><th>Analyst</th></tr></thead><tbody>${rows}</tbody></table>`;
     }
 
+    function renderBaskets(baskets) {
+      document.getElementById("baskets-count").textContent = baskets.length ? `(${baskets.length})` : "";
+      const el = document.getElementById("baskets");
+      if (!baskets.length) { el.innerHTML = `<div class="empty">No baskets found.</div>`; return; }
+      el.innerHTML = baskets.map(b => `
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600;margin-bottom:8px">${esc(b.name)}</div>
+          <div class="chips" style="padding:0">${(b.tickers || []).map(t =>
+            `<span class="chip"><a href="https://seekingalpha.com/symbol/${esc(t.ticker)}" target="_blank" class="tk">${esc(t.ticker)}</a>${t.company ? `<span class="r">${esc(t.company)}</span>` : ""}</span>`
+          ).join("")}</div>
+        </div>`).join("");
+    }
+
     async function load() {
       const btn = document.getElementById("refresh");
       btn.disabled = true;
@@ -167,6 +185,7 @@
         renderChips("quant", "quant-count", d.tech_quant_tickers || []);
         renderChips("analyst", "analyst-count", d.tech_analyst_tickers || []);
         renderTop(d.top_analysts || []);
+        renderBaskets(d.homepage_comparisons || []);
         document.getElementById("status").textContent = "live";
         document.getElementById("updated").textContent =
           d.generated_at ? "updated " + new Date(d.generated_at).toLocaleString() : "";
