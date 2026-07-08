@@ -474,11 +474,37 @@ class SeekingAlphaScraper:
             await page.wait_for_timeout(6000)
         return False
 
+    async def _spa_open(self, page, href_hint: str) -> bool:
+        """Open a deep page by clicking an in-app link instead of a full load.
+
+        SA's logged-in area is a SPA, so an internal-link click routes
+        client-side (XHR only) and skips the full-document PerimeterX gate that
+        blocks direct navigation. Returns True if it landed on real content.
+        """
+        try:
+            link = await page.query_selector(
+                f'a[href*="{href_hint}"], a[href*="/account/people"], a[href*="my-analysts"]'
+            )
+            if not link:
+                return False
+            await link.scroll_into_view_if_needed()
+            await link.click()
+            await _settle(page, quiet_ms=2000)
+            title = (await page.title() or "").lower()
+            return "denied" not in title and len(await page.content()) > 20_000
+        except Exception:  # noqa: BLE001
+            return False
+
     # --- My Analysts feed --------------------------------------------------
     async def _scrape_my_analysts(self, page, result: SAScrapeResult) -> None:
         """Extract recent Buy/Strong Buy articles from the analysts you follow."""
         cfg = self.settings.seekingalpha
-        if not await self._load_past_block(page, cfg.my_analysts_url, "my-analysts"):
+        # Method A: SPA click from the current (homepage) tab — avoids the
+        # full-page load PerimeterX blocks. Method B: direct nav with retry.
+        loaded = await self._spa_open(page, "people") or await self._load_past_block(
+            page, cfg.my_analysts_url, "my-analysts"
+        )
+        if not loaded:
             await self._save_debug(page, "my_analysts")
             logger.warning("my-analysts blocked; skipping (see sa_debug/my_analysts.*)")
             result.errors.append("my-analysts blocked by bot wall")
@@ -537,12 +563,15 @@ class SeekingAlphaScraper:
         except Exception as exc:  # noqa: BLE001
             logger.warning("home widget extraction failed: %s", exc)
             return []
-        # Drop widgets/groups with no rows; cap runaway rows defensively.
+        # Keep real groups only. A homepage widget column holds ~10 rows; a
+        # group with far more means the container-climb over-grabbed a whole
+        # page section, so drop it rather than pollute the seed table.
+        MAX_GROUP_ROWS = 20
         clean = []
         for w in widgets or []:
-            groups = [g for g in w.get("groups", []) if g.get("rows")]
-            for g in groups:
-                g["rows"] = g["rows"][:60]
+            groups = [
+                g for g in w.get("groups", []) if g.get("rows") and len(g["rows"]) <= MAX_GROUP_ROWS
+            ]
             if groups:
                 clean.append(
                     {"title": w.get("title", ""), "description": w.get("description", ""), "groups": groups}
