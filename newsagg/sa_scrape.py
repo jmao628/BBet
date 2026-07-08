@@ -362,7 +362,9 @@ class SeekingAlphaScraper:
 
             try:
                 await self._scrape_homepage(page, result)
-                await self._scrape_my_analysts(page, result)
+                # My Analysts (/account/people) is hard-blocked by PerimeterX on
+                # direct load; disabled — homepage widgets already carry broad
+                # analyst coverage. (_scrape_my_analysts remains for later use.)
                 await self._scrape_top_analysts(page, result)
             except Exception as exc:  # noqa: BLE001 — keep whatever we got
                 logger.exception("scrape error")
@@ -563,15 +565,15 @@ class SeekingAlphaScraper:
         except Exception as exc:  # noqa: BLE001
             logger.warning("home widget extraction failed: %s", exc)
             return []
-        # Keep real groups only. A homepage widget column holds ~10 rows; a
-        # group with far more means the container-climb over-grabbed a whole
-        # page section, so drop it rather than pollute the seed table.
-        MAX_GROUP_ROWS = 20
+        # A homepage widget column holds ~10 rows. Cap each group to bound the
+        # occasional over-grab (container-climb swallowing a whole section)
+        # WITHOUT dropping the widget — dropping could zero out the homepage.
+        MAX_GROUP_ROWS = 15
         clean = []
         for w in widgets or []:
-            groups = [
-                g for g in w.get("groups", []) if g.get("rows") and len(g["rows"]) <= MAX_GROUP_ROWS
-            ]
+            groups = [g for g in w.get("groups", []) if g.get("rows")]
+            for g in groups:
+                g["rows"] = g["rows"][:MAX_GROUP_ROWS]
             if groups:
                 clean.append(
                     {"title": w.get("title", ""), "description": w.get("description", ""), "groups": groups}
