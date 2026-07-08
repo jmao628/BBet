@@ -55,3 +55,9 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# newsagg dashboard (React app) — build locally
+newsagg/dashboard/node_modules/
+newsagg/dashboard/dist/
+newsagg/web/dashboard/
+newsagg/dashboard/tsconfig.tsbuildinfo

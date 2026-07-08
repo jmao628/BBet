@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Trading-terminal theme tokens. */
+@theme {
+  --color-term-bg: #0a0e14;
+  --color-term-panel: #0d131c;
+  --color-term-panel2: #0f1621;
+  --color-term-border: #1c2530;
+  --color-term-line: #161d27;
+  --color-term-text: #d4dae3;
+  --color-term-muted: #6b7684;
+  --color-term-accent: #3b82f6;
+  --color-term-up: #22c55e;
+  --color-term-down: #ef4444;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-term-bg);
+  color: var(--color-term-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin terminal-style scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #263140 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #263140;
+  border-radius: 4px;
+}

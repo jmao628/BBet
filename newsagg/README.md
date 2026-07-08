@@ -116,6 +116,34 @@ python -m http.server 8000        # run from the BBet repo root
 Then open <http://localhost:8000/newsagg/web/>. For a truly live board, run the
 scraper in `--watch` mode in one terminal and the web server in another.
 
+## Dashboard (React + TS + Tailwind)
+
+A single-page, full-screen trading-terminal dashboard lives in
+`newsagg/dashboard/`. Three columns (25% / 45% / 30%), dark theme, a slim
+header with a live clock + global ticker input, and panels:
+
+| Column | Panel | Data |
+|---|---|---|
+| Left | SeekingAlpha Feed | live (scraped widgets) |
+| Middle top | Schwab Live Stream | placeholder (source not wired) |
+| Middle bottom | Live Caption & Signal | placeholder |
+| Right top | X (Twitter) Ticker | driven by the header ticker input |
+| Right bottom | Stock Ranking | live (all tickers, sortable) |
+
+State is a Zustand store; the data layer polls `seekingalpha_latest.json` every
+15s (swap to WebSocket/SSE once a streaming source exists). Build it into the
+folder the local `http.server` already serves:
+
+```bash
+cd newsagg/dashboard
+npm install          # first time (use a mirror if slow: npm config set registry https://registry.npmmirror.com)
+npm run build        # outputs to ../web/dashboard/
+```
+
+Then open <http://localhost:8000/newsagg/web/dashboard/> (the launchd web job
+already serves the repo root). Rebuild after pulling dashboard changes. For
+live-editing the UI: `npm run dev` (Vite on :5173, proxies data from :8000).
+
 ## Run it daily on your Mac (local automation)
 
 Instead of running commands by hand, install two launchd jobs — a daily scrape
