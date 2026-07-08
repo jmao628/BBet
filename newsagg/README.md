@@ -116,6 +116,36 @@ python -m http.server 8000        # run from the BBet repo root
 Then open <http://localhost:8000/newsagg/web/>. For a truly live board, run the
 scraper in `--watch` mode in one terminal and the web server in another.
 
+## Run it daily on your Mac (local automation)
+
+Instead of running commands by hand, install two launchd jobs — a daily scrape
+and an always-on local web server:
+
+```bash
+bash newsagg/deploy/install_mac.sh          # daily scrape at 09:00 local
+bash newsagg/deploy/install_mac.sh 7        # ...or pick the hour (07:00)
+```
+
+This installs:
+- **com.newsagg.scrape** — runs `sa_scrape` once a day (catches up on wake if
+  the Mac was asleep at the scheduled time).
+- **com.newsagg.web** — keeps the page live at <http://localhost:8000/newsagg/web/>
+  whenever you're logged in.
+
+Populate it immediately without waiting for the schedule:
+
+```bash
+launchctl start com.newsagg.scrape
+```
+
+Logs land in `data/newsagg/logs/`. Remove everything with
+`bash newsagg/deploy/uninstall_mac.sh`.
+
+**Cookie refresh:** your SeekingAlpha session (`sa_cookies.json`) expires after
+a few weeks. When the page stops updating, re-export cookies (see above) and the
+next daily run picks them up. Everything runs on your machine, so the page is
+only reachable while your Mac is on and logged in.
+
 ### Notes on robustness
 
 - Each collector is isolated: one failing source doesn't sink the run (errors
