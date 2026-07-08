@@ -1,45 +1,41 @@
-import { Header } from "./components/Header";
-import { SeekingAlphaPanel } from "./components/SeekingAlphaPanel";
-import { SchwabStreamPanel } from "./components/SchwabStreamPanel";
-import { CaptionSignalPanel } from "./components/CaptionSignalPanel";
-import { XTickerPanel } from "./components/XTickerPanel";
-import { RankingPanel } from "./components/RankingPanel";
+import { useStore } from "./store";
 import { usePoller } from "./lib/usePoller";
+import { TopBar } from "./sb/TopBar";
+import { FunnelRail } from "./sb/FunnelRail";
+import { OverviewView } from "./sb/views/OverviewView";
+import { SeedsView } from "./sb/views/SeedsView";
+import {
+  HeatView,
+  ScreenView,
+  CatalystView,
+  ConvictionView,
+  TechnicalView,
+  CandidatesView,
+} from "./sb/views/StageViews";
+
+const VIEWS = {
+  overview: OverviewView,
+  seeds: SeedsView,
+  heat: HeatView,
+  screen: ScreenView,
+  catalyst: CatalystView,
+  conviction: ConvictionView,
+  technical: TechnicalView,
+  candidates: CandidatesView,
+} as const;
 
 export default function App() {
   usePoller();
+  const view = useStore((s) => s.view);
+  const View = VIEWS[view];
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-term-bg text-term-text">
-      <Header />
-
-      {/* 3-column grid: 25% / 45% / 30%, each region scrolls on its own. */}
-      <div className="grid min-h-0 flex-1 grid-cols-[25%_45%_30%] overflow-hidden">
-        {/* Left column */}
-        <div className="min-h-0 border-r border-term-border">
-          <SeekingAlphaPanel />
-        </div>
-
-        {/* Middle column: stacked halves */}
-        <div className="grid min-h-0 grid-rows-2 overflow-hidden border-r border-term-border">
-          <div className="min-h-0 border-b border-term-border">
-            <SchwabStreamPanel />
-          </div>
-          <div className="min-h-0">
-            <CaptionSignalPanel />
-          </div>
-        </div>
-
-        {/* Right column: stacked halves */}
-        <div className="grid min-h-0 grid-rows-2 overflow-hidden">
-          <div className="min-h-0 border-b border-term-border">
-            <XTickerPanel />
-          </div>
-          <div className="min-h-0">
-            <RankingPanel />
-          </div>
-        </div>
-      </div>
+    <div className="grid h-screen w-screen grid-cols-[264px_1fr] grid-rows-[56px_1fr] overflow-hidden">
+      <TopBar />
+      <FunnelRail />
+      <main className="overflow-y-auto px-7 py-6">
+        <View />
+      </main>
     </div>
   );
 }

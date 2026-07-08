@@ -3,13 +3,25 @@ import type { HomeWidget, SAData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 
+export type ViewKey =
+  | "overview"
+  | "seeds"
+  | "heat"
+  | "screen"
+  | "catalyst"
+  | "conviction"
+  | "technical"
+  | "candidates";
+
 interface DashboardState {
   data: SAData | null;
   status: ConnStatus;
   lastUpdated: number | null; // epoch ms of last successful fetch
-  ticker: string; // global ticker, drives the X panel + ranking highlight
+  view: ViewKey; // active view in the funnel
+  ticker: string; // focused ticker (search / row click)
   setData: (d: SAData) => void;
   setStatus: (s: ConnStatus) => void;
+  setView: (v: ViewKey) => void;
   setTicker: (t: string) => void;
 }
 
@@ -17,9 +29,11 @@ export const useStore = create<DashboardState>((set) => ({
   data: null,
   status: "connecting",
   lastUpdated: null,
+  view: "overview",
   ticker: "",
   setData: (d) => set({ data: d, status: "live", lastUpdated: Date.now() }),
   setStatus: (s) => set({ status: s }),
+  setView: (v) => set({ view: v }),
   setTicker: (t) => set({ ticker: t.toUpperCase().replace(/[^A-Z.:-]/g, "") }),
 }));
 

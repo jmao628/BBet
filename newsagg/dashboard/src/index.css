@@ -1,18 +1,30 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 
-/* Trading-terminal theme tokens. */
+/* SuperBeta terminal theme (ported from the design mockup). */
 @theme {
-  --color-term-bg: #0a0e14;
-  --color-term-panel: #0d131c;
-  --color-term-panel2: #0f1621;
-  --color-term-border: #1c2530;
-  --color-term-line: #161d27;
-  --color-term-text: #d4dae3;
-  --color-term-muted: #6b7684;
-  --color-term-accent: #3b82f6;
-  --color-term-up: #22c55e;
-  --color-term-down: #ef4444;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --color-ink: #0a0e15;
+  --color-panel: #111824;
+  --color-panel2: #0d131c;
+  --color-inset: #0b1017;
+  --color-line: #1c2734;
+  --color-line2: #293a4e;
+  --color-text: #e7edf4;
+  --color-muted: #8a9aac;
+  --color-muted2: #5a6a7c;
+  --color-dead: #5c7c99;
+  --color-ignite: #f2a73c;
+  --color-detonate: #ff5a78;
+  --color-signal: #3dd6c4;
+  --color-ok: #5bc48c;
+  --color-warn: #e7b84c;
+  --color-bad: #e5636b;
+  --color-gold: #e9c46a;
+
+  --font-disp:
+    "Space Grotesk", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 html,
@@ -23,22 +35,27 @@ body,
 }
 
 body {
-  background: var(--color-term-bg);
-  color: var(--color-term-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-ink);
+  color: var(--color-text);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-/* Thin terminal-style scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #263140 transparent;
+  scrollbar-color: #293a4e transparent;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #263140;
-  border-radius: 4px;
+  background: #293a4e;
+  border-radius: 5px;
+  border: 2px solid var(--color-ink);
 }
