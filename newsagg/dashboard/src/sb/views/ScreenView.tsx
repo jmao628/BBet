@@ -1,8 +1,14 @@
 import { useMemo } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, capLabel } from "../pipeline";
+import { buildScreen, buildUniverse, capLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
+
+const GRP_COLOR: Record<string, string> = {
+  upstream: "#5fb0e8",
+  downstream: "#48c78e",
+  peers: "#e9c46a",
+};
 
 const PHASE_L: Record<string, { en: string; zh: string }> = {
   detonate: { en: "Detonate", zh: "引爆" },
@@ -25,6 +31,7 @@ export function ScreenView() {
   const heat = useStore((s) => s.heat);
   const technical = useStore((s) => s.technical);
   const marketCaps = useStore((s) => s.marketCaps);
+  const supplychain = useStore((s) => s.supplychain);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
@@ -33,6 +40,32 @@ export function ScreenView() {
     () => buildScreen(data, heat, marketCaps, technical),
     [data, heat, marketCaps, technical],
   );
+
+  // Ecosystem network: which universe tickers connect to OTHER universe tickers.
+  // Those are the ones worth building a graph around (they share a supply chain).
+  const links = useMemo(() => {
+    if (!supplychain) return [];
+    const uni = buildUniverse(data);
+    const inUni = new Set(uni.map((u) => u.ticker));
+    const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
+    type Neighbor = { ticker: string; kind: string };
+    const rows: { ticker: string; company: string; neighbors: Neighbor[] }[] = [];
+    for (const [tk, m] of Object.entries(supplychain)) {
+      const seen = new Set<string>();
+      const neighbors: Neighbor[] = [];
+      for (const kind of ["upstream", "downstream", "peers"] as const) {
+        for (const e of m[kind] ?? []) {
+          if (e.ticker && e.ticker !== tk && inUni.has(e.ticker) && !seen.has(e.ticker)) {
+            seen.add(e.ticker);
+            neighbors.push({ ticker: e.ticker, kind });
+          }
+        }
+      }
+      if (neighbors.length) rows.push({ ticker: tk, company: companyOf.get(tk) ?? "", neighbors });
+    }
+    rows.sort((a, b) => b.neighbors.length - a.neighbors.length);
+    return rows;
+  }, [supplychain, data]);
 
   return (
     <div className="view-in">
@@ -53,6 +86,61 @@ export function ScreenView() {
           { k: t("Candidates", "发现候选"), v: candidates.length, d: t("+ author quality", "+ 作者质量二段"), color: "#3dd6c4" },
         ]}
       />
+
+      {supplychain && (
+        <div className="mb-4">
+        <Card
+          title={t("Ecosystem Links", "生态关联网络")}
+          sub={
+            links.length
+              ? t(`${links.length} tickers connect to others in your universe`, `${links.length} 只与你 universe 内其它票有关联`)
+              : t("no cross-universe links mapped yet", "尚未映射到跨 universe 关联")
+          }
+          right={<MethodInfo />}
+        >
+          {links.length === 0 ? (
+            <div className="py-6 text-center text-[12.5px] text-muted">
+              {t(
+                "Once more tickers are mapped (python -m newsagg.supplychain), the ones whose suppliers/customers/peers are also in your universe show up here — the interconnected cluster worth focusing on.",
+                "等映射了更多票（python -m newsagg.supplychain），那些上下游/同业也落在你 universe 内的票会出现在这里——就是值得重点看的相互关联簇。",
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {links.map((r) => (
+                <div
+                  key={r.ticker}
+                  onClick={() => openDetail(r.ticker)}
+                  className="flex cursor-pointer flex-wrap items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-2 hover:bg-white/[0.04]"
+                >
+                  <span className="font-mono text-[13px] font-semibold text-signal">{r.ticker}</span>
+                  {r.company && <span className="text-[11px] text-muted">{r.company.slice(0, 22)}</span>}
+                  <span className="ml-auto flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-[10.5px] text-muted2">
+                      {t(`${r.neighbors.length} links`, `${r.neighbors.length} 关联`)}
+                    </span>
+                    {r.neighbors.map((n) => (
+                      <button
+                        key={n.ticker}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDetail(n.ticker);
+                        }}
+                        className="rounded-full border px-2 py-0.5 font-mono text-[11px] font-medium"
+                        style={{ color: GRP_COLOR[n.kind], borderColor: `${GRP_COLOR[n.kind]}66`, background: `${GRP_COLOR[n.kind]}14` }}
+                        title={n.kind}
+                      >
+                        {n.ticker}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        </div>
+      )}
 
       <Card
         title={t("Candidates", "发现候选 · Candidates")}

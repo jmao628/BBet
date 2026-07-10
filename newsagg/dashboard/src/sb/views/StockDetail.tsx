@@ -190,8 +190,9 @@ function SupplyChainGraph({
     }),
   );
 
-  const nodeW = 96;
+  const nodeW = 100;
   const nodeH = 30;
+  const inUni = (e: SupplyEdge) => !!e.ticker && e.ticker !== ticker && inUniverse.has(e.ticker);
 
   return (
     <div className="rounded-xl border border-line bg-panel2 p-4">
@@ -208,27 +209,39 @@ function SupplyChainGraph({
       </div>
       <div className="mb-2 text-[11px] leading-relaxed text-muted2">
         {t(
-          "AI-derived, major relationships only — not exhaustive. Glowing nodes are in your Buy universe (click to open).",
-          "AI 推断，仅列主要关系，非穷举。发光的节点在你的 Buy universe 内（点击可进入）。",
+          "AI-derived, major relationships only — not exhaustive. A node with a ↗ badge is in your Buy universe — click it (or its card below) to open that ticker.",
+          "AI 推断，仅列主要关系，非穷举。带 ↗ 角标的节点在你的 Buy universe 内——点它（或下方卡片）即可跳到那只票。",
         )}
         {map.model ? ` · ${map.model}` : ""}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: "100%" }}>
         {/* connectors */}
-        {nodes.map((nd, i) => (
-          <line key={`l${i}`} x1={cx} y1={cy} x2={nd.x} y2={nd.y} stroke={`${nd.color}55`} strokeWidth="1.4" />
-        ))}
+        {nodes.map((nd, i) => {
+          const hot = inUni(nd.edge);
+          return (
+            <line
+              key={`l${i}`}
+              x1={cx}
+              y1={cy}
+              x2={nd.x}
+              y2={nd.y}
+              stroke={hot ? nd.color : `${nd.color}44`}
+              strokeWidth={hot ? 2 : 1.1}
+            />
+          );
+        })}
         {/* center node */}
         <g>
           <rect
-            x={cx - 58}
-            y={cy - 20}
-            width={116}
-            height={40}
+            x={cx - 60}
+            y={cy - 21}
+            width={120}
+            height={42}
             rx={10}
             fill="#0e2a3a"
             stroke="#3dd6c4"
             strokeWidth="2"
+            style={{ filter: "drop-shadow(0 0 8px #3dd6c477)" }}
           />
           <text x={cx} y={cy - 2} textAnchor="middle" fontSize="15" fontWeight="700" fill="#3dd6c4">
             {ticker}
@@ -239,8 +252,10 @@ function SupplyChainGraph({
         </g>
         {/* spoke nodes */}
         {nodes.map((nd, i) => {
-          const hot = !!nd.edge.ticker && inUniverse.has(nd.edge.ticker);
+          const hot = inUni(nd.edge);
           const label = nd.edge.ticker || nd.edge.name.slice(0, 12);
+          const rx = nd.x + nodeW / 2;
+          const ry = nd.y - nodeH / 2;
           return (
             <g
               key={`n${i}`}
@@ -256,30 +271,91 @@ function SupplyChainGraph({
                 width={nodeW}
                 height={nodeH}
                 rx={8}
-                fill={hot ? `${nd.color}22` : "#14202b"}
-                stroke={nd.color}
-                strokeWidth={hot ? 2 : 1}
-                style={hot ? { filter: `drop-shadow(0 0 5px ${nd.color}aa)` } : undefined}
+                fill={hot ? `${nd.color}2b` : "#131c25"}
+                stroke={hot ? nd.color : `${nd.color}3a`}
+                strokeWidth={hot ? 2.5 : 1}
+                style={hot ? { filter: `drop-shadow(0 0 7px ${nd.color})` } : undefined}
               />
               <text
                 x={nd.x}
-                y={nd.y - 1}
+                y={nd.edge.ticker && nd.edge.name ? nd.y - 1 : nd.y + 3.5}
                 textAnchor="middle"
                 fontSize="11"
                 fontWeight={hot ? 700 : 500}
-                fill={hot ? nd.color : "#c7d2dc"}
+                fill={hot ? "#fff" : "#8695a3"}
               >
                 {label}
               </text>
               {nd.edge.ticker && nd.edge.name && (
-                <text x={nd.x} y={nd.y + 10} textAnchor="middle" fontSize="7.5" fill="#7c8a97">
+                <text
+                  x={nd.x}
+                  y={nd.y + 10}
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill={hot ? nd.color : "#5f6d7a"}
+                >
                   {nd.edge.name.slice(0, 16)}
                 </text>
+              )}
+              {hot && (
+                <>
+                  <circle cx={rx - 3} cy={ry + 3} r="8" fill={nd.color} />
+                  <text x={rx - 3} y={ry + 6.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#0c141b">
+                    ↗
+                  </text>
+                </>
               )}
             </g>
           );
         })}
       </svg>
+
+      {/* relationship reader — every edge with its reason, always visible */}
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {groups.map((g) => (
+          <div key={g.key}>
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: SC_GROUPS[g.key].color }}>
+              <span className="h-2 w-2 rounded-full" style={{ background: SC_GROUPS[g.key].color }} />
+              {lbl({ ...SC_GROUPS[g.key] }, lang)}
+              <span className="text-muted2">· {g.edges.length}</span>
+            </div>
+            <div className="space-y-1.5">
+              {g.edges.length === 0 && <div className="text-[11px] text-muted2">—</div>}
+              {g.edges.map((e, i) => {
+                const hot = inUni(e);
+                return (
+                  <div
+                    key={i}
+                    onClick={hot ? () => openDetail(e.ticker) : undefined}
+                    className={`rounded-lg border px-2.5 py-1.5 ${
+                      hot
+                        ? "cursor-pointer border-line2 bg-white/[0.04] hover:bg-white/[0.08]"
+                        : "border-line bg-panel"
+                    }`}
+                    style={hot ? { borderColor: `${SC_GROUPS[g.key].color}66` } : undefined}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[12px] font-semibold" style={{ color: hot ? SC_GROUPS[g.key].color : "#c7d2dc" }}>
+                        {e.ticker || e.name.slice(0, 14)}
+                      </span>
+                      {hot && (
+                        <span
+                          className="rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold"
+                          style={{ color: "#0c141b", background: SC_GROUPS[g.key].color }}
+                        >
+                          {t("open ↗", "打开 ↗")}
+                        </span>
+                      )}
+                    </div>
+                    {e.ticker && e.name && <div className="text-[10.5px] text-muted">{e.name}</div>}
+                    {e.reason && <div className="mt-0.5 text-[11px] leading-snug text-muted2">{e.reason}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
