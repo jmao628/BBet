@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useStore } from "../../store";
+import { useStore, useT } from "../../store";
 import { buildSeeds, buildUniverse, buildRankings, buildScreen } from "../pipeline";
 import { ViewHead, StatStrip, Card, Chip, TickerCell } from "../ui";
 import { FUNNEL } from "../nav";
@@ -11,6 +11,8 @@ export function OverviewView() {
   const marketCaps = useStore((s) => s.marketCaps);
   const setView = useStore((s) => s.setView);
   const openDetail = useStore((s) => s.openDetail);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
   const seeds = buildSeeds(data);
   const universe = buildUniverse(data);
 
@@ -36,38 +38,41 @@ export function OverviewView() {
   const ready = (k: string) => counts[k] != null;
 
   return (
-    <div>
+    <div className="view-in">
       <ViewHead
-        eyebrow={`Discovery run · ${data?.generated_at?.slice(0, 10) ?? "—"}`}
-        title="发现机器 · 当日运行总览"
-        desc="从看多种子表出发，经多维排名择时（量价注意力 / 放量 / 动量 / 社交热度）→ 发现筛选 → 催化剂 → 管理层 conviction → Boll 技术，收敛出「即将被发现」的中小盘做多候选。"
+        eyebrow={`Discovery Run · ${data?.generated_at?.slice(0, 10) ?? "—"}`}
+        title={t("Discovery Machine · Today's Run", "发现机器 · 当日运行总览")}
+        desc={t(
+          "From the bullish seed table, through multi-lens timing (attention / volume / momentum / social) → screen → catalyst → management conviction → Bollinger, converging on mid/small caps about to be discovered.",
+          "从看多种子表出发，经多维排名择时（量价注意力 / 放量 / 动量 / 社交热度）→ 发现筛选 → 催化剂 → 管理层 conviction → Boll 技术，收敛出「即将被发现」的中小盘做多候选。",
+        )}
       />
 
       <StatStrip
         stats={[
           {
-            k: "种子条数 seeds",
+            k: t("Seeds", "种子条数"),
             v: seeds.length,
-            d: `其中 ${seeds.filter((s) => s.hasThesis).length} 只有分析师论点`,
+            d: t(`${seeds.filter((s) => s.hasThesis).length} with analyst thesis`, `其中 ${seeds.filter((s) => s.hasThesis).length} 只有分析师论点`),
           },
           {
-            k: "入选下一轮 ignition",
+            k: t("Advancing", "入选下一轮"),
             v: advancing ?? "—",
-            d: hasSignals ? "各维度前 10 的并集" : "待跑 technical / heat",
+            d: hasSignals ? t("union of per-lens top-10", "各维度前 10 的并集") : t("run technical / heat", "待跑 technical / heat"),
             color: "#f2a73c",
           },
           {
-            k: "发现候选 screen",
+            k: t("Candidates", "发现候选"),
             v: candidates ?? "—",
-            d: hasSignals ? "入选 + 作者质量" : "待上游接入",
+            d: hasSignals ? t("advancing + author quality", "入选 + 作者质量") : t("awaiting upstream", "待上游接入"),
             color: "#3dd6c4",
           },
-          { k: "覆盖标的 universe", v: universe.length, d: "去重后 tickers" },
+          { k: t("Universe", "覆盖标的"), v: universe.length, d: t("deduped tickers", "去重后 tickers") },
         ]}
       />
 
       <div className="grid gap-4">
-        <Card title="漏斗状态 · Pipeline" sub="各层数据接入进度" pad0>
+        <Card title={t("Pipeline Status", "漏斗状态 · Pipeline")} sub={t("data wiring per stage", "各层数据接入进度")} pad0>
           <table className="w-full text-[13px]">
             <tbody>
               {FUNNEL.map((s) => {
@@ -81,14 +86,14 @@ export function OverviewView() {
                   >
                     <td className="px-4 py-2.5">
                       <span className="mr-2 font-mono text-muted2">{s.step}</span>
-                      {s.lbl}
-                      <span className="ml-2 text-[11px] text-muted2">{s.sub}</span>
+                      {lang === "zh" ? s.zh : s.en}
+                      <span className="ml-2 text-[11px] text-muted2">{lang === "zh" ? s.en : s.zh}</span>
                     </td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums text-muted">
                       {c != null ? c : ""}
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      {r ? <Chip kind="ok">已接入</Chip> : <Chip kind="wait">待接入计算</Chip>}
+                      {r ? <Chip kind="ok">{t("wired", "已接入")}</Chip> : <Chip kind="wait">{t("pending", "待接入计算")}</Chip>}
                     </td>
                   </tr>
                 );
@@ -97,16 +102,16 @@ export function OverviewView() {
           </table>
         </Card>
 
-        <Card title="种子 universe · 覆盖标的" sub={`${universe.length} 只 · 按 Quant 分排序`} pad0>
+        <Card title={t("Seed Universe", "种子 universe · 覆盖标的")} sub={t(`${universe.length} names · by Quant score`, `${universe.length} 只 · 按 Quant 分排序`)} pad0>
           {universe.length === 0 ? (
-            <div className="p-6 text-center text-[13px] text-muted">暂无数据，运行抓取器后填充。</div>
+            <div className="p-6 text-center text-[13px] text-muted">{t("No data yet — run the scraper.", "暂无数据，运行抓取器后填充。")}</div>
           ) : (
             <div className="max-h-[420px] overflow-y-auto">
               <table className="w-full text-[13px]">
                 <thead className="sticky top-0 bg-panel">
                   <tr className="text-[11px] uppercase tracking-wide text-muted2">
-                    <th className="px-4 py-2 text-left font-medium">标的</th>
-                    <th className="px-4 py-2 text-left font-medium">来源板块</th>
+                    <th className="px-4 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
+                    <th className="px-4 py-2 text-left font-medium">{t("Source lists", "来源板块")}</th>
                     <th className="px-4 py-2 text-right font-medium">Quant</th>
                   </tr>
                 </thead>

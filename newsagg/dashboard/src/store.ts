@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData, SectorData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
+export type Lang = "en" | "zh";
 
 export type ViewKey =
   | "overview"
@@ -25,6 +26,7 @@ interface DashboardState {
   view: ViewKey; // active view in the funnel
   ticker: string; // focused ticker (search / row click)
   detail: string | null; // ticker whose full detail page is open (overlay)
+  lang: Lang; // UI language (default English)
   setData: (d: SAData) => void;
   setHeat: (h: HeatData | null) => void;
   setTechnical: (t: TechnicalData | null) => void;
@@ -36,6 +38,7 @@ interface DashboardState {
   setTicker: (t: string) => void;
   openDetail: (t: string) => void;
   closeDetail: () => void;
+  toggleLang: () => void;
 }
 
 export const useStore = create<DashboardState>((set) => ({
@@ -50,6 +53,7 @@ export const useStore = create<DashboardState>((set) => ({
   view: "overview",
   ticker: "",
   detail: null,
+  lang: "en",
   setData: (d) => set({ data: d, status: "live", lastUpdated: Date.now() }),
   setHeat: (h) => set({ heat: h }),
   setTechnical: (t) => set({ technical: t }),
@@ -61,7 +65,14 @@ export const useStore = create<DashboardState>((set) => ({
   setTicker: (t) => set({ ticker: t.toUpperCase().replace(/[^A-Z.:-]/g, "") }),
   openDetail: (t) => set({ detail: t.toUpperCase().replace(/[^A-Z.:-]/g, "") }),
   closeDetail: () => set({ detail: null }),
+  toggleLang: () => set((s) => ({ lang: s.lang === "en" ? "zh" : "en" })),
 }));
+
+// i18n helper: `const t = useT(); t("English", "中文")`. Default is English.
+export const useT = () => {
+  const lang = useStore((s) => s.lang);
+  return (en: string, zh: string) => (lang === "zh" ? zh : en);
+};
 
 // Stable empty reference: selectors must NOT return a fresh `?? []` each call,
 // or useSyncExternalStore sees a new snapshot every render → infinite loop.

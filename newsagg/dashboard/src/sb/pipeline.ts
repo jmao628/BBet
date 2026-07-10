@@ -25,6 +25,12 @@ export function sectorCN(sector: string | undefined): string {
   return SECTOR_CN[sector] ?? sector;
 }
 
+// Lang-aware label: English keeps yfinance's own English sector; Chinese maps it.
+export function sectorLabel(sector: string | undefined, lang: "en" | "zh"): string {
+  if (!sector) return lang === "zh" ? "其他" : "—";
+  return lang === "zh" ? SECTOR_CN[sector] ?? sector : sector;
+}
+
 export type CatalystType =
   | "earnings"
   | "guidance"
@@ -283,10 +289,15 @@ export interface RankItem {
   advancing: boolean; // inTop || strongBuy
 }
 
+export interface BiText {
+  en: string;
+  zh: string;
+}
+
 export interface Ranking {
   key: string;
-  label: string;
-  desc: string;
+  label: BiText;
+  desc: BiText;
   rows: RankItem[];
 }
 
@@ -309,8 +320,8 @@ export interface RankBundle {
 
 interface Lens {
   key: string;
-  label: string;
-  desc: string;
+  label: BiText;
+  desc: BiText;
   min: number; // value must clear this to count as "ignited" (else stays dim)
   get: (t: string) => number | null;
   fmt: (v: number) => string;
@@ -344,35 +355,38 @@ export function buildRankings(
   const lenses: Lens[] = [
     {
       key: "attention",
-      label: "量价注意力",
-      desc: "RVOL + 突破 + OBV + 趋势 综合分,达标线 50",
+      label: { en: "Price-Volume Attention", zh: "量价注意力" },
+      desc: {
+        en: "RVOL + breakout + OBV + trend composite · bar 50",
+        zh: "RVOL + 突破 + OBV + 趋势 综合分,达标线 50",
+      },
       min: 50,
       get: (t) => attn(t)?.score ?? null,
-      fmt: (v) => `${Math.round(v)} 分`,
+      fmt: (v) => `${Math.round(v)}`,
       // The score is coarse (many tie at 60) — break ties by RVOL then momentum
       // so who lands in the top-10 is meaningful, not arbitrary.
       tie: (t) => (attn(t)?.rvol ?? 0) + (momentum(t) ?? 0) / 1000,
     },
     {
       key: "rvol",
-      label: "放量 RVOL",
-      desc: "近 5 日 / 20 日均量,达标线 1.5×",
+      label: { en: "Relative Volume", zh: "放量 RVOL" },
+      desc: { en: "5-day / 20-day avg volume · bar 1.5×", zh: "近 5 日 / 20 日均量,达标线 1.5×" },
       min: 1.5,
       get: (t) => attn(t)?.rvol ?? null,
       fmt: (v) => `${v.toFixed(2)}×`,
     },
     {
       key: "momentum",
-      label: "动量 60 日",
-      desc: "近 60 个交易日涨幅,达标线 +10%",
+      label: { en: "Momentum 60d", zh: "动量 60 日" },
+      desc: { en: "Return over last 60 trading days · bar +10%", zh: "近 60 个交易日涨幅,达标线 +10%" },
       min: 10,
       get: (t) => momentum(t),
       fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`,
     },
     {
       key: "social",
-      label: "社交热度",
-      desc: "Ape Wisdom z 分数,达标线 0.5(点火线)",
+      label: { en: "Social Heat", zh: "社交热度" },
+      desc: { en: "Ape Wisdom z-score · bar 0.5 (ignite)", zh: "Ape Wisdom z 分数,达标线 0.5(点火线)" },
       min: 0.5,
       get: (t) => heat?.tickers?.[t]?.z ?? null,
       fmt: (v) => v.toFixed(2),
@@ -552,3 +566,30 @@ export const ROLE_CN: Record<Role, string> = {
   downstream: "下游",
   unknown: "待定",
 };
+
+export const CATALYST_EN: Record<CatalystType, string> = {
+  earnings: "Earnings",
+  guidance: "Guidance",
+  new_order: "New Order",
+  policy: "Policy",
+  m_and_a: "M&A",
+  other: "Other",
+  unknown: "TBD",
+};
+
+export const ROLE_EN: Record<Role, string> = {
+  upstream: "Upstream",
+  downstream: "Downstream",
+  unknown: "TBD",
+};
+
+export const CAP_LABEL: Record<CapSize, { en: string; zh: string }> = {
+  large: { en: "Large", zh: "大盘" },
+  mid: { en: "Mid", zh: "中盘" },
+  small: { en: "Small", zh: "小盘" },
+  unknown: { en: "—", zh: "—" },
+};
+
+export function capLabel(cap: CapSize, lang: "en" | "zh"): string {
+  return lang === "zh" ? CAP_LABEL[cap].zh : CAP_LABEL[cap].en;
+}

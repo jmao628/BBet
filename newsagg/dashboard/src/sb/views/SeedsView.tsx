@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useStore } from "../../store";
-import { buildSeeds, CATALYST_CN, ROLE_CN, sectorCN } from "../pipeline";
+import { useStore, useT } from "../../store";
+import { buildSeeds, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
@@ -8,6 +8,8 @@ export function SeedsView() {
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
   const openDetail = useStore((s) => s.openDetail);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
   const seeds = useMemo(() => buildSeeds(data), [data]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
@@ -38,11 +40,14 @@ export function SeedsView() {
   if (sectorFilter) rows = rows.filter((r) => sectorOf(r.ticker) === sectorFilter);
 
   return (
-    <div>
+    <div className="view-in">
       <ViewHead
-        eyebrow="Stage 1 · 采集"
-        title="当日看多种子表"
-        desc="全网看多种子去重成一张表（每票一行）。有分析师发文看多的标 ★ 论点；其余为 Quant / screener 榜单上的看多票。行情/技术数据由 yfinance 补齐，个别 OTC / 海外 ADR 可能查不到（下面标「无数据」）。"
+        eyebrow={t("Stage 1 · Collection", "Stage 1 · 采集")}
+        title={t("Today's Bullish Seed Table", "当日看多种子表")}
+        desc={t(
+          "Every bullish seed, deduped to one row per ticker. Analyst-written theses are marked ★; the rest are Quant / screener-list bulls. Price data comes from yfinance — a few OTC / foreign ADRs can't be found (marked No data).",
+          "全网看多种子去重成一张表（每票一行）。有分析师发文看多的标 ★ 论点；其余为 Quant / screener 榜单上的看多票。行情/技术数据由 yfinance 补齐，个别 OTC / 海外 ADR 可能查不到（下面标「无数据」）。",
+        )}
       />
 
       {/* filters */}
@@ -52,13 +57,13 @@ export function SeedsView() {
             onClick={() => setThesisOnly(false)}
             className={`px-3 py-1.5 text-[12px] ${!thesisOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
           >
-            全部 {seeds.length}
+            {t("All", "全部")} {seeds.length}
           </button>
           <button
             onClick={() => setThesisOnly(true)}
             className={`px-3 py-1.5 text-[12px] ${thesisOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
           >
-            ★ 有分析师论点 {thesisCount}
+            {t("★ Analyst thesis", "★ 有分析师论点")} {thesisCount}
           </button>
         </div>
         {noData.length > 0 && (
@@ -68,23 +73,23 @@ export function SeedsView() {
               noDataOnly ? "border-bad/50 bg-bad/10 text-bad" : "border-line text-muted hover:text-text"
             }`}
           >
-            ⚠ 无数据 {noData.length}
+            {t("⚠ No data", "⚠ 无数据")} {noData.length}
           </button>
         )}
-        <span className="ml-auto font-mono text-[12px] text-muted2">{rows.length} 条 · 已去重</span>
+        <span className="ml-auto font-mono text-[12px] text-muted2">{t(`${rows.length} rows · deduped`, `${rows.length} 条 · 已去重`)}</span>
       </div>
 
       {/* sector classification chips */}
       {sectorCounts.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-muted2">按板块:</span>
+          <span className="text-[11px] text-muted2">{t("By sector:", "按板块:")}</span>
           <button
             onClick={() => setSectorFilter(null)}
             className={`rounded-full border px-2.5 py-0.5 text-[12px] ${
               sectorFilter === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"
             }`}
           >
-            全部
+            {t("All", "全部")}
           </button>
           {sectorCounts.map(([sec, n]) => (
             <button
@@ -94,7 +99,7 @@ export function SeedsView() {
                 sectorFilter === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"
               }`}
             >
-              {sectorCN(sec)} {n}
+              {sectorLabel(sec, lang)} {n}
             </button>
           ))}
         </div>
@@ -103,8 +108,8 @@ export function SeedsView() {
       {/* the no-data tickers, spelled out */}
       {noData.length > 0 && (
         <div className="mb-3 rounded-lg border border-bad/30 bg-bad/[0.06] px-3.5 py-2.5 text-[12px]">
-          <span className="font-medium text-bad">yfinance 未找到行情的 {noData.length} 只</span>
-          <span className="text-muted2">（多为 OTC / 海外 ADR，不参与热度/技术）：</span>
+          <span className="font-medium text-bad">{t(`${noData.length} not found on yfinance`, `yfinance 未找到行情的 ${noData.length} 只`)}</span>
+          <span className="text-muted2">{t(" (mostly OTC / foreign ADRs, excluded from heat/technical): ", "（多为 OTC / 海外 ADR，不参与热度/技术）：")}</span>
           <span className="ml-1 font-mono text-muted">
             {noData.map((r) => r.ticker).join("  ·  ")}
           </span>
@@ -114,17 +119,17 @@ export function SeedsView() {
       <Card pad0>
         {rows.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-muted">
-            暂无种子。运行抓取器后，看多票会出现在这里。
+            {t("No seeds yet — run the scraper and bulls will appear here.", "暂无种子。运行抓取器后，看多票会出现在这里。")}
           </div>
         ) : (
           <div className="max-h-[calc(100vh-320px)] overflow-auto">
             <table className="w-full min-w-[920px] text-[13px]">
               <thead className="sticky top-0 z-[1] bg-panel">
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
-                  <Th>标的</Th>
-                  <Th>板块</Th>
-                  <Th>标记 / 来源</Th>
-                  <Th>作者</Th>
+                  <Th>{t("Ticker", "标的")}</Th>
+                  <Th>{t("Sector", "板块")}</Th>
+                  <Th>{t("Tags / Source", "标记 / 来源")}</Th>
+                  <Th>{t("Author", "作者")}</Th>
                   <Th>Reasoning</Th>
                   <Th right>Quant</Th>
                   <Th>Catalyst</Th>
@@ -147,12 +152,12 @@ export function SeedsView() {
                         <div className="text-[11px] text-muted">{r.company}</div>
                       </td>
                       <td className="px-3 py-2.5 text-[12px] text-muted">
-                        {sectorOf(r.ticker) ? sectorCN(sectorOf(r.ticker)) : <span className="text-muted2">—</span>}
+                        {sectorOf(r.ticker) ? sectorLabel(sectorOf(r.ticker), lang) : <span className="text-muted2">—</span>}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex flex-wrap items-center gap-1">
-                          {r.hasThesis && <Chip kind="signal">★ 论点</Chip>}
-                          {missing && <Chip kind="no">无数据</Chip>}
+                          {r.hasThesis && <Chip kind="signal">{t("★ Thesis", "★ 论点")}</Chip>}
+                          {missing && <Chip kind="no">{t("No data", "无数据")}</Chip>}
                           {r.tags.map((t) => (
                             <span key={t} className="rounded bg-panel2 px-1.5 py-0.5 text-[10px] text-muted">
                               {t}
@@ -193,10 +198,10 @@ export function SeedsView() {
                       </td>
                       <td className="px-3 py-2.5">
                         <Chip kind={r.catalyst === "unknown" ? "wait" : "signal"}>
-                          {CATALYST_CN[r.catalyst]}
+                          {lang === "zh" ? CATALYST_CN[r.catalyst] : CATALYST_EN[r.catalyst]}
                         </Chip>
                       </td>
-                      <td className="px-3 py-2.5 text-muted">{ROLE_CN[r.role]}</td>
+                      <td className="px-3 py-2.5 text-muted">{lang === "zh" ? ROLE_CN[r.role] : ROLE_EN[r.role]}</td>
                     </tr>
                   );
                 })}

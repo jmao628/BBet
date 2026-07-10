@@ -1,39 +1,41 @@
 import { useEffect, useMemo } from "react";
-import { useStore } from "../../store";
+import { useStore, useT, type Lang } from "../../store";
 import {
   buildSeeds,
   buildUniverse,
   capSizeFromCap,
   bypassesHeat,
   passesHeatGate,
-  sectorCN,
+  sectorLabel,
+  capLabel,
 } from "../pipeline";
 import type { TechTicker } from "../../types";
 
-const CAP_CN: Record<string, string> = { large: "大盘", mid: "中盘", small: "小盘", unknown: "—" };
+type L = { en: string; zh: string; color: string };
+const lbl = (m: L, lang: Lang) => (lang === "zh" ? m.zh : m.en);
 
-const GAUGE: Record<string, { cn: string; color: string; pos: number }> = {
-  strong_buy: { cn: "强力买入", color: "#48c78e", pos: 0.92 },
-  buy: { cn: "买入", color: "#7fce9e", pos: 0.7 },
-  neutral: { cn: "中性", color: "#e9c46a", pos: 0.5 },
-  sell: { cn: "卖出", color: "#f2a73c", pos: 0.3 },
-  strong_sell: { cn: "强力卖出", color: "#ff5a78", pos: 0.08 },
+const GAUGE: Record<string, L & { pos: number }> = {
+  strong_buy: { en: "Strong Buy", zh: "强力买入", color: "#48c78e", pos: 0.92 },
+  buy: { en: "Buy", zh: "买入", color: "#7fce9e", pos: 0.7 },
+  neutral: { en: "Neutral", zh: "中性", color: "#e9c46a", pos: 0.5 },
+  sell: { en: "Sell", zh: "卖出", color: "#f2a73c", pos: 0.3 },
+  strong_sell: { en: "Strong Sell", zh: "强力卖出", color: "#ff5a78", pos: 0.08 },
 };
 
-const ATTN: Record<string, { cn: string; color: string }> = {
-  breakout: { cn: "突破", color: "#ff5a78" },
-  igniting: { cn: "量价点火", color: "#3dd6c4" },
-  accumulating: { cn: "吸筹中", color: "#5fb0e8" },
-  quiet: { cn: "沉寂", color: "#5a6a7c" },
+const ATTN: Record<string, L> = {
+  breakout: { en: "Breakout", zh: "突破", color: "#ff5a78" },
+  igniting: { en: "Igniting", zh: "量价点火", color: "#3dd6c4" },
+  accumulating: { en: "Accumulating", zh: "吸筹中", color: "#5fb0e8" },
+  quiet: { en: "Quiet", zh: "沉寂", color: "#5a6a7c" },
 };
 
-const SOCIAL: Record<string, { cn: string; color: string }> = {
-  detonate: { cn: "引爆", color: "#ff5a78" },
-  ignite: { cn: "点火", color: "#f2a73c" },
-  watch: { cn: "观察", color: "#e9c46a" },
-  dead: { cn: "死水", color: "#5c7c99" },
-  ultralow: { cn: "超低覆盖", color: "#5a6a7c" },
-  warming: { cn: "积累中", color: "#3dd6c4" },
+const SOCIAL: Record<string, L> = {
+  detonate: { en: "Detonate", zh: "引爆", color: "#ff5a78" },
+  ignite: { en: "Ignite", zh: "点火", color: "#f2a73c" },
+  watch: { en: "Watch", zh: "观察", color: "#e9c46a" },
+  dead: { en: "Dead", zh: "死水", color: "#5c7c99" },
+  ultralow: { en: "Ultra-low", zh: "超低覆盖", color: "#5a6a7c" },
+  warming: { en: "Warming", zh: "积累中", color: "#3dd6c4" },
 };
 
 function Flag({ on, children }: { on: boolean; children: React.ReactNode }) {
@@ -61,6 +63,7 @@ function Stat({ label, value, color }: { label: string; value: React.ReactNode; 
 }
 
 function GaugeMeter({ summary }: { summary: string }) {
+  const lang = useStore((s) => s.lang);
   const g = GAUGE[summary] ?? GAUGE.neutral;
   return (
     <div>
@@ -77,7 +80,7 @@ function GaugeMeter({ summary }: { summary: string }) {
         />
       </div>
       <div className="mt-2 text-center text-[15px] font-semibold" style={{ color: g.color }}>
-        {g.cn}
+        {lbl(g, lang)}
       </div>
     </div>
   );
@@ -137,6 +140,8 @@ export function StockDetail() {
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
   const marketCaps = useStore((s) => s.marketCaps);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -190,9 +195,9 @@ export function StockDetail() {
               )}
             </div>
             <div className="mt-1 text-[12px] text-muted">
-              {company || "—"} · {CAP_CN[cap]}
+              {company || "—"} · {capLabel(cap, lang)}
               {mc ? ` · $${(mc / 1e9).toFixed(1)}B` : ""}
-              {sectors?.[ticker]?.sector ? ` · ${sectorCN(sectors[ticker].sector)}` : ""}
+              {sectors?.[ticker]?.sector ? ` · ${sectorLabel(sectors[ticker].sector, lang)}` : ""}
               {sectors?.[ticker]?.industry ? ` · ${sectors[ticker].industry}` : ""}
             </div>
           </div>
@@ -200,7 +205,7 @@ export function StockDetail() {
             onClick={close}
             className="rounded-lg border border-line px-3 py-1 text-[13px] text-muted hover:text-text"
           >
-            关闭 ✕
+            {t("Close ✕", "关闭 ✕")}
           </button>
         </div>
 
@@ -209,7 +214,7 @@ export function StockDetail() {
           <div className="flex flex-wrap items-center gap-2">
             {bypassesHeat(mc) ? (
               <span className="rounded-full border border-signal/40 bg-signal/10 px-3 py-1 text-[12px] font-medium text-signal">
-                大票直通（≥$100B）
+                {t("Mega-cap bypass (≥$100B)", "大票直通（≥$100B）")}
               </span>
             ) : (
               <span
@@ -217,7 +222,7 @@ export function StockDetail() {
                   passes ? "border-ok/40 bg-ok/10 text-ok" : "border-line bg-inset text-muted2"
                 }`}
               >
-                {passes ? "通过热度闸" : "未过热度闸"}
+                {passes ? t("Passes heat gate", "通过热度闸") : t("No heat gate", "未过热度闸")}
               </span>
             )}
             {a && (
@@ -229,7 +234,7 @@ export function StockDetail() {
                   background: `${(ATTN[a.phase] ?? ATTN.quiet).color}18`,
                 }}
               >
-                量价 · {(ATTN[a.phase] ?? ATTN.quiet).cn} · {a.score}分
+                {t("PV", "量价")} · {lbl(ATTN[a.phase] ?? ATTN.quiet, lang)} · {a.score}
               </span>
             )}
             {h && (
@@ -241,7 +246,7 @@ export function StockDetail() {
                   background: `${(SOCIAL[h.phase] ?? SOCIAL.dead).color}18`,
                 }}
               >
-                社交 · {(SOCIAL[h.phase] ?? SOCIAL.dead).cn}
+                {t("Social", "社交")} · {lbl(SOCIAL[h.phase] ?? SOCIAL.dead, lang)}
                 {h.z != null ? ` · z ${h.z.toFixed(2)}` : ""}
               </span>
             )}
@@ -249,8 +254,9 @@ export function StockDetail() {
 
           {!tech && (
             <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-5 text-center text-[13px] text-muted">
-              还没有该票的量价数据。在 Mac 上运行{" "}
-              <code className="font-mono text-signal">python -m newsagg.technical</code> 后自动出现。
+              {t("No price-volume data for this ticker yet. Run ", "还没有该票的量价数据。在 Mac 上运行 ")}
+              <code className="font-mono text-signal">python -m newsagg.technical</code>
+              {t(" on the Mac.", " 后自动出现。")}
             </div>
           )}
 
@@ -258,7 +264,9 @@ export function StockDetail() {
             <>
               {/* price + volume */}
               <div className="rounded-xl border border-line bg-panel2 p-4">
-                <div className="mb-2 text-[12px] font-semibold text-muted">价格 · 成交量（近 {tech.close_series.length} 日）</div>
+                <div className="mb-2 text-[12px] font-semibold text-muted">
+                  {t(`Price · Volume (last ${tech.close_series.length}d)`, `价格 · 成交量（近 ${tech.close_series.length} 日）`)}
+                </div>
                 <PriceChart closes={tech.close_series} vols={tech.vol_series} />
               </div>
 
@@ -266,23 +274,23 @@ export function StockDetail() {
               {a && (
                 <div className="rounded-xl border border-line bg-panel2 p-4">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="text-[13px] font-semibold">量价注意力信号</div>
+                    <div className="text-[13px] font-semibold">{t("Price-Volume Attention", "量价注意力信号")}</div>
                     <div className="text-[12px] text-muted">
-                      注意力分 <span className="font-mono font-semibold text-signal">{a.score}</span>/100
+                      {t("score", "注意力分")} <span className="font-mono font-semibold text-signal">{a.score}</span>/100
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                    <Stat label="RVOL 相对量" value={a.rvol != null ? `${a.rvol.toFixed(2)}×` : "—"} color={a.rvol && a.rvol >= 1.5 ? "#3dd6c4" : undefined} />
-                    <Stat label="距20日高" value={a.dist_to_high != null ? `${(a.dist_to_high * 100).toFixed(1)}%` : "—"} />
-                    <Stat label="ATR 波动" value={tech.atr_pct != null ? `${tech.atr_pct}%` : "—"} />
+                    <Stat label={t("RVOL", "RVOL 相对量")} value={a.rvol != null ? `${a.rvol.toFixed(2)}×` : "—"} color={a.rvol && a.rvol >= 1.5 ? "#3dd6c4" : undefined} />
+                    <Stat label={t("Dist. to 20d high", "距20日高")} value={a.dist_to_high != null ? `${(a.dist_to_high * 100).toFixed(1)}%` : "—"} />
+                    <Stat label={t("ATR", "ATR 波动")} value={tech.atr_pct != null ? `${tech.atr_pct}%` : "—"} />
                     <Stat label="SMA50" value={tech.sma50 != null ? `$${tech.sma50}` : "—"} />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Flag on={a.new_high_20d}>20日新高</Flag>
-                    <Flag on={a.new_high_52w}>52周新高</Flag>
-                    <Flag on={a.obv_up}>OBV 吸筹</Flag>
-                    <Flag on={a.above_sma50}>站上 SMA50</Flag>
-                    <Flag on={a.sma50_rising}>SMA50 上行</Flag>
+                    <Flag on={a.new_high_20d}>{t("20d high", "20日新高")}</Flag>
+                    <Flag on={a.new_high_52w}>{t("52w high", "52周新高")}</Flag>
+                    <Flag on={a.obv_up}>{t("OBV up", "OBV 吸筹")}</Flag>
+                    <Flag on={a.above_sma50}>{t("Above SMA50", "站上 SMA50")}</Flag>
+                    <Flag on={a.sma50_rising}>{t("SMA50 rising", "SMA50 上行")}</Flag>
                   </div>
                 </div>
               )}
@@ -290,19 +298,21 @@ export function StockDetail() {
               {/* technical gauge (display only) */}
               <div className="rounded-xl border border-line bg-panel2 p-4">
                 <div className="mb-3 flex items-center justify-between">
-                  <div className="text-[13px] font-semibold">技术表针（机械聚合）</div>
-                  <div className="text-[11px] text-muted2">MA + 震荡指标投票 · 滞后，仅参考</div>
+                  <div className="text-[13px] font-semibold">{t("Technical Gauge (mechanical)", "技术表针（机械聚合）")}</div>
+                  <div className="text-[11px] text-muted2">{t("MA + oscillator vote · lags, reference only", "MA + 震荡指标投票 · 滞后，仅参考")}</div>
                 </div>
                 <GaugeMeter summary={tech.gauge.summary} />
                 <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                  <Stat label="均线 买/卖" value={`${tech.gauge.ma_buy} / ${tech.gauge.ma_sell}`} />
-                  <Stat label="震荡 买/中/卖" value={`${tech.gauge.osc_buy}/${tech.gauge.osc_neutral}/${tech.gauge.osc_sell}`} />
+                  <Stat label={t("MA buy/sell", "均线 买/卖")} value={`${tech.gauge.ma_buy} / ${tech.gauge.ma_sell}`} />
+                  <Stat label={t("Osc buy/neu/sell", "震荡 买/中/卖")} value={`${tech.gauge.osc_buy}/${tech.gauge.osc_neutral}/${tech.gauge.osc_sell}`} />
                   <Stat label="RSI(14)" value={tech.gauge.rsi != null ? tech.gauge.rsi.toFixed(1) : "—"} color={tech.gauge.rsi != null ? (tech.gauge.rsi > 70 ? "#ff5a78" : tech.gauge.rsi < 30 ? "#48c78e" : undefined) : undefined} />
-                  <Stat label="MACD 柱" value={tech.gauge.macd_hist != null ? tech.gauge.macd_hist.toFixed(2) : "—"} color={tech.gauge.macd_hist != null ? (tech.gauge.macd_hist >= 0 ? "#48c78e" : "#ff5a78") : undefined} />
+                  <Stat label={t("MACD hist", "MACD 柱")} value={tech.gauge.macd_hist != null ? tech.gauge.macd_hist.toFixed(2) : "—"} color={tech.gauge.macd_hist != null ? (tech.gauge.macd_hist >= 0 ? "#48c78e" : "#ff5a78") : undefined} />
                 </div>
                 <div className="mt-3 text-[11.5px] leading-relaxed text-muted2">
-                  注：这是均线与震荡指标的机械投票，趋势下行时即便当天大涨也常显示卖出——
-                  用来看当前姿态，不作为筛选依据。
+                  {t(
+                    "Note: a mechanical MA + oscillator vote — in a downtrend it often reads Sell even on a big up day. Read it for posture, not as a filter.",
+                    "注：这是均线与震荡指标的机械投票，趋势下行时即便当天大涨也常显示卖出——用来看当前姿态，不作为筛选依据。",
+                  )}
                 </div>
               </div>
             </>
@@ -311,14 +321,14 @@ export function StockDetail() {
           {/* SA thesis */}
           {seed && (seed.hasThesis || seed.rating) && (
             <div className="rounded-xl border border-line bg-panel2 p-4">
-              <div className="mb-2 text-[13px] font-semibold">SeekingAlpha 看多论点</div>
+              <div className="mb-2 text-[13px] font-semibold">{t("SeekingAlpha Bull Thesis", "SeekingAlpha 看多论点")}</div>
               <div className="mb-2 flex flex-wrap gap-2 text-[12px] text-muted">
                 {seed.rating && (
                   <span className="rounded-md border border-gold/40 bg-gold/10 px-2 py-0.5 font-medium text-gold">
                     {seed.rating}
                   </span>
                 )}
-                {seed.author && <span>分析师：{seed.author}</span>}
+                {seed.author && <span>{t("Analyst: ", "分析师：")}{seed.author}</span>}
               </div>
               {seed.articleUrl ? (
                 <a
@@ -327,7 +337,7 @@ export function StockDetail() {
                   rel="noreferrer"
                   className="text-[13px] text-signal hover:underline"
                 >
-                  {seed.reasoning || "查看文章"} ↗
+                  {seed.reasoning || t("View article", "查看文章")} ↗
                 </a>
               ) : (
                 <div className="text-[13px] text-muted">{seed.reasoning || "—"}</div>

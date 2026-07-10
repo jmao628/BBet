@@ -1,25 +1,23 @@
 import { useMemo } from "react";
-import { useStore } from "../../store";
-import { buildScreen, type CapSize } from "../pipeline";
+import { useStore, useT } from "../../store";
+import { buildScreen, capLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
-const CAP_CN: Record<CapSize, string> = { large: "大盘", mid: "中盘", small: "小盘", unknown: "—" };
-
-const PHASE_CN: Record<string, string> = {
-  detonate: "引爆",
-  ignite: "点火",
-  watch: "观察",
-  dead: "死水",
-  ultralow: "超低覆盖",
-  warming: "积累中",
+const PHASE_L: Record<string, { en: string; zh: string }> = {
+  detonate: { en: "Detonate", zh: "引爆" },
+  ignite: { en: "Ignite", zh: "点火" },
+  watch: { en: "Watch", zh: "观察" },
+  dead: { en: "Dead", zh: "死水" },
+  ultralow: { en: "Ultra-low", zh: "超低覆盖" },
+  warming: { en: "Warming", zh: "积累中" },
 };
 
-const ATTN_CN: Record<string, string> = {
-  breakout: "突破",
-  igniting: "量价点火",
-  accumulating: "吸筹中",
-  quiet: "沉寂",
+const ATTN_L: Record<string, { en: string; zh: string }> = {
+  breakout: { en: "Breakout", zh: "突破" },
+  igniting: { en: "Igniting", zh: "量价点火" },
+  accumulating: { en: "Accumulating", zh: "吸筹中" },
+  quiet: { en: "Quiet", zh: "沉寂" },
 };
 
 export function ScreenView() {
@@ -28,6 +26,8 @@ export function ScreenView() {
   const technical = useStore((s) => s.technical);
   const marketCaps = useStore((s) => s.marketCaps);
   const openDetail = useStore((s) => s.openDetail);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
 
   const { candidates, total, passedHeat } = useMemo(
     () => buildScreen(data, heat, marketCaps, technical),
@@ -35,43 +35,46 @@ export function ScreenView() {
   );
 
   return (
-    <div>
+    <div className="view-in">
       <ViewHead
-        eyebrow="Stage 3 · 发现筛选"
-        title="发现筛选 · 即将被发现的中小盘"
-        desc="种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 多维排名入选（量价注意力 / 放量 / 动量 / 社交热度，各维度前 10 晋级，大票直通）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。"
+        eyebrow={t("Stage 3 · Screen", "Stage 3 · 发现筛选")}
+        title={t("Screen · Mid/Small Caps About to Be Discovered", "发现筛选 · 即将被发现的中小盘")}
+        desc={t(
+          "Seed table → SA rating gate (no-rating thesis-only mentions excluded) → multi-lens advance (attention / volume / momentum / social top-10, mega-cap bypass) → author-quality second gate (has an analyst thesis) → candidate shortlist.",
+          "种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 多维排名入选（量价注意力 / 放量 / 动量 / 社交热度，各维度前 10 晋级，大票直通）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。",
+        )}
         actions={<MethodInfo />}
       />
 
       <StatStrip
         stats={[
-          { k: "种子 seeds", v: total, d: "去重后全部看多票" },
-          { k: "入选下一轮", v: passedHeat, d: "各维度前 10 的并集", color: "#f2a73c" },
-          { k: "发现候选", v: candidates.length, d: "+ 作者质量二段", color: "#3dd6c4" },
+          { k: t("Seeds", "种子"), v: total, d: t("all deduped bulls", "去重后全部看多票") },
+          { k: t("Advancing", "入选下一轮"), v: passedHeat, d: t("union of per-lens top-10", "各维度前 10 的并集"), color: "#f2a73c" },
+          { k: t("Candidates", "发现候选"), v: candidates.length, d: t("+ author quality", "+ 作者质量二段"), color: "#3dd6c4" },
         ]}
       />
 
       <Card
-        title="发现候选 · Candidates"
-        sub={`${candidates.length} 只 · 大盘在前，再按 z 排序`}
+        title={t("Candidates", "发现候选 · Candidates")}
+        sub={t(`${candidates.length} names · large cap first, then by z`, `${candidates.length} 只 · 大盘在前，再按 z 排序`)}
         pad0
       >
         {candidates.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-muted">
-            暂无候选。可能原因：中小盘还没社交点火（热度需每天积累），或市值数据未接入。
+            {t("No candidates yet — mid/small caps may not have ignited (heat accrues daily), or market caps aren't wired.", "暂无候选。可能原因：中小盘还没社交点火（热度需每天积累），或市值数据未接入。")}
           </div>
         ) : (
           <div className="max-h-[calc(100vh-320px)] overflow-auto">
             <table className="w-full min-w-[900px] text-[13px]">
               <thead className="sticky top-0 z-[1] bg-panel">
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
-                  <th className="px-3 py-2 text-left font-medium">标的</th>
-                  <th className="px-3 py-2 text-left font-medium">市值</th>
-                  <th className="px-3 py-2 text-left font-medium">热度闸</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Cap", "市值")}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Heat gate", "热度闸")}</th>
                   <th className="px-3 py-2 text-right font-medium">z</th>
                   <th className="px-3 py-2 text-right font-medium">RVOL</th>
-                  <th className="px-3 py-2 text-left font-medium">作者</th>
-                  <th className="px-3 py-2 text-left font-medium">论点</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Author", "作者")}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Thesis", "论点")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,19 +88,19 @@ export function ScreenView() {
                       <span className="font-mono font-semibold text-signal">{c.ticker}</span>
                       <span className="ml-2 text-[11px] text-muted">{c.company}</span>
                     </td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted">{CAP_CN[c.cap]}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted">{capLabel(c.cap, lang)}</td>
                     <td className="px-3 py-2.5">
                       {c.via === "bypass" ? (
                         <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
-                          大票直通
+                          {t("Mega bypass", "大票直通")}
                         </span>
                       ) : c.via === "social" ? (
                         <span className="rounded-full border border-ignite/40 bg-ignite/10 px-2 py-0.5 text-[11px] font-medium text-ignite">
-                          {c.phase ? PHASE_CN[c.phase] ?? c.phase : "点火"}
+                          {c.phase ? (PHASE_L[c.phase]?.[lang] ?? c.phase) : t("Ignite", "点火")}
                         </span>
                       ) : (
                         <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
-                          {c.attnPhase ? ATTN_CN[c.attnPhase] ?? c.attnPhase : "量价点火"}
+                          {c.attnPhase ? (ATTN_L[c.attnPhase]?.[lang] ?? c.attnPhase) : t("Igniting", "量价点火")}
                         </span>
                       )}
                     </td>

@@ -22,6 +22,8 @@ export function TopBar() {
   const setView = useStore((s) => s.setView);
   const openDetail = useStore((s) => s.openDetail);
   const closeDetail = useStore((s) => s.closeDetail);
+  const lang = useStore((s) => s.lang);
+  const toggleLang = useStore((s) => s.toggleLang);
   const meta = STATUS[status];
 
   const goHome = () => {
@@ -57,11 +59,24 @@ export function TopBar() {
           value={ticker}
           onChange={(e) => setTicker(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submitSearch()}
-          placeholder="搜代码 ↵"
+          placeholder={lang === "zh" ? "搜代码 ↵" : "Ticker ↵"}
           spellCheck={false}
           className="w-28 bg-transparent font-mono text-[13px] uppercase text-text outline-none placeholder:normal-case placeholder:text-muted2"
         />
       </div>
+
+      <button
+        onClick={toggleLang}
+        title="Language / 语言"
+        className="flex overflow-hidden rounded-lg border border-line text-[11px] font-semibold"
+      >
+        <span className={`px-2 py-1.5 transition-colors ${lang === "en" ? "bg-signal/15 text-signal" : "text-muted2"}`}>
+          EN
+        </span>
+        <span className={`px-2 py-1.5 transition-colors ${lang === "zh" ? "bg-signal/15 text-signal" : "text-muted2"}`}>
+          中
+        </span>
+      </button>
 
       <div className="rounded-md border border-line bg-panel2 px-2.5 py-1.5 font-mono text-[12px] text-muted">
         RUN <b className="text-text">{runDate}</b>

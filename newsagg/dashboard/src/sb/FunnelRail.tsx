@@ -34,7 +34,10 @@ function useCounts(): Record<string, number | null> {
 function NavRow({ stage, count }: { stage: NavStage; count: number | null }) {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
+  const lang = useStore((s) => s.lang);
   const active = view === stage.key;
+  const primary = lang === "zh" ? stage.zh : stage.en;
+  const secondary = lang === "zh" ? stage.en : stage.zh;
   return (
     <button
       onClick={() => setView(stage.key)}
@@ -45,7 +48,7 @@ function NavRow({ stage, count }: { stage: NavStage; count: number | null }) {
       {active && <span className="absolute left-0 h-6 w-[3px] rounded-r bg-signal" />}
       {stage.step != null && (
         <span
-          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[10px] font-semibold ${
+          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[10px] font-semibold transition-colors ${
             active ? "border-signal bg-signal text-ink" : "border-line2 text-muted2"
           }`}
         >
@@ -53,8 +56,8 @@ function NavRow({ stage, count }: { stage: NavStage; count: number | null }) {
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block text-[13px]">{stage.lbl}</span>
-        <span className="block text-[10px] text-muted2">{stage.sub}</span>
+        <span className="block text-[13px]">{primary}</span>
+        <span className="block text-[10px] text-muted2">{secondary}</span>
       </span>
       <span className="font-mono text-[13px] font-semibold text-text">
         {count == null ? <span className="text-muted2">—</span> : count}
@@ -65,6 +68,7 @@ function NavRow({ stage, count }: { stage: NavStage; count: number | null }) {
 
 export function FunnelRail() {
   const counts = useCounts();
+  const lang = useStore((s) => s.lang);
   return (
     <aside className="relative overflow-y-auto border-r border-line bg-panel2 py-4">
       <div className="relative">
@@ -72,7 +76,7 @@ export function FunnelRail() {
       </div>
 
       <div className="px-5 pb-2 pt-4 text-[10.5px] uppercase tracking-[0.14em] text-muted2">
-        发现漏斗 · Funnel
+        {lang === "zh" ? "发现漏斗 · Funnel" : "Discovery Funnel"}
       </div>
       {FUNNEL.map((s) => (
         <div key={s.key} className="relative">

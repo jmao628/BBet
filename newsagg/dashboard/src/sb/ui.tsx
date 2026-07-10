@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useT } from "../store";
 
 export function ViewHead({
   eyebrow,
@@ -101,13 +102,14 @@ export function Chip({ kind, children }: { kind: keyof typeof CHIP_CLS; children
 
 // Honest placeholder for a pipeline stage whose computation isn't wired yet.
 export function Pending({ title, needs }: { title: string; needs: string[] }) {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-6">
       <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-gold">
         <span>◷</span> {title}
       </div>
       <div className="mb-3 text-[12.5px] text-muted">
-        结构已就位，等下面这些接入后自动填充：
+        {t("Structure is in place — fills in automatically once these are wired:", "结构已就位，等下面这些接入后自动填充：")}
       </div>
       <ul className="space-y-1.5">
         {needs.map((n, i) => (

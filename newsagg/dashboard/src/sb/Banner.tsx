@@ -1,4 +1,4 @@
-import { useStore } from "../store";
+import { useStore, useT } from "../store";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -7,6 +7,7 @@ const DAY = 24 * 60 * 60 * 1000;
 // to run — so you never have to watch logs.
 export function Banner() {
   const health = useStore((s) => s.health);
+  const t = useT();
   if (!health) return null;
 
   const successAge = health.last_success ? Date.now() - new Date(health.last_success).getTime() : null;
@@ -15,7 +16,8 @@ export function Banner() {
   if (health.auth_ok === false) {
     return (
       <Strip tone="bad">
-        <b>SeekingAlpha 登录已过期</b> —— 最近一次抓取没拿到登录后的数据，请更新 cookie：
+        <b>{t("SeekingAlpha login expired", "SeekingAlpha 登录已过期")}</b>{" "}
+        {t("— the last scrape got no logged-in data. Refresh the cookie:", "—— 最近一次抓取没拿到登录后的数据，请更新 cookie：")}
         <Steps />
       </Strip>
     );
@@ -26,7 +28,9 @@ export function Banner() {
     const days = Math.floor(successAge / DAY);
     return (
       <Strip tone="warn">
-        数据已 <b>{days} 天</b>未更新（Mac 关机、或抓取失败）。若持续，尝试更新 cookie：
+        {t("Data hasn't updated in ", "数据已 ")}
+        <b>{t(`${days} days`, `${days} 天`)}</b>
+        {t(" (Mac was off, or scrapes failing). If it persists, refresh the cookie:", "未更新（Mac 关机、或抓取失败）。若持续，尝试更新 cookie：")}
         <Steps />
       </Strip>
     );
@@ -36,9 +40,10 @@ export function Banner() {
 }
 
 function Steps() {
+  const t = useT();
   return (
     <span className="ml-1 text-current/80">
-      浏览器 Cookie-Editor 导出后运行{" "}
+      {t("Export via Cookie-Editor, then run ", "浏览器 Cookie-Editor 导出后运行 ")}
       <code className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[12px]">
         bash newsagg/deploy/refresh_cookies.sh
       </code>

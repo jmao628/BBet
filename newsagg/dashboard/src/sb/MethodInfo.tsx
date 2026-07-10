@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useStore } from "../store";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -22,6 +23,7 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
 // ViewHead's `actions` slot on any funnel page.
 export function MethodInfo() {
   const [open, setOpen] = useState(false);
+  const lang = useStore((s) => s.lang);
 
   useEffect(() => {
     if (!open) return;
@@ -34,8 +36,8 @@ export function MethodInfo() {
     <>
       <button
         onClick={() => setOpen(true)}
-        title="评分方法与规则"
-        className="grid h-7 w-7 place-items-center rounded-full border border-line text-[13px] font-semibold text-muted hover:border-signal hover:text-signal"
+        title={lang === "zh" ? "评分方法与规则" : "Methodology & rules"}
+        className="grid h-7 w-7 place-items-center rounded-full border border-line text-[13px] font-semibold text-muted transition-colors hover:border-signal hover:text-signal"
       >
         ⓘ
       </button>
@@ -54,17 +56,126 @@ export function MethodInfo() {
                 <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-signal">
                   Methodology
                 </div>
-                <h3 className="mt-0.5 text-[17px] font-semibold">评分方法与规则</h3>
+                <h3 className="mt-0.5 text-[17px] font-semibold">
+                  {lang === "zh" ? "评分方法与规则" : "Methodology & Rules"}
+                </h3>
               </div>
               <button
                 onClick={() => setOpen(false)}
                 className="rounded-lg border border-line px-3 py-1 text-[13px] text-muted hover:text-text"
               >
-                关闭 ✕
+                {lang === "zh" ? "关闭 ✕" : "Close ✕"}
               </button>
             </div>
 
-            <div className="space-y-5 p-6">
+            {lang === "en" ? <EnSections /> : <ZhSections />}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function EnSections() {
+  return (
+    <div className="space-y-5 p-6">
+      <Section title="① Funnel Overview">
+        <p>
+          Bullish seed table (SA) → multi-lens ranking (this page) → screen → catalyst → conviction →
+          technical → finalists. Goal: catch mid/small caps getting noticed <b>before</b> the market
+          fully discovers them.
+        </p>
+      </Section>
+
+      <Section title="② Data Source & Cadence">
+        <Row k="Price/Tech" v="yfinance (Yahoo) daily OHLCV, via proxy." />
+        <Row k="Social" v="Ape Wisdom daily mention snapshot, accrued into a series." />
+        <Row k="Market cap" v="yfinance fast_info." />
+        <Row
+          k="Refresh"
+          v={
+            <>
+              <b>Daily, not live</b>. Price is the latest close vs prior close; each{" "}
+              <code className="mx-1 rounded bg-black/30 px-1 font-mono text-signal">technical</code>/
+              <code className="mx-1 rounded bg-black/30 px-1 font-mono text-signal">heat</code> run
+              refreshes it. No intraday ticks.
+            </>
+          }
+        />
+      </Section>
+
+      <Section title="③ Seed Gate (to enter this page)">
+        <p>
+          Must have a SeekingAlpha <b>rating</b> (Quant score or BUY/STRONG BUY). Analyst-mention-only,
+          no-rating names (e.g. IREN) don't enter the ranking.
+        </p>
+      </Section>
+
+      <Section title="④ Price-Volume Attention Score (0–100)">
+        <p>Four weighted parts, measuring how strongly money is paying attention:</p>
+        <Row k="RVOL 40%" v="5-day / 20-day avg volume; ≥1.5 = full marks (a surge can't hide)." />
+        <Row k="Breakout 25%" v="new 20-day high = full; else linear by distance to the high (within 10%)." />
+        <Row k="OBV 20%" v="20-day OBV slope > 0 (accumulation) = full." />
+        <Row k="Trend 15%" v="above SMA50 & SMA50 rising = full; only above = half." />
+        <p className="text-muted2">
+          e.g. PENG RVOL 1.82→0.22, 20d high→0.25, OBV↑→0.20, trend→0.15, total 0.82 → <b>82</b>.
+        </p>
+      </Section>
+
+      <Section title="⑤ Attention Phase">
+        <Row k="breakout" v="new 52-week high and RVOL ≥ 2." />
+        <Row k="igniting" v="RVOL ≥ 1.5 and (20d high or within 5% of it) and OBV rising." />
+        <Row k="accumulating" v="OBV rising and above SMA50." />
+        <Row k="quiet" v="none of the above." />
+      </Section>
+
+      <Section title="⑥ The Four Ranking Lenses">
+        <Row k="Attention" v="the 0–100 composite above — the primary signal." />
+        <Row k="Rel. Volume" v="pure relative volume; money flow only, no direction." />
+        <Row k="Momentum 60d" v="return over the last 60 trading days." />
+        <Row k="Social Heat" v="Ape Wisdom z-score — mentions vs their own baseline." />
+      </Section>
+
+      <Section title="⑦ Advance Rules (to the next round)">
+        <p>
+          Each lens takes its <b>top 10</b>, and a name lights up PASS only if it <b>clears the bar</b> —
+          attention ≥50, RVOL ≥1.5×, momentum ≥+10%, social z ≥0.5. Top-10 below the bar stay dim and
+          don't advance; on a weak day nothing lights up. The attention score is coarse (ties at 60), so
+          <b> ties break by RVOL then momentum</b>. Advancing = <b>union</b> of three paths: ① any lens's
+          top-10 that clears the bar; ② <b>technical gauge = Strong Buy</b> (tagged STRONG, any rank);
+          ③ market cap <b>≥ $100B</b> mega-cap bypass (shown in its own card).
+        </p>
+      </Section>
+
+      <Section title="⑧ Sector Classification">
+        <p>
+          Sectors come from yfinance (cached, rarely change). The heat page filters advancing names by
+          sector and shows the <b>top sector</b> — so you can see why a batch skews to one sector.
+        </p>
+      </Section>
+
+      <Section title="⑨ Social Heat z (reference)">
+        <p>
+          x = ln(1+mentions); z = (x − μ) / σ, μ = 60-day median, σ = 1.4826·MAD (floor 0.35). Ignite 0.5,
+          detonate 2.0. Mid/small-cap social is sparse, so it's not a hard gate — just one ranking lens.
+        </p>
+      </Section>
+
+      <Section title="⑩ Technical Gauge / Strong Buy">
+        <p>
+          Strong buy/sell is a <b>mechanical vote</b> of MAs + oscillators (RSI/Stoch/CCI/W%R/MACD/ROC):
+          (MA buy + osc buy) − (MA sell + osc sell) ÷ total, &gt;0.5 = strong buy. It <b>lags</b> — in a
+          downtrend it often reads Sell even on a big up day. <b>Strong Buy</b> is now an extra advance
+          path in ⑦ (tagged STRONG); the other buckets are reference only.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
+function ZhSections() {
+  return (
+    <div className="space-y-5 p-6">
               <Section title="① 漏斗总览">
                 <p>
                   看多种子表(SA)→ 多维排名(本页)→ 发现筛选 → 催化剂 → 信念分级 →
@@ -155,10 +266,6 @@ export function MethodInfo() {
                   (标 强买);其余档位(买入/中性/卖出)仅供参考,不参与筛选。
                 </p>
               </Section>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
