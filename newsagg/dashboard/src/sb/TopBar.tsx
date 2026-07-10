@@ -42,31 +42,11 @@ export function TopBar() {
       <button
         onClick={goHome}
         title="回到发现总览"
-        className="-ml-1 flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.04]"
+        className="-ml-1 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.04]"
       >
-        <span className="grid h-[28px] w-[28px] place-items-center rounded-[9px] border border-signal/25 bg-[linear-gradient(145deg,rgba(61,214,196,0.16),rgba(61,214,196,0.02))]">
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#3dd6c4"
-            strokeWidth="2.1"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 16.5 L9.5 10.5 L13.5 14.5 L20 7" />
-            <path d="M14.5 7 L20 7 L20 12.5" />
-          </svg>
+        <span className="midea-word font-disp text-[19px] font-semibold tracking-[0.34em]">
+          MIDEA
         </span>
-        <div className="text-left leading-none">
-          <div className="font-disp text-[16px] font-semibold tracking-[0.24em] text-text">
-            MIDEA
-          </div>
-          <div className="mt-1 text-[9.5px] uppercase tracking-[0.13em] text-muted2">
-            共识修正定时机器
-          </div>
-        </div>
       </button>
 
       <div className="flex-1" />
