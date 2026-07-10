@@ -74,7 +74,12 @@ export function HeatView() {
     for (const u of buildUniverse(data)) m.set(u.ticker, capSizeFromCap(marketCaps?.[u.ticker], u.caps));
     return m;
   }, [data, marketCaps]);
-  const universe = useMemo(() => new Set(capBy.keys()), [capBy]);
+  // "我的票" = only SA-rated tickers (analyst-thesis-only mentions without a
+  // rating don't enter the heat funnel).
+  const universe = useMemo(
+    () => new Set(buildUniverse(data).filter((u) => u.rated).map((u) => u.ticker)),
+    [data],
+  );
 
   const allRows = useMemo(() => {
     const t = heat?.tickers ?? {};
@@ -151,7 +156,7 @@ export function HeatView() {
               onClick={() => setMineOnly(true)}
               className={`px-3 py-1.5 text-[12px] ${mineOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
             >
-              我的票 {mineCount}
+              我的票（有SA评分）{mineCount}
             </button>
             <button
               onClick={() => setMineOnly(false)}
@@ -162,7 +167,7 @@ export function HeatView() {
           </div>
           <span className="text-[11px] text-muted2">
             {mineOnly
-              ? "只看种子表里的票（其余票社交无讨论，属超低覆盖）"
+              ? "只看有 SA 评分的种子票（无评分的纯分析师提及不进热度闸）"
               : "Ape Wisdom 全部社交热榜"}
           </span>
         </div>

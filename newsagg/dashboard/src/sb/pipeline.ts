@@ -39,6 +39,7 @@ export interface UniStock {
   ticker: string;
   company: string;
   quant: number | null; // best numeric quant score across widgets
+  rated: boolean; // has an SA rating (quant score or BUY/STRONG BUY) somewhere
   tags: string[]; // widgets it appears in
   caps: string[]; // cap-size buckets
 }
@@ -215,10 +216,13 @@ export function buildUniverse(data: SAData | null): UniStock[] {
       for (const r of g.rows) {
         const cur =
           map.get(r.ticker) ??
-          ({ ticker: r.ticker, company: r.company ?? "", quant: null, tags: [], caps: [] } as UniStock);
-        if (r.rating && NUM_RE.test(r.rating)) {
-          const n = parseFloat(r.rating);
-          cur.quant = cur.quant == null ? n : Math.max(cur.quant, n);
+          ({ ticker: r.ticker, company: r.company ?? "", quant: null, rated: false, tags: [], caps: [] } as UniStock);
+        if (r.rating) {
+          cur.rated = true; // any rating cell (quant score or BUY/STRONG BUY)
+          if (NUM_RE.test(r.rating)) {
+            const n = parseFloat(r.rating);
+            cur.quant = cur.quant == null ? n : Math.max(cur.quant, n);
+          }
         }
         if (r.company && !cur.company) cur.company = r.company;
         if (!cur.tags.includes(tag)) cur.tags.push(tag);
@@ -230,9 +234,11 @@ export function buildUniverse(data: SAData | null): UniStock[] {
   return [...map.values()].sort((a, b) => (b.quant ?? -1) - (a.quant ?? -1));
 }
 
-// Stage 3 — Screen. A seed becomes a discovery candidate when it (1) passes
-// the heat gate (big cap bypass, or mid/small ignited) AND (2) has author
-// quality — proxied by an analyst thesis until an author whitelist exists.
+// Stage 3 — Screen. A seed becomes a discovery candidate when it (0) has an SA
+// rating (quant score or BUY/STRONG BUY — analyst-thesis-only mentions with no
+// rating, e.g. IREN, don't qualify), (1) passes the heat gate (big cap bypass,
+// or mid/small ignited), AND (2) has author quality — proxied by an analyst
+// thesis until an author whitelist exists.
 export interface ScreenRow {
   ticker: string;
   company: string;
@@ -260,6 +266,8 @@ export function buildScreen(
   let passedHeat = 0;
 
   for (const s of seeds) {
+    // Stage 0 — must have an SA rating to enter the heat/screen funnel.
+    if (s.rating == null && s.quant == null) continue;
     const mc = marketCaps?.[s.ticker];
     const cap = capSizeFromCap(mc, uniCaps.get(s.ticker) ?? []);
     const ht = heat?.tickers?.[s.ticker];

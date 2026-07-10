@@ -10,12 +10,12 @@ function useCounts(): Record<string, number | null> {
   const marketCaps = useStore((s) => s.marketCaps);
   const seeds = buildSeeds(data);
 
-  // Heat gate over the seed universe: big caps pass straight through; mid/small
-  // caps must ignite/detonate.
+  // Heat gate over the rated seed universe: only SA-rated tickers enter; big caps
+  // pass straight through; mid/small caps must ignite/detonate.
   let heatCount: number | null = null;
   if (heat) {
-    heatCount = buildUniverse(data).filter((u) =>
-      passesHeatGate(marketCaps?.[u.ticker], heat.tickers[u.ticker]?.phase ?? ""),
+    heatCount = buildUniverse(data).filter(
+      (u) => u.rated && passesHeatGate(marketCaps?.[u.ticker], heat.tickers[u.ticker]?.phase ?? ""),
     ).length;
   }
 

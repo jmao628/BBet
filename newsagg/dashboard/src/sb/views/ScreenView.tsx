@@ -30,7 +30,7 @@ export function ScreenView() {
       <ViewHead
         eyebrow="Stage 3 · 发现筛选"
         title="发现筛选 · 即将被发现的中小盘"
-        desc="种子表 → 过热度闸（大票直通 / 中小盘点火）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。作者白名单接入后，二段将换成精确的 author_weight 过滤。"
+        desc="种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 过热度闸（大票直通 / 中小盘点火）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。作者白名单接入后，二段将换成精确的 author_weight 过滤。"
       />
 
       <StatStrip
