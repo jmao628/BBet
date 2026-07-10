@@ -7,19 +7,27 @@ import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 function useCounts(): Record<string, number | null> {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
+  const technical = useStore((s) => s.technical);
   const marketCaps = useStore((s) => s.marketCaps);
   const seeds = buildSeeds(data);
 
   // Heat gate over the rated seed universe: only SA-rated tickers enter; big caps
-  // pass straight through; mid/small caps must ignite/detonate.
+  // pass straight through; mid/small caps must ignite socially OR on price-volume.
   let heatCount: number | null = null;
-  if (heat) {
+  if (heat || technical) {
     heatCount = buildUniverse(data).filter(
-      (u) => u.rated && passesHeatGate(marketCaps?.[u.ticker], heat.tickers[u.ticker]?.phase ?? ""),
+      (u) =>
+        u.rated &&
+        passesHeatGate(
+          marketCaps?.[u.ticker],
+          heat?.tickers[u.ticker]?.phase ?? "",
+          technical?.tickers[u.ticker]?.attention?.ignites ?? false,
+        ),
     ).length;
   }
 
-  const screenCount = heat ? buildScreen(data, heat, marketCaps).candidates.length : null;
+  const screenCount =
+    heat || technical ? buildScreen(data, heat, marketCaps, technical).candidates.length : null;
 
   return {
     seeds: seeds.length,

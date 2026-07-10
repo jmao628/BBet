@@ -2,9 +2,12 @@
 #
 # One-time setup for local daily automation on macOS.
 #
-# Installs two launchd jobs for the current user:
-#   com.newsagg.scrape  — runs the SeekingAlpha scrape once a day
-#   com.newsagg.web     — keeps a local web server on http://localhost:8000
+# Installs launchd jobs for the current user:
+#   com.newsagg.scrape     — SeekingAlpha scrape once a day        (:00)
+#   com.newsagg.marketcap  — yfinance market caps                 (:10)
+#   com.newsagg.technical  — yfinance price-volume + technicals    (:15)
+#   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
+#   com.newsagg.web        — local web server on http://localhost:8000
 #
 # Re-run this any time to update the schedule. Uninstall with uninstall_mac.sh.
 #
@@ -17,6 +20,15 @@ set -euo pipefail
 
 HOUR="${1:-9}"
 PORT="${PORT:-8000}"
+# Optional: proxy for the yfinance jobs (market cap + technical) when Yahoo is
+# only reachable through a VPN/proxy. e.g. PROXY=http://127.0.0.1:3213 bash ...
+PROXY="${PROXY:-}"
+
+PROXY_LINES=""
+if [[ -n "$PROXY" ]]; then
+  PROXY_LINES="    <key>HTTPS_PROXY</key><string>$PROXY</string>
+    <key>HTTP_PROXY</key><string>$PROXY</string>"
+fi
 
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +48,7 @@ mkdir -p "$LA_DIR" "$LOG_DIR"
 SCRAPE_PLIST="$LA_DIR/com.newsagg.scrape.plist"
 HEAT_PLIST="$LA_DIR/com.newsagg.heat.plist"
 MCAP_PLIST="$LA_DIR/com.newsagg.marketcap.plist"
+TECH_PLIST="$LA_DIR/com.newsagg.technical.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -114,6 +127,7 @@ cat > "$MCAP_PLIST" <<EOF
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$PROXY_LINES
   </dict>
   <key>StartCalendarInterval</key>
   <dict>
@@ -122,6 +136,35 @@ cat > "$MCAP_PLIST" <<EOF
   </dict>
   <key>StandardOutPath</key><string>$LOG_DIR/marketcap.log</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/marketcap.log</string>
+</dict>
+</plist>
+EOF
+
+cat > "$TECH_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.technical</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.technical</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$PROXY_LINES
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>15</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/technical.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/technical.log</string>
 </dict>
 </plist>
 EOF
@@ -149,7 +192,7 @@ cat > "$WEB_PLIST" <<EOF
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

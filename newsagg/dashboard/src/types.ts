@@ -69,6 +69,50 @@ export interface HeatData {
   tickers: Record<string, HeatTicker>;
 }
 
+// Price-volume attention: is a mid/small cap starting to get noticed?
+export interface TechAttention {
+  score: number; // 0-100 composite attention score
+  phase: "breakout" | "igniting" | "accumulating" | "quiet";
+  ignites: boolean; // passes price-volume ignition (igniting | breakout)
+  rvol: number | null; // 5d avg volume / 20d avg volume
+  new_high_20d: boolean;
+  new_high_52w: boolean;
+  dist_to_high: number | null; // fraction below the 20-day high
+  obv_up: boolean; // on-balance-volume rising (accumulation)
+  above_sma50: boolean;
+  sma50_rising: boolean;
+}
+
+// investing.com-style mechanical MA + oscillator aggregate. Display only — lags.
+export interface TechGauge {
+  summary: "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
+  ma_buy: number;
+  ma_sell: number;
+  osc_buy: number;
+  osc_sell: number;
+  osc_neutral: number;
+  rsi: number | null;
+  macd_hist: number | null;
+}
+
+export interface TechTicker {
+  price: number;
+  change_pct: number | null;
+  atr_pct: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  sma200: number | null;
+  days: number;
+  attention: TechAttention;
+  gauge: TechGauge;
+  close_series: number[];
+  vol_series: number[];
+}
+
+export interface TechnicalData {
+  tickers: Record<string, TechTicker>;
+}
+
 export interface Health {
   last_attempt: string | null;
   last_success: string | null;

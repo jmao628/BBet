@@ -14,15 +14,23 @@ const PHASE_CN: Record<string, string> = {
   warming: "积累中",
 };
 
+const ATTN_CN: Record<string, string> = {
+  breakout: "突破",
+  igniting: "量价点火",
+  accumulating: "吸筹中",
+  quiet: "沉寂",
+};
+
 export function ScreenView() {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
+  const technical = useStore((s) => s.technical);
   const marketCaps = useStore((s) => s.marketCaps);
-  const setTicker = useStore((s) => s.setTicker);
+  const openDetail = useStore((s) => s.openDetail);
 
   const { candidates, total, passedHeat } = useMemo(
-    () => buildScreen(data, heat, marketCaps),
-    [data, heat, marketCaps],
+    () => buildScreen(data, heat, marketCaps, technical),
+    [data, heat, marketCaps, technical],
   );
 
   return (
@@ -30,13 +38,13 @@ export function ScreenView() {
       <ViewHead
         eyebrow="Stage 3 · 发现筛选"
         title="发现筛选 · 即将被发现的中小盘"
-        desc="种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 过热度闸（大票直通 / 中小盘点火）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。作者白名单接入后，二段将换成精确的 author_weight 过滤。"
+        desc="种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 过热度闸（大票直通 / 中小盘社交点火 或 量价点火）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。量价点火 = 放量 + 突破 + OBV 吸筹，用来捞社交讨论太稀疏的中小盘。"
       />
 
       <StatStrip
         stats={[
           { k: "种子 seeds", v: total, d: "去重后全部看多票" },
-          { k: "过热度闸", v: passedHeat, d: "大票直通 + 中小盘点火", color: "#f2a73c" },
+          { k: "过热度闸", v: passedHeat, d: "大票直通 + 社交/量价点火", color: "#f2a73c" },
           { k: "发现候选", v: candidates.length, d: "+ 作者质量二段", color: "#3dd6c4" },
         ]}
       />
@@ -52,13 +60,14 @@ export function ScreenView() {
           </div>
         ) : (
           <div className="max-h-[calc(100vh-320px)] overflow-auto">
-            <table className="w-full min-w-[820px] text-[13px]">
+            <table className="w-full min-w-[900px] text-[13px]">
               <thead className="sticky top-0 z-[1] bg-panel">
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
                   <th className="px-3 py-2 text-left font-medium">标的</th>
                   <th className="px-3 py-2 text-left font-medium">市值</th>
                   <th className="px-3 py-2 text-left font-medium">热度闸</th>
                   <th className="px-3 py-2 text-right font-medium">z</th>
+                  <th className="px-3 py-2 text-right font-medium">RVOL</th>
                   <th className="px-3 py-2 text-left font-medium">作者</th>
                   <th className="px-3 py-2 text-left font-medium">论点</th>
                 </tr>
@@ -67,7 +76,7 @@ export function ScreenView() {
                 {candidates.map((c) => (
                   <tr
                     key={c.ticker}
-                    onClick={() => setTicker(c.ticker)}
+                    onClick={() => openDetail(c.ticker)}
                     className="cursor-pointer border-t border-line hover:bg-white/[0.03]"
                   >
                     <td className="px-3 py-2.5">
@@ -76,18 +85,25 @@ export function ScreenView() {
                     </td>
                     <td className="px-3 py-2.5 text-[12px] text-muted">{CAP_CN[c.cap]}</td>
                     <td className="px-3 py-2.5">
-                      {c.bypass ? (
+                      {c.via === "bypass" ? (
                         <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
                           大票直通
                         </span>
-                      ) : (
+                      ) : c.via === "social" ? (
                         <span className="rounded-full border border-ignite/40 bg-ignite/10 px-2 py-0.5 text-[11px] font-medium text-ignite">
                           {c.phase ? PHASE_CN[c.phase] ?? c.phase : "点火"}
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
+                          {c.attnPhase ? ATTN_CN[c.attnPhase] ?? c.attnPhase : "量价点火"}
                         </span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums">
                       {c.z != null ? c.z.toFixed(2) : <span className="text-muted2">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                      {c.rvol != null ? `${c.rvol.toFixed(1)}×` : <span className="text-muted2">—</span>}
                     </td>
                     <td className="px-3 py-2.5">{c.author ?? <span className="text-muted2">—</span>}</td>
                     <td className="max-w-[320px] px-3 py-2.5">

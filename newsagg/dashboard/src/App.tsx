@@ -7,6 +7,7 @@ import { OverviewView } from "./sb/views/OverviewView";
 import { SeedsView } from "./sb/views/SeedsView";
 import { HeatView } from "./sb/views/HeatView";
 import { ScreenView } from "./sb/views/ScreenView";
+import { StockDetail } from "./sb/views/StockDetail";
 import {
   CatalystView,
   ConvictionView,
@@ -38,6 +39,7 @@ export default function App() {
         <Banner />
         <View />
       </main>
+      <StockDetail />
     </div>
   );
 }

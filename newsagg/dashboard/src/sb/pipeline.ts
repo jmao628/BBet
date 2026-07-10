@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { HeatData, MarketCaps, SAData } from "../types";
+import type { HeatData, MarketCaps, SAData, TechnicalData } from "../types";
 
 export type CatalystType =
   | "earnings"
@@ -203,9 +203,18 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
 
-// Passes the heat gate if it's a mega cap (bypass) or it has ignited/detonated.
-export function passesHeatGate(marketCap: number | undefined, phase: string): boolean {
-  return bypassesHeat(marketCap) || phase === "ignite" || phase === "detonate";
+// Passes the heat gate if it's a mega cap (bypass), OR social heat has
+// ignited/detonated, OR price-volume attention has ignited. The last lane is
+// what lets thinly-discussed mid/small caps through — social mentions are too
+// sparse for them, but volume/breakout/OBV show accumulation first.
+export function passesHeatGate(
+  marketCap: number | undefined,
+  phase: string,
+  attnIgnites = false,
+): boolean {
+  return (
+    bypassesHeat(marketCap) || phase === "ignite" || phase === "detonate" || attnIgnites
+  );
 }
 
 export function buildUniverse(data: SAData | null): UniStock[] {
@@ -239,12 +248,18 @@ export function buildUniverse(data: SAData | null): UniStock[] {
 // rating, e.g. IREN, don't qualify), (1) passes the heat gate (big cap bypass,
 // or mid/small ignited), AND (2) has author quality — proxied by an analyst
 // thesis until an author whitelist exists.
+export type GateVia = "bypass" | "social" | "volume";
+
 export interface ScreenRow {
   ticker: string;
   company: string;
   cap: CapSize;
   bypass: boolean; // mega cap that skipped social heat
-  phase: string | null;
+  via: GateVia; // how it passed the heat gate
+  phase: string | null; // social heat phase
+  attnPhase: string | null; // price-volume attention phase
+  attnScore: number | null;
+  rvol: number | null;
   hasThesis: boolean;
   author: string | null;
   reasoning: string;
@@ -259,6 +274,7 @@ export function buildScreen(
   data: SAData | null,
   heat: HeatData | null,
   marketCaps: MarketCaps | null,
+  technical: TechnicalData | null,
 ): { candidates: ScreenRow[]; total: number; passedHeat: number } {
   const seeds = buildSeeds(data);
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
@@ -272,15 +288,22 @@ export function buildScreen(
     const cap = capSizeFromCap(mc, uniCaps.get(s.ticker) ?? []);
     const ht = heat?.tickers?.[s.ticker];
     const phase = ht?.phase ?? null;
-    const passHeat = passesHeatGate(mc, phase ?? "");
+    const attn = technical?.tickers?.[s.ticker]?.attention;
+    const socialIgnite = phase === "ignite" || phase === "detonate";
+    const passHeat = passesHeatGate(mc, phase ?? "", attn?.ignites ?? false);
     if (passHeat) passedHeat++;
     if (passHeat && s.hasThesis) {
+      const via: GateVia = bypassesHeat(mc) ? "bypass" : socialIgnite ? "social" : "volume";
       candidates.push({
         ticker: s.ticker,
         company: s.company,
         cap,
         bypass: bypassesHeat(mc),
+        via,
         phase,
+        attnPhase: attn?.phase ?? null,
+        attnScore: attn?.score ?? null,
+        rvol: attn?.rvol ?? null,
         hasThesis: s.hasThesis,
         author: s.author,
         reasoning: s.reasoning,
@@ -292,7 +315,10 @@ export function buildScreen(
   }
 
   candidates.sort(
-    (a, b) => CAP_RANK[a.cap] - CAP_RANK[b.cap] || (b.z ?? -99) - (a.z ?? -99),
+    (a, b) =>
+      CAP_RANK[a.cap] - CAP_RANK[b.cap] ||
+      (b.z ?? -99) - (a.z ?? -99) ||
+      (b.attnScore ?? -1) - (a.attnScore ?? -1),
   );
   return { candidates, total: seeds.length, passedHeat };
 }
