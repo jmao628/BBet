@@ -106,10 +106,8 @@ cat > "$WEB_PLIST" <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>$PY</string>
-    <string>-m</string>
-    <string>http.server</string>
+    <string>$REPO_DIR/newsagg/deploy/serve.py</string>
     <string>$PORT</string>
-    <string>--directory</string>
     <string>$REPO_DIR</string>
   </array>
   <key>WorkingDirectory</key><string>$REPO_DIR</string>
