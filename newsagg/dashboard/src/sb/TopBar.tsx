@@ -19,7 +19,19 @@ export function TopBar() {
   const generatedAt = useStore((s) => s.data?.generated_at ?? null);
   const ticker = useStore((s) => s.ticker);
   const setTicker = useStore((s) => s.setTicker);
+  const setView = useStore((s) => s.setView);
+  const openDetail = useStore((s) => s.openDetail);
+  const closeDetail = useStore((s) => s.closeDetail);
   const meta = STATUS[status];
+
+  const goHome = () => {
+    closeDetail();
+    setView("overview");
+  };
+  const submitSearch = () => {
+    const t = ticker.trim();
+    if (t) openDetail(t);
+  };
 
   const runDate = generatedAt
     ? new Date(generatedAt).toLocaleDateString("en-CA")
@@ -27,30 +39,47 @@ export function TopBar() {
 
   return (
     <div className="col-span-2 flex items-center gap-4 border-b border-line bg-[linear-gradient(180deg,#0E141D,#0A0E15)] px-5">
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-[26px] w-[26px] place-items-center rounded-md bg-signal/15 text-signal">
-          ◨
+      <button
+        onClick={goHome}
+        title="回到发现总览"
+        className="-ml-1 flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.04]"
+      >
+        <span className="grid h-[28px] w-[28px] place-items-center rounded-[9px] border border-signal/25 bg-[linear-gradient(145deg,rgba(61,214,196,0.16),rgba(61,214,196,0.02))]">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#3dd6c4"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 16.5 L9.5 10.5 L13.5 14.5 L20 7" />
+            <path d="M14.5 7 L20 7 L20 12.5" />
+          </svg>
         </span>
-        <div className="leading-none">
-          <div className="font-disp text-[16px] font-bold tracking-tight">
-            Super<span className="text-signal">Beta</span>
+        <div className="text-left leading-none">
+          <div className="font-disp text-[16px] font-semibold tracking-[0.24em] text-text">
+            MIDEA
           </div>
-          <div className="mt-0.5 text-[10px] uppercase tracking-[0.08em] text-muted2">
+          <div className="mt-1 text-[9.5px] uppercase tracking-[0.13em] text-muted2">
             共识修正定时机器
           </div>
         </div>
-      </div>
+      </button>
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-1.5">
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-1.5 focus-within:border-signal/50">
         <span className="text-muted2">⌕</span>
         <input
           value={ticker}
           onChange={(e) => setTicker(e.target.value)}
-          placeholder="TICKER"
+          onKeyDown={(e) => e.key === "Enter" && submitSearch()}
+          placeholder="搜代码 ↵"
           spellCheck={false}
-          className="w-24 bg-transparent font-mono text-[13px] uppercase text-text outline-none placeholder:text-muted2"
+          className="w-28 bg-transparent font-mono text-[13px] uppercase text-text outline-none placeholder:normal-case placeholder:text-muted2"
         />
       </div>
 
