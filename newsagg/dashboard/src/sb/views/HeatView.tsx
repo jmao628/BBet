@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../store";
-import { companyMap } from "../pipeline";
+import { companyMap, buildUniverse } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import type { HeatTicker } from "../../types";
 
@@ -32,13 +32,22 @@ export function HeatView() {
   const focus = useStore((s) => s.ticker);
   const setTicker = useStore((s) => s.setTicker);
   const cmap = useMemo(() => companyMap(data), [data]);
+  const [mineOnly, setMineOnly] = useState(true);
 
-  const rows = useMemo(() => {
+  const universe = useMemo(() => new Set(buildUniverse(data).map((u) => u.ticker)), [data]);
+
+  const allRows = useMemo(() => {
     const t = heat?.tickers ?? {};
     return Object.entries(t)
       .map(([ticker, h]) => ({ ticker, ...h }))
       .sort((a, b) => (b.z ?? -99) - (a.z ?? -99));
   }, [heat]);
+
+  const mineCount = useMemo(
+    () => allRows.filter((r) => universe.has(r.ticker)).length,
+    [allRows, universe],
+  );
+  const rows = mineOnly ? allRows.filter((r) => universe.has(r.ticker)) : allRows;
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -48,7 +57,7 @@ export function HeatView() {
 
   const focused = rows.find((r) => r.ticker === focus) ?? rows[0];
 
-  if (!heat || rows.length === 0) {
+  if (!heat || allRows.length === 0) {
     return (
       <div>
         <ViewHead
@@ -96,7 +105,33 @@ export function HeatView() {
       )}
 
       <div className="mt-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="flex overflow-hidden rounded-lg border border-line">
+            <button
+              onClick={() => setMineOnly(true)}
+              className={`px-3 py-1.5 text-[12px] ${mineOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
+            >
+              我的票 {mineCount}
+            </button>
+            <button
+              onClick={() => setMineOnly(false)}
+              className={`px-3 py-1.5 text-[12px] ${!mineOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
+            >
+              全部社交热榜 {allRows.length}
+            </button>
+          </div>
+          <span className="text-[11px] text-muted2">
+            {mineOnly
+              ? "只看种子表里的票（其余票社交无讨论，属超低覆盖）"
+              : "Ape Wisdom 全部社交热榜"}
+          </span>
+        </div>
         <Card title="热度榜 · 按 z 排序" sub={`${rows.length} 只 · 点击看图`} pad0>
+          {rows.length === 0 && (
+            <div className="p-6 text-center text-[13px] text-muted">
+              种子表里的票暂无社交提及（都还没进 Ape Wisdom 热榜）。切到「全部社交热榜」看大盘热度。
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto">
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-panel">
