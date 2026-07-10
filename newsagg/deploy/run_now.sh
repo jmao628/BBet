@@ -36,9 +36,11 @@ echo "▶ 1/4 scrape  — refresh SA universe…"
 "$PY" -m newsagg.sa_scrape || echo "  (scrape failed; keeping existing universe)"
 echo "▶ 2/4 marketcap…"
 "$PY" -m newsagg.marketcap || echo "  (marketcap failed; keeping existing caps)"
-echo "▶ 3/4 technical…"
+echo "▶ 3/5 technical…"
 "$PY" -m newsagg.technical || echo "  (technical failed; keeping existing technicals)"
-echo "▶ 4/4 heat…"
+echo "▶ 4/5 sectors…"
+"$PY" -m newsagg.sectors || echo "  (sectors failed; keeping existing sectors)"
+echo "▶ 5/5 heat…"
 "$PY" -m newsagg.heat || echo "  (heat failed; keeping existing heat)"
 
 echo

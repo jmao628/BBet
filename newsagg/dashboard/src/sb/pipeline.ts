@@ -3,7 +3,27 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { HeatData, MarketCaps, SAData, TechnicalData } from "../types";
+import type { HeatData, MarketCaps, SAData, TechnicalData, SectorData } from "../types";
+
+// yfinance GICS sectors → short Chinese labels.
+export const SECTOR_CN: Record<string, string> = {
+  Technology: "科技",
+  Healthcare: "医疗",
+  "Financial Services": "金融",
+  "Consumer Cyclical": "可选消费",
+  "Consumer Defensive": "必需消费",
+  Industrials: "工业",
+  Energy: "能源",
+  "Basic Materials": "原材料",
+  "Communication Services": "通讯",
+  Utilities: "公用",
+  "Real Estate": "地产",
+};
+
+export function sectorCN(sector: string | undefined): string {
+  if (!sector) return "其他";
+  return SECTOR_CN[sector] ?? sector;
+}
 
 export type CatalystType =
   | "earnings"
@@ -253,10 +273,12 @@ export interface RankItem {
   ticker: string;
   company: string;
   cap: CapSize;
+  sector: string; // raw yfinance sector ("" if unknown)
   value: number;
   display: string;
   rank: number;
-  advancing: boolean; // top-N in this lens
+  meetsBar: boolean; // value clears this lens's minimum threshold
+  advancing: boolean; // top-N in this lens AND meets the bar
 }
 
 export interface Ranking {
@@ -277,6 +299,7 @@ interface Lens {
   key: string;
   label: string;
   desc: string;
+  min: number; // value must clear this to count as "ignited" (else stays dim)
   get: (t: string) => number | null;
   fmt: (v: number) => string;
 }
@@ -286,12 +309,14 @@ export function buildRankings(
   heat: HeatData | null,
   technical: TechnicalData | null,
   marketCaps: MarketCaps | null,
+  sectors: SectorData | null = null,
   topN = 10,
 ): RankBundle {
   const uni = buildUniverse(data).filter((u) => u.rated);
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
   const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
+  const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
   const attn = (t: string) => technical?.tickers?.[t]?.attention;
 
   const momentum = (t: string): number | null => {
@@ -300,32 +325,38 @@ export function buildRankings(
     return (cs[cs.length - 1] / cs[0] - 1) * 100;
   };
 
+  // `min` = the "达标" bar. A name in the top-N still stays dim (not 入选) unless
+  // it clears the bar — so on a weak day nothing lights up rather than forcing it.
   const lenses: Lens[] = [
     {
       key: "attention",
       label: "量价注意力",
-      desc: "RVOL + 突破 + OBV + 趋势 综合分",
+      desc: "RVOL + 突破 + OBV + 趋势 综合分,达标线 50",
+      min: 50,
       get: (t) => attn(t)?.score ?? null,
       fmt: (v) => `${Math.round(v)} 分`,
     },
     {
       key: "rvol",
       label: "放量 RVOL",
-      desc: "近 5 日 / 20 日均量,纯资金异动",
+      desc: "近 5 日 / 20 日均量,达标线 1.5×",
+      min: 1.5,
       get: (t) => attn(t)?.rvol ?? null,
       fmt: (v) => `${v.toFixed(2)}×`,
     },
     {
       key: "momentum",
       label: "动量 60 日",
-      desc: "近 60 个交易日涨幅",
+      desc: "近 60 个交易日涨幅,达标线 +10%",
+      min: 10,
       get: (t) => momentum(t),
       fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`,
     },
     {
       key: "social",
       label: "社交热度",
-      desc: "Ape Wisdom z 分数(提及异常度)",
+      desc: "Ape Wisdom z 分数,达标线 0.5(点火线)",
+      min: 0.5,
       get: (t) => heat?.tickers?.[t]?.z ?? null,
       fmt: (v) => v.toFixed(2),
     },
@@ -340,19 +371,25 @@ export function buildRankings(
       .map((u) => ({ t: u.ticker, v: L.get(u.ticker) }))
       .filter((x): x is { t: string; v: number } => x.v != null && !Number.isNaN(x.v))
       .sort((a, b) => b.v - a.v)
-      .map((x, i) => ({
-        ticker: x.t,
-        company: cmap.get(x.t) ?? "",
-        cap: capOf(x.t),
-        value: x.v,
-        display: L.fmt(x.v),
-        rank: i + 1,
-        advancing: i < topN,
-      }));
+      .map((x, i) => {
+        const meetsBar = x.v >= L.min;
+        return {
+          ticker: x.t,
+          company: cmap.get(x.t) ?? "",
+          cap: capOf(x.t),
+          sector: sectorOf(x.t),
+          value: x.v,
+          display: L.fmt(x.v),
+          rank: i + 1,
+          meetsBar,
+          advancing: i < topN && meetsBar,
+        };
+      });
     if (!rows.length) continue;
     rankings.push({ key: L.key, label: L.label, desc: L.desc, rows });
     for (const r of rows) {
-      if (!r.advancing) break;
+      if (r.rank > topN) break;
+      if (!r.advancing) continue; // top-N but below the bar → stays dim, doesn't advance
       advancing.add(r.ticker);
       advancingBy.set(r.ticker, [...(advancingBy.get(r.ticker) ?? []), L.key]);
     }

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { HeatData, Health, MarketCaps, SAData, TechnicalData } from "../types";
+import type { HeatData, Health, MarketCaps, SAData, TechnicalData, SectorData } from "../types";
 
 // The scraped snapshot. Served same-origin by the local http.server (built) or
 // proxied by Vite in dev. Data updates daily today; polling is the pragmatic
@@ -8,6 +8,7 @@ import type { HeatData, Health, MarketCaps, SAData, TechnicalData } from "../typ
 const DATA_URL = "/data/newsagg/seekingalpha_latest.json";
 const HEAT_URL = "/data/newsagg/heat_latest.json";
 const TECH_URL = "/data/newsagg/technical_latest.json";
+const SECTOR_URL = "/data/newsagg/sectors.json";
 const MCAP_URL = "/data/newsagg/marketcaps.json";
 const HEALTH_URL = "/data/newsagg/health.json";
 const POLL_MS = 15_000;
@@ -17,6 +18,7 @@ export function usePoller() {
   const setData = useStore((s) => s.setData);
   const setHeat = useStore((s) => s.setHeat);
   const setTechnical = useStore((s) => s.setTechnical);
+  const setSectors = useStore((s) => s.setSectors);
   const setMarketCaps = useStore((s) => s.setMarketCaps);
   const setHealth = useStore((s) => s.setHealth);
   const setStatus = useStore((s) => s.setStatus);
@@ -52,6 +54,12 @@ export function usePoller() {
         /* ignore */
       }
       try {
+        const sres = await fetch(`${SECTOR_URL}?t=${Date.now()}`);
+        if (alive) setSectors(sres.ok ? ((await sres.json()) as SectorData) : null);
+      } catch {
+        /* ignore */
+      }
+      try {
         const mres = await fetch(`${MCAP_URL}?t=${Date.now()}`);
         if (alive) setMarketCaps(mres.ok ? ((await mres.json()) as MarketCaps) : null);
       } catch {
@@ -71,5 +79,5 @@ export function usePoller() {
       alive = false;
       clearInterval(id);
     };
-  }, [setData, setHeat, setTechnical, setMarketCaps, setHealth, setStatus]);
+  }, [setData, setHeat, setTechnical, setSectors, setMarketCaps, setHealth, setStatus]);
 }

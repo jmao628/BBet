@@ -113,6 +113,8 @@ export interface TechnicalData {
   tickers: Record<string, TechTicker>;
 }
 
+export type SectorData = Record<string, { sector: string; industry: string }>;
+
 export interface Health {
   last_attempt: string | null;
   last_success: string | null;

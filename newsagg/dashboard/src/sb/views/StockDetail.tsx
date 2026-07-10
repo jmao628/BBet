@@ -6,6 +6,7 @@ import {
   capSizeFromCap,
   bypassesHeat,
   passesHeatGate,
+  sectorCN,
 } from "../pipeline";
 import type { TechTicker } from "../../types";
 
@@ -134,6 +135,7 @@ export function StockDetail() {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
   const technical = useStore((s) => s.technical);
+  const sectors = useStore((s) => s.sectors);
   const marketCaps = useStore((s) => s.marketCaps);
 
   useEffect(() => {
@@ -190,6 +192,8 @@ export function StockDetail() {
             <div className="mt-1 text-[12px] text-muted">
               {company || "—"} · {CAP_CN[cap]}
               {mc ? ` · $${(mc / 1e9).toFixed(1)}B` : ""}
+              {sectors?.[ticker]?.sector ? ` · ${sectorCN(sectors[ticker].sector)}` : ""}
+              {sectors?.[ticker]?.industry ? ` · ${sectors[ticker].industry}` : ""}
             </div>
           </div>
           <button

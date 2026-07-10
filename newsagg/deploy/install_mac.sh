@@ -6,6 +6,7 @@
 #   com.newsagg.scrape     — SeekingAlpha scrape once a day        (:00)
 #   com.newsagg.marketcap  — yfinance market caps                 (:10)
 #   com.newsagg.technical  — yfinance price-volume + technicals    (:15)
+#   com.newsagg.sectors    — yfinance sector classification (cached)(:17)
 #   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
 #   com.newsagg.web        — local web server on http://localhost:8000
 #
@@ -49,6 +50,7 @@ SCRAPE_PLIST="$LA_DIR/com.newsagg.scrape.plist"
 HEAT_PLIST="$LA_DIR/com.newsagg.heat.plist"
 MCAP_PLIST="$LA_DIR/com.newsagg.marketcap.plist"
 TECH_PLIST="$LA_DIR/com.newsagg.technical.plist"
+SECTOR_PLIST="$LA_DIR/com.newsagg.sectors.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -169,6 +171,35 @@ $PROXY_LINES
 </plist>
 EOF
 
+cat > "$SECTOR_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.sectors</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.sectors</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$PROXY_LINES
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>17</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/sectors.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/sectors.log</string>
+</dict>
+</plist>
+EOF
+
 cat > "$WEB_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -192,7 +223,7 @@ cat > "$WEB_PLIST" <<EOF
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

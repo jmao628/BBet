@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData } from "./types";
+import type { HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData, SectorData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 
@@ -17,6 +17,7 @@ interface DashboardState {
   data: SAData | null;
   heat: HeatData | null;
   technical: TechnicalData | null;
+  sectors: SectorData | null;
   marketCaps: MarketCaps | null;
   health: Health | null;
   status: ConnStatus;
@@ -27,6 +28,7 @@ interface DashboardState {
   setData: (d: SAData) => void;
   setHeat: (h: HeatData | null) => void;
   setTechnical: (t: TechnicalData | null) => void;
+  setSectors: (s: SectorData | null) => void;
   setMarketCaps: (m: MarketCaps | null) => void;
   setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
@@ -40,6 +42,7 @@ export const useStore = create<DashboardState>((set) => ({
   data: null,
   heat: null,
   technical: null,
+  sectors: null,
   marketCaps: null,
   health: null,
   status: "connecting",
@@ -50,6 +53,7 @@ export const useStore = create<DashboardState>((set) => ({
   setData: (d) => set({ data: d, status: "live", lastUpdated: Date.now() }),
   setHeat: (h) => set({ heat: h }),
   setTechnical: (t) => set({ technical: t }),
+  setSectors: (s) => set({ sectors: s }),
   setMarketCaps: (m) => set({ marketCaps: m }),
   setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),
