@@ -41,7 +41,8 @@ def seed_tickers(output_dir: Path) -> list[str]:
 
 
 def _market_cap(tk) -> int | None:
-    # fast_info is cheap and version-tolerant; fall back to full info.
+    # fast_info only — it's one cheap request. (The full .info fallback is
+    # far too slow across hundreds of tickers, so we skip it.)
     try:
         fi = tk.fast_info
         mc = getattr(fi, "market_cap", None)
@@ -50,26 +51,32 @@ def _market_cap(tk) -> int | None:
                 mc = fi["marketCap"]
             except Exception:  # noqa: BLE001
                 mc = None
-        if mc:
-            return int(mc)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        mc = tk.info.get("marketCap")
         return int(mc) if mc else None
     except Exception:  # noqa: BLE001
         return None
 
 
-def fetch_caps(tickers: list[str]) -> dict[str, int]:
+def fetch_caps(tickers: list[str], workers: int = 10) -> dict[str, int]:
+    """Fetch market caps in parallel (fast_info per ticker)."""
     import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def one(t: str) -> tuple[str, int | None]:
+        # yfinance uses '-' for share classes (BRK.B -> BRK-B).
+        return t, _market_cap(yf.Ticker(t.replace(".", "-")))
 
     caps: dict[str, int] = {}
-    for t in tickers:
-        # yfinance uses '-' for share classes (BRK.B -> BRK-B).
-        mc = _market_cap(yf.Ticker(t.replace(".", "-")))
-        if mc:
-            caps[t] = mc
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(one, t) for t in tickers]
+        for i, fut in enumerate(as_completed(futures), 1):
+            try:
+                t, mc = fut.result()
+            except Exception:  # noqa: BLE001
+                continue
+            if mc:
+                caps[t] = mc
+            if i % 40 == 0:
+                logger.info("  %d/%d…", i, len(tickers))
     return caps
 
 
