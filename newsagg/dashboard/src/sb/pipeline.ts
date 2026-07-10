@@ -171,6 +171,25 @@ export function buildSeeds(data: SAData | null): SeedRow[] {
   });
 }
 
+export type CapSize = "large" | "mid" | "small" | "unknown";
+
+// Infer cap size from the SA widget cap-group labels a ticker appears in
+// (Large Cap / S&P 500, Mid Cap / Mid Cap 400, Small Cap / Small Cap 600).
+export function capSizeOf(caps: string[]): CapSize {
+  const j = caps.join(" ").toLowerCase();
+  if (j.includes("large") || j.includes("s&p 500")) return "large";
+  if (j.includes("small")) return "small";
+  if (j.includes("mid")) return "mid";
+  return "unknown";
+}
+
+// Big caps are already well-covered, so they bypass the social-heat gate and
+// pass straight to screening; only mid/small caps need heat ignition.
+export function passesHeatGate(cap: CapSize, phase: string): boolean {
+  if (cap === "large") return true;
+  return phase === "ignite" || phase === "detonate";
+}
+
 export function buildUniverse(data: SAData | null): UniStock[] {
   const map = new Map<string, UniStock>();
   for (const w of data?.home_widgets ?? []) {

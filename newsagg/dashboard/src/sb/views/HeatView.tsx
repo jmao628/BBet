@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../../store";
-import { companyMap, buildUniverse } from "../pipeline";
+import { companyMap, buildUniverse, capSizeOf, passesHeatGate, type CapSize } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import type { HeatTicker } from "../../types";
 
@@ -26,6 +26,33 @@ function PhaseChip({ phase }: { phase: string }) {
   );
 }
 
+const CAP_CN: Record<CapSize, string> = {
+  large: "大盘",
+  mid: "中盘",
+  small: "小盘",
+  unknown: "—",
+};
+
+// Heat gate: big caps pass straight through; mid/small caps must ignite.
+function GateChip({ cap, phase }: { cap: CapSize; phase: string }) {
+  if (cap === "large")
+    return (
+      <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
+        大票直通
+      </span>
+    );
+  const ok = passesHeatGate(cap, phase);
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+        ok ? "border-ok/40 bg-ok/10 text-ok" : "border-line bg-inset text-muted2"
+      }`}
+    >
+      {ok ? "点火通过" : "待点火"}
+    </span>
+  );
+}
+
 export function HeatView() {
   const heat = useStore((s) => s.heat);
   const data = useStore((s) => s.data);
@@ -34,7 +61,12 @@ export function HeatView() {
   const cmap = useMemo(() => companyMap(data), [data]);
   const [mineOnly, setMineOnly] = useState(true);
 
-  const universe = useMemo(() => new Set(buildUniverse(data).map((u) => u.ticker)), [data]);
+  const capBy = useMemo(() => {
+    const m = new Map<string, CapSize>();
+    for (const u of buildUniverse(data)) m.set(u.ticker, capSizeOf(u.caps));
+    return m;
+  }, [data]);
+  const universe = useMemo(() => new Set(capBy.keys()), [capBy]);
 
   const allRows = useMemo(() => {
     const t = heat?.tickers ?? {};
@@ -83,7 +115,7 @@ export function HeatView() {
       <ViewHead
         eyebrow="Stage 2 · 热度信号"
         title="热度信号 · z / 涨速 / 相位"
-        desc="x=ln(1+m)；μ=过去60天中位数(滞后1)，σ=1.4826·MAD(≥0.35)；z=(x−μ)/σ；涨速=近3天z斜率。点火 0.5 / 引爆 2.0。"
+        desc="大票已被充分覆盖 → 直接跳过热度闸进入筛选；只有中小盘需要社交热度点火。x=ln(1+m)；z=(x−μ)/σ（μ=过去60天中位数，σ=1.4826·MAD≥0.35）；涨速=近3天z斜率。点火 0.5 / 引爆 2.0。"
       />
 
       <StatStrip
@@ -137,37 +169,46 @@ export function HeatView() {
               <thead className="sticky top-0 bg-panel">
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
                   <th className="px-3 py-2 text-left font-medium">标的</th>
+                  <th className="px-3 py-2 text-left font-medium">市值</th>
                   <th className="px-3 py-2 text-right font-medium">提及</th>
                   <th className="px-3 py-2 text-right font-medium">z</th>
                   <th className="px-3 py-2 text-right font-medium">涨速</th>
                   <th className="px-3 py-2 text-left font-medium">相位</th>
+                  <th className="px-3 py-2 text-left font-medium">热度闸</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 80).map((r) => (
-                  <tr
-                    key={r.ticker}
-                    onClick={() => setTicker(r.ticker)}
-                    className={`cursor-pointer border-t border-line hover:bg-white/[0.03] ${
-                      focused?.ticker === r.ticker ? "bg-signal/10" : ""
-                    }`}
-                  >
-                    <td className="px-3 py-2">
-                      <span className="font-mono font-semibold text-signal">{r.ticker}</span>
-                      <span className="ml-2 text-[11px] text-muted">{cmap.get(r.ticker) ?? ""}</span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{r.mentions}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {r.z != null ? r.z.toFixed(2) : <span className="text-muted2">—</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
-                      {r.vel != null ? r.vel.toFixed(2) : "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <PhaseChip phase={r.phase} />
-                    </td>
-                  </tr>
-                ))}
+                {rows.slice(0, 80).map((r) => {
+                  const cap = capBy.get(r.ticker) ?? "unknown";
+                  return (
+                    <tr
+                      key={r.ticker}
+                      onClick={() => setTicker(r.ticker)}
+                      className={`cursor-pointer border-t border-line hover:bg-white/[0.03] ${
+                        focused?.ticker === r.ticker ? "bg-signal/10" : ""
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <span className="font-mono font-semibold text-signal">{r.ticker}</span>
+                        <span className="ml-2 text-[11px] text-muted">{cmap.get(r.ticker) ?? ""}</span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-muted2">{CAP_CN[cap]}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">{r.mentions}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        {r.z != null ? r.z.toFixed(2) : <span className="text-muted2">—</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
+                        {r.vel != null ? r.vel.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <PhaseChip phase={r.phase} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <GateChip cap={cap} phase={r.phase} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
