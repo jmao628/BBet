@@ -184,28 +184,47 @@ export function HeatView() {
         </div>
       )}
 
-      {bypassOnly.length > 0 && (filter === null) && (
-        <Card
-          title="大票直通"
-          sub={`≥ $1000亿 · ${bypassOnly.length} 只 · 已被充分覆盖,跳过热度闸(不在下方排名高亮)`}
-        >
-          <div className="flex max-h-[104px] flex-wrap gap-2 overflow-y-auto">
-            {bypassOnly.map((t) => (
-              <button
-                key={t}
-                onClick={() => openDetail(t)}
-                className="flex items-center gap-2 rounded-lg border border-signal/30 bg-signal/[0.06] px-2.5 py-1.5 text-[12px] hover:bg-signal/10"
-              >
-                <span className="font-mono font-semibold text-signal">{t}</span>
-                <span className="max-w-[130px] truncate text-muted">{cmap.get(t) ?? ""}</span>
-                {marketCaps?.[t] ? (
-                  <span className="font-mono text-muted2">${(marketCaps[t] / 1e9).toFixed(0)}B</span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      {(() => {
+        const bpRows = (filter ? bypassOnly.filter((t) => (sectors?.[t]?.sector ?? "") === filter) : bypassOnly);
+        return bpRows.length > 0 ? (
+          <Card
+            title="大票直通"
+            sub={`≥ $1000亿 · ${bpRows.length} 只 · 已被充分覆盖,跳过热度闸 · 按市值排序`}
+            pad0
+          >
+            <div className="max-h-[300px] overflow-y-auto">
+              <table className="w-full text-[13px]">
+                <tbody>
+                  {bpRows.map((t, i) => (
+                    <tr
+                      key={t}
+                      onClick={() => openDetail(t)}
+                      className="cursor-pointer border-t border-line hover:bg-white/[0.03]"
+                    >
+                      <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
+                        {i + 1}
+                      </td>
+                      <td className="py-2 pl-2">
+                        <span className="font-mono font-semibold text-signal">{t}</span>
+                        <span className="ml-2 text-[11px] text-muted">{cmap.get(t) ?? ""}</span>
+                      </td>
+                      <td className="py-2 text-[11px] text-muted2">{sectorCN(sectors?.[t]?.sector ?? "")}</td>
+                      <td className="py-2 pr-1 text-right font-mono tabular-nums text-signal">
+                        {marketCaps?.[t] ? `$${(marketCaps[t] / 1e9).toFixed(0)}B` : "—"}
+                      </td>
+                      <td className="w-14 py-2 pr-[18px] text-right">
+                        <span className="whitespace-nowrap rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[10px] font-medium text-signal">
+                          直通
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) : null;
+      })()}
 
       {(() => {
         const sbRows = filter ? bundle.strongBuys.filter((s) => s.sector === filter) : bundle.strongBuys;
