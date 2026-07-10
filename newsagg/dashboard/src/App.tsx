@@ -6,8 +6,8 @@ import { Banner } from "./sb/Banner";
 import { OverviewView } from "./sb/views/OverviewView";
 import { SeedsView } from "./sb/views/SeedsView";
 import { HeatView } from "./sb/views/HeatView";
+import { ScreenView } from "./sb/views/ScreenView";
 import {
-  ScreenView,
   CatalystView,
   ConvictionView,
   TechnicalView,

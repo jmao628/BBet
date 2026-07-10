@@ -23,33 +23,6 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function ScreenView() {
-  return (
-    <div>
-      <ViewHead
-        eyebrow="Stage 3 · 发现筛选"
-        title="发现筛选 · 即将被发现的中小盘"
-        desc="从种子表 + 热度里，筛出一小批「即将被发现」的中小盘 bull 候选。这是发现机器的核心。"
-      />
-      <div className="grid gap-4">
-        <Pending
-          title="待接入：相位 + 市值 + 作者质量"
-          needs={[
-            "热度入口 A：取相位=点火的票（z∈[0.5,2.0)、vel≥0.15、accel≥0）",
-            "作者质量二段：命中后校验白名单作者权重 > 0",
-            "市值：数据商 / yfinance，过滤中小盘（市值上限阈值）",
-            "产出：发现候选短名单",
-          ]}
-        />
-        <Ref>
-          <Row k="入口 A" v="热度点火 → 作者质量二段" />
-          <Row k="核心目标" v="被市场共识重新定价之前，先挖出中小盘 bull 候选" />
-        </Ref>
-      </div>
-    </div>
-  );
-}
-
 export function CatalystView() {
   return (
     <div>

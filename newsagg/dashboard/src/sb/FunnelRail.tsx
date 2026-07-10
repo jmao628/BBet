@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildUniverse, capSizeFromCap, passesHeatGate } from "./pipeline";
+import { buildSeeds, buildUniverse, buildScreen, capSizeFromCap, passesHeatGate } from "./pipeline";
 import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -24,10 +24,12 @@ function useCounts(): Record<string, number | null> {
     }).length;
   }
 
+  const screenCount = heat ? buildScreen(data, heat, marketCaps).candidates.length : null;
+
   return {
     seeds: seeds.length,
     heat: heatCount,
-    screen: null,
+    screen: screenCount,
     catalyst: null,
     conviction: null,
     technical: null,

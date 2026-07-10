@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { SAData } from "../types";
+import type { HeatData, MarketCaps, SAData } from "../types";
 
 export type CatalystType =
   | "earnings"
@@ -222,6 +222,62 @@ export function buildUniverse(data: SAData | null): UniStock[] {
     }
   }
   return [...map.values()].sort((a, b) => (b.quant ?? -1) - (a.quant ?? -1));
+}
+
+// Stage 3 — Screen. A seed becomes a discovery candidate when it (1) passes
+// the heat gate (big cap bypass, or mid/small ignited) AND (2) has author
+// quality — proxied by an analyst thesis until an author whitelist exists.
+export interface ScreenRow {
+  ticker: string;
+  company: string;
+  cap: CapSize;
+  phase: string | null;
+  hasThesis: boolean;
+  author: string | null;
+  reasoning: string;
+  articleUrl: string | null;
+  rating: string | null;
+  z: number | null;
+}
+
+const CAP_RANK: Record<CapSize, number> = { large: 0, mid: 1, small: 2, unknown: 3 };
+
+export function buildScreen(
+  data: SAData | null,
+  heat: HeatData | null,
+  marketCaps: MarketCaps | null,
+): { candidates: ScreenRow[]; total: number; passedHeat: number } {
+  const seeds = buildSeeds(data);
+  const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
+  const candidates: ScreenRow[] = [];
+  let passedHeat = 0;
+
+  for (const s of seeds) {
+    const cap = capSizeFromCap(marketCaps?.[s.ticker], uniCaps.get(s.ticker) ?? []);
+    const ht = heat?.tickers?.[s.ticker];
+    const phase = ht?.phase ?? null;
+    const passHeat = passesHeatGate(cap, phase ?? "");
+    if (passHeat) passedHeat++;
+    if (passHeat && s.hasThesis) {
+      candidates.push({
+        ticker: s.ticker,
+        company: s.company,
+        cap,
+        phase,
+        hasThesis: s.hasThesis,
+        author: s.author,
+        reasoning: s.reasoning,
+        articleUrl: s.articleUrl,
+        rating: s.rating,
+        z: ht?.z ?? null,
+      });
+    }
+  }
+
+  candidates.sort(
+    (a, b) => CAP_RANK[a.cap] - CAP_RANK[b.cap] || (b.z ?? -99) - (a.z ?? -99),
+  );
+  return { candidates, total: seeds.length, passedHeat };
 }
 
 export const CATALYST_CN: Record<CatalystType, string> = {
