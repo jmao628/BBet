@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useStore } from "../../store";
 import { buildScreen, type CapSize } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
+import { MethodInfo } from "../MethodInfo";
 
 const CAP_CN: Record<CapSize, string> = { large: "大盘", mid: "中盘", small: "小盘", unknown: "—" };
 
@@ -39,6 +40,7 @@ export function ScreenView() {
         eyebrow="Stage 3 · 发现筛选"
         title="发现筛选 · 即将被发现的中小盘"
         desc="种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 多维排名入选（量价注意力 / 放量 / 动量 / 社交热度，各维度前 10 晋级，大票直通）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。"
+        actions={<MethodInfo />}
       />
 
       <StatStrip

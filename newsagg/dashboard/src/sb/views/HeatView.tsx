@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useStore } from "../../store";
 import { buildRankings, type CapSize, type Ranking } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
+import { MethodInfo } from "../MethodInfo";
 
 const CAP_CN: Record<CapSize, string> = { large: "大盘", mid: "中盘", small: "小盘", unknown: "—" };
 
@@ -107,6 +108,7 @@ export function HeatView() {
         eyebrow="Stage 2 · 热度点火"
         title="热度点火 · 多维排名"
         desc="种子池全部在此,按多个独立维度分别排名——量价注意力、放量 RVOL、60 日动量、社交热度。每个维度的前 10 入选下一轮(某只票只要在任一维度进前 10 就晋级)。数据为日频,跑一次 technical/heat 刷新一次。"
+        actions={<MethodInfo />}
       />
 
       <StatStrip
