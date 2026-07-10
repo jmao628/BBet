@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../../store";
-import { buildRankings, sectorCN, type Ranking } from "../pipeline";
+import { buildRankings, companyMap, sectorCN, type Ranking } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -81,10 +81,24 @@ export function HeatView() {
   const marketCaps = useStore((s) => s.marketCaps);
   const [filter, setFilter] = useState<string | null>(null);
 
+  const openDetail = useStore((s) => s.openDetail);
+  const cmap = useMemo(() => companyMap(data), [data]);
+
   const bundle = useMemo(
     () => buildRankings(data, heat, technical, marketCaps, sectors),
     [data, heat, technical, marketCaps, sectors],
   );
+
+  // Mega caps that advanced by bypass only (≥$100B, skip the heat gate) — they
+  // don't appear highlighted in any ranking table, so list them so the
+  // "入选下一轮" total reconciles: ranking-advanced + bypass.
+  const bypassOnly = useMemo(() => {
+    const out: string[] = [];
+    for (const [t, lenses] of bundle.advancingBy) {
+      if (lenses.length === 1 && lenses[0] === "bypass") out.push(t);
+    }
+    return out.sort((a, b) => (marketCaps?.[b] ?? 0) - (marketCaps?.[a] ?? 0));
+  }, [bundle.advancingBy, marketCaps]);
 
   // Sector breakdown of the advancing set — shows why it skews to one sector.
   const sectorCounts = useMemo(() => {
@@ -134,8 +148,13 @@ export function HeatView() {
       <StatStrip
         stats={[
           { k: "种子池", v: bundle.universe, d: "有 SA 评分的票" },
-          { k: "入选下一轮", v: bundle.advancing.size, d: "各维度达标前 10 的并集", color: "#3dd6c4" },
-          { k: "排名维度", v: bundle.rankings.length, d: "量价/放量/动量/社交" },
+          {
+            k: "入选下一轮",
+            v: bundle.advancing.size,
+            d: `排名达标 ${bundle.advancing.size - bypassOnly.length} + 大票直通 ${bypassOnly.length}`,
+            color: "#3dd6c4",
+          },
+          { k: "排名维度", v: bundle.rankings.length, d: "量价/放量/动量/社交(有数据的)" },
           {
             k: "主导板块",
             v: sectorCounts.length ? sectorCN(sectorCounts[0][0]) : "—",
@@ -171,7 +190,30 @@ export function HeatView() {
         </div>
       )}
 
-      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]">
+      {bypassOnly.length > 0 && (filter === null) && (
+        <Card
+          title="大票直通"
+          sub={`≥ $1000亿 · ${bypassOnly.length} 只 · 已被充分覆盖,跳过热度闸(不在下方排名高亮)`}
+        >
+          <div className="flex flex-wrap gap-2">
+            {bypassOnly.map((t) => (
+              <button
+                key={t}
+                onClick={() => openDetail(t)}
+                className="flex items-center gap-2 rounded-lg border border-signal/30 bg-signal/[0.06] px-2.5 py-1.5 text-[12px] hover:bg-signal/10"
+              >
+                <span className="font-mono font-semibold text-signal">{t}</span>
+                <span className="max-w-[130px] truncate text-muted">{cmap.get(t) ?? ""}</span>
+                {marketCaps?.[t] ? (
+                  <span className="font-mono text-muted2">${(marketCaps[t] / 1e9).toFixed(0)}B</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <div className="mt-4 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]">
         {bundle.rankings.map((r) => (
           <RankingCard key={r.key} ranking={r} filter={filter} />
         ))}
