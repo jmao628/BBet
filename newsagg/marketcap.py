@@ -93,8 +93,23 @@ def main() -> int:
         return 1
     logger.info("fetching market caps for %d tickers…", len(tickers))
     caps = fetch_caps(tickers)
+    out_path = settings.output_dir / MARKETCAP_FILE
+
+    # Safety net: a network failure (e.g. Yahoo unreachable) yields 0 caps —
+    # don't overwrite a previously-good marketcaps.json with nothing.
+    if not caps:
+        if out_path.exists():
+            logger.warning("fetched 0 market caps (network?); keeping existing marketcaps.json")
+        else:
+            logger.warning(
+                "fetched 0 market caps and no existing file — is Yahoo reachable? "
+                "try: HTTPS_PROXY=http://127.0.0.1:<port> python -m newsagg.marketcap"
+            )
+        print("market caps: 0 (kept previous / none)")
+        return 1
+
     settings.output_dir.mkdir(parents=True, exist_ok=True)
-    (settings.output_dir / MARKETCAP_FILE).write_text(json.dumps(caps))
+    out_path.write_text(json.dumps(caps))
     logger.info("wrote %d/%d market caps", len(caps), len(tickers))
     print(f"market caps: {len(caps)}/{len(tickers)}")
     return 0
