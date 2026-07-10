@@ -463,11 +463,13 @@ export function buildRankings(
   return { rankings, advancing, advancingBy, strongBuys, universe: uni.length };
 }
 
-// Stage 3 — Screen. A seed becomes a discovery candidate when it (0) has an SA
-// rating (quant score or BUY/STRONG BUY — analyst-thesis-only mentions with no
-// rating, e.g. IREN, don't qualify), (1) passes the heat gate (big cap bypass,
-// or mid/small ignited), AND (2) has author quality — proxied by an analyst
-// thesis until an author whitelist exists.
+// Screen — the *quality net*, run in PARALLEL with Heat (not downstream of it).
+// A seed is a screen candidate when it (0) has an SA rating (quant score or
+// BUY/STRONG BUY — thesis-only mentions with no rating, e.g. IREN, don't
+// qualify) AND (1) has author quality — proxied by an analyst thesis until an
+// author whitelist exists. Whether it ALSO cleared the attention board (Heat)
+// is recorded as `advanced` (the overlap is what later stages act on) but is no
+// longer a gate — so Screen and Heat are two independent lenses.
 export type GateVia = "bypass" | "social" | "volume";
 
 export interface ScreenRow {
@@ -475,7 +477,8 @@ export interface ScreenRow {
   company: string;
   cap: CapSize;
   bypass: boolean; // mega cap that skipped social heat
-  via: GateVia; // how it passed the heat gate
+  advanced: boolean; // also cleared the Heat attention board (the overlap)
+  via: GateVia; // if advanced, how it cleared the attention board
   lenses: string[]; // ranking lenses it advanced in (attention/rvol/momentum/social)
   phase: string | null; // social heat phase
   attnPhase: string | null; // price-volume attention phase
@@ -504,46 +507,48 @@ export function buildScreen(
   let passedHeat = 0;
 
   for (const s of seeds) {
-    // Stage 0 — must have an SA rating to enter the heat/screen funnel.
+    // Quality net: must have an SA rating AND an analyst thesis. Independent of Heat.
     if (s.rating == null && s.quant == null) continue;
+    if (!s.hasThesis) continue;
     const mc = marketCaps?.[s.ticker];
     const cap = capSizeFromCap(mc, uniCaps.get(s.ticker) ?? []);
     const ht = heat?.tickers?.[s.ticker];
     const phase = ht?.phase ?? null;
     const attn = technical?.tickers?.[s.ticker]?.attention;
-    // Stage 2 — advances if it's top-N in ANY ranking lens (or a mega cap).
+    // Overlap with the Heat attention board (recorded, not gated).
     const advanced = advancing.has(s.ticker);
     const lenses = advancingBy.get(s.ticker) ?? [];
     if (advanced) passedHeat++;
-    if (advanced && s.hasThesis) {
-      const via: GateVia = bypassesHeat(mc)
-        ? "bypass"
-        : lenses.includes("social")
-          ? "social"
-          : "volume";
-      candidates.push({
-        ticker: s.ticker,
-        company: s.company,
-        cap,
-        bypass: bypassesHeat(mc),
-        via,
-        lenses,
-        phase,
-        attnPhase: attn?.phase ?? null,
-        attnScore: attn?.score ?? null,
-        rvol: attn?.rvol ?? null,
-        hasThesis: s.hasThesis,
-        author: s.author,
-        reasoning: s.reasoning,
-        articleUrl: s.articleUrl,
-        rating: s.rating,
-        z: ht?.z ?? null,
-      });
-    }
+    const via: GateVia = bypassesHeat(mc)
+      ? "bypass"
+      : lenses.includes("social") && !lenses.some((l) => l !== "social")
+        ? "social"
+        : "volume";
+    candidates.push({
+      ticker: s.ticker,
+      company: s.company,
+      cap,
+      bypass: bypassesHeat(mc),
+      advanced,
+      via,
+      lenses,
+      phase,
+      attnPhase: attn?.phase ?? null,
+      attnScore: attn?.score ?? null,
+      rvol: attn?.rvol ?? null,
+      hasThesis: s.hasThesis,
+      author: s.author,
+      reasoning: s.reasoning,
+      articleUrl: s.articleUrl,
+      rating: s.rating,
+      z: ht?.z ?? null,
+    });
   }
 
+  // Overlap (in both nets) first, then by cap, then by heat z / attention.
   candidates.sort(
     (a, b) =>
+      Number(b.advanced) - Number(a.advanced) ||
       CAP_RANK[a.cap] - CAP_RANK[b.cap] ||
       (b.z ?? -99) - (a.z ?? -99) ||
       (b.attnScore ?? -1) - (a.attnScore ?? -1),

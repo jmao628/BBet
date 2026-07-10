@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, capLabel } from "../pipeline";
+import { buildScreen, buildUniverse, bypassesHeat, capLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -41,40 +41,56 @@ export function ScreenView() {
     [data, heat, marketCaps, technical],
   );
 
-  // Ecosystem network: which universe tickers connect to OTHER universe tickers.
-  // Those are the ones worth building a graph around (they share a supply chain).
+  // Ecosystem network. SELECTION RULE — a ticker earns a row (becomes the
+  // "subject") only if it is a *discovery target*: in your universe AND not a
+  // mega-cap (≥$100B). Mega-caps (AMZN, NVDA, MSFT…) are anchors — you don't
+  // "discover" them, so they never sit on the left; they only appear as chips
+  // that a target is tied to. RANKING — by how many other universe names it
+  // links to (its centrality); ties broken alphabetically. That's why CRDO (a
+  // small cap) is a row and AMZN (its mega-cap customer) is only a chip.
   const links = useMemo(() => {
     if (!supplychain) return [];
     const uni = buildUniverse(data);
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
-    type Neighbor = { ticker: string; kind: string };
-    const rows: { ticker: string; company: string; neighbors: Neighbor[] }[] = [];
+    type Neighbor = { ticker: string; kind: string; anchor: boolean };
+    const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number }[] = [];
     for (const [tk, m] of Object.entries(supplychain)) {
+      // Selection: subject must be a non-mega-cap universe name.
+      if (!inUni.has(tk) || bypassesHeat(marketCaps?.[tk])) continue;
       const seen = new Set<string>();
       const neighbors: Neighbor[] = [];
       for (const kind of ["upstream", "downstream", "peers"] as const) {
         for (const e of m[kind] ?? []) {
           if (e.ticker && e.ticker !== tk && inUni.has(e.ticker) && !seen.has(e.ticker)) {
             seen.add(e.ticker);
-            neighbors.push({ ticker: e.ticker, kind });
+            neighbors.push({ ticker: e.ticker, kind, anchor: bypassesHeat(marketCaps?.[e.ticker]) });
           }
         }
       }
-      if (neighbors.length) rows.push({ ticker: tk, company: companyOf.get(tk) ?? "", neighbors });
+      if (neighbors.length)
+        rows.push({
+          ticker: tk,
+          company: companyOf.get(tk) ?? "",
+          neighbors,
+          anchors: neighbors.filter((n) => n.anchor).length,
+        });
     }
-    rows.sort((a, b) => b.neighbors.length - a.neighbors.length);
+    // Rank by total links, then by number of mega-cap anchors, then alpha.
+    rows.sort(
+      (a, b) => b.neighbors.length - a.neighbors.length || b.anchors - a.anchors || a.ticker.localeCompare(b.ticker),
+    );
     return rows;
-  }, [supplychain, data]);
+  }, [supplychain, data, marketCaps]);
 
   return (
     <div className="view-in">
       <ViewHead
-        eyebrow={t("Stage 3 · Screen", "Stage 3 · 发现筛选")}
-        title={t("Screen · Mid/Small Caps About to Be Discovered", "发现筛选 · 即将被发现的中小盘")}
+        eyebrow={t("Stage 2 · Screen (quality net)", "Stage 2 · 发现筛选（质量网）")}
+        title={t("Screen · The Quality Net", "发现筛选 · 质量筛")}
         desc={t(
-          "Seed table → SA rating gate (no-rating thesis-only mentions excluded) → multi-lens advance (attention / volume / momentum / social top-10, mega-cap bypass) → author-quality second gate (has an analyst thesis) → candidate shortlist.",
-          "种子表 → SA 评分门槛（无评分的纯分析师提及不入围）→ 多维排名入选（量价注意力 / 放量 / 动量 / 社交热度，各维度前 10 晋级，大票直通）→ 作者质量二段（有分析师看多论点）→ 发现候选短名单。",
+          "Run in parallel with Heat, not after it. The quality net keeps seeds that (1) carry an SA rating (thesis-only mentions with no rating are out) and (2) have an analyst thesis. The ✓ column marks names that ALSO cleared the Heat attention board — that overlap is what later stages act on.",
+          "与热度点火并行，不是它的下游。质量网留下同时满足：(1) 有 SA 评分（无评分的纯提及出局）、(2) 有分析师看多论点 的种子。带 ✓ 的是同时也过了热度注意力榜的票——两网交集才是后续阶段真正处理的对象。",
         )}
         actions={<MethodInfo />}
       />
@@ -82,8 +98,8 @@ export function ScreenView() {
       <StatStrip
         stats={[
           { k: t("Seeds", "种子"), v: total, d: t("all deduped bulls", "去重后全部看多票") },
-          { k: t("Advancing", "入选下一轮"), v: passedHeat, d: t("union of per-lens top-10", "各维度前 10 的并集"), color: "#f2a73c" },
-          { k: t("Candidates", "发现候选"), v: candidates.length, d: t("+ author quality", "+ 作者质量二段"), color: "#3dd6c4" },
+          { k: t("Quality net", "质量网"), v: candidates.length, d: t("rating + thesis", "有评分 + 有论点"), color: "#3dd6c4" },
+          { k: t("In both nets", "两网交集"), v: passedHeat, d: t("also cleared Heat", "同时过热度榜"), color: "#f2a73c" },
         ]}
       />
 
@@ -93,7 +109,7 @@ export function ScreenView() {
           title={t("Ecosystem Links", "生态关联网络")}
           sub={
             links.length
-              ? t(`${links.length} tickers connect to others in your universe`, `${links.length} 只与你 universe 内其它票有关联`)
+              ? t(`${links.length} discovery targets · ranked by links`, `${links.length} 个发现目标 · 按关联数排`)
               : t("no cross-universe links mapped yet", "尚未映射到跨 universe 关联")
           }
           right={<MethodInfo />}
@@ -107,21 +123,31 @@ export function ScreenView() {
             </div>
           ) : (
             <>
-              {/* the rule: a chip's colour = that ticker's role *relative to the row ticker* */}
-              <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-inset px-3 py-2 text-[11px]">
-                <span className="text-muted2">
-                  {t("Chip colour = its role vs the row ticker:", "标签颜色 = 它相对左侧票的角色：")}
-                </span>
-                {(["upstream", "downstream", "peers"] as const).map((k) => (
-                  <span key={k} className="flex items-center gap-1.5" style={{ color: GRP_COLOR[k] }}>
-                    <span className="h-2 w-2 rounded-full" style={{ background: GRP_COLOR[k] }} />
-                    {k === "upstream"
-                      ? t("supplier (upstream)", "供应商（上游）")
-                      : k === "downstream"
-                        ? t("customer (downstream)", "客户（下游）")
-                        : t("peer", "同业")}
+              {/* rules: who becomes a row, and what a chip's colour means */}
+              <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
+                <div className="text-muted">
+                  {t(
+                    "Rows = discovery targets: universe names under $100B. Mega-caps are anchors — they only appear as chips, never as a row. Ranked by number of links.",
+                    "左侧成行的 = 发现目标：universe 内 <$100B 的票。大票是锚，只作为标签出现、不单独成行。按关联数排名。",
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className="text-muted2">{t("Chip colour = its role vs the row ticker:", "标签颜色 = 它相对左侧票的角色：")}</span>
+                  {(["upstream", "downstream", "peers"] as const).map((k) => (
+                    <span key={k} className="flex items-center gap-1.5" style={{ color: GRP_COLOR[k] }}>
+                      <span className="h-2 w-2 rounded-full" style={{ background: GRP_COLOR[k] }} />
+                      {k === "upstream"
+                        ? t("supplier (upstream)", "供应商（上游）")
+                        : k === "downstream"
+                          ? t("customer (downstream)", "客户（下游）")
+                          : t("peer", "同业")}
+                    </span>
+                  ))}
+                  <span className="flex items-center gap-1.5 text-muted2">
+                    <span className="grid h-3 w-3 place-items-center rounded-full border border-muted2 text-[7px]">⚓</span>
+                    {t("= mega-cap anchor", "= 大票锚")}
                   </span>
-                ))}
+                </div>
               </div>
               <div className="space-y-1.5">
                 {links.map((r, idx) => {
@@ -165,6 +191,7 @@ export function ScreenView() {
                                   : t(`${n.ticker} competes with ${r.ticker}`, `${n.ticker} 与 ${r.ticker} 同业竞争`)
                             }
                           >
+                            {n.anchor ? "⚓ " : ""}
                             {n.ticker}
                           </button>
                         ))}
@@ -180,13 +207,13 @@ export function ScreenView() {
       )}
 
       <Card
-        title={t("Candidates", "发现候选 · Candidates")}
-        sub={t(`${candidates.length} names · large cap first, then by z`, `${candidates.length} 只 · 大盘在前，再按 z 排序`)}
+        title={t("Quality Net", "质量网 · Screen")}
+        sub={t(`${candidates.length} names · in-both-nets first, then by cap`, `${candidates.length} 只 · 两网交集在前，再按市值`)}
         pad0
       >
         {candidates.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-muted">
-            {t("No candidates yet — mid/small caps may not have ignited (heat accrues daily), or market caps aren't wired.", "暂无候选。可能原因：中小盘还没社交点火（热度需每天积累），或市值数据未接入。")}
+            {t("No candidates yet — no rated seed has an analyst thesis yet, or the SA scrape hasn't run.", "暂无候选。可能：还没有带评分的种子有分析师论点，或 SA 抓取还没跑。")}
           </div>
         ) : (
           <div className="max-h-[calc(100vh-320px)] overflow-auto">
@@ -195,7 +222,7 @@ export function ScreenView() {
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
                   <th className="px-3 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
                   <th className="px-3 py-2 text-left font-medium">{t("Cap", "市值")}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t("Heat gate", "热度闸")}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Heat overlap", "热度交集")}</th>
                   <th className="px-3 py-2 text-right font-medium">z</th>
                   <th className="px-3 py-2 text-right font-medium">RVOL</th>
                   <th className="px-3 py-2 text-left font-medium">{t("Author", "作者")}</th>
@@ -215,17 +242,19 @@ export function ScreenView() {
                     </td>
                     <td className="px-3 py-2.5 text-[12px] text-muted">{capLabel(c.cap, lang)}</td>
                     <td className="px-3 py-2.5">
-                      {c.via === "bypass" ? (
+                      {!c.advanced ? (
+                        <span className="text-[11px] text-muted2">{t("· not in heat", "· 未过热度")}</span>
+                      ) : c.via === "bypass" ? (
                         <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
-                          {t("Mega bypass", "大票直通")}
+                          ✓ {t("Mega bypass", "大票直通")}
                         </span>
                       ) : c.via === "social" ? (
                         <span className="rounded-full border border-ignite/40 bg-ignite/10 px-2 py-0.5 text-[11px] font-medium text-ignite">
-                          {c.phase ? (PHASE_L[c.phase]?.[lang] ?? c.phase) : t("Ignite", "点火")}
+                          ✓ {c.phase ? (PHASE_L[c.phase]?.[lang] ?? c.phase) : t("Ignite", "点火")}
                         </span>
                       ) : (
                         <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
-                          {c.attnPhase ? (ATTN_L[c.attnPhase]?.[lang] ?? c.attnPhase) : t("Igniting", "量价点火")}
+                          ✓ {c.attnPhase ? (ATTN_L[c.attnPhase]?.[lang] ?? c.attnPhase) : t("Igniting", "量价点火")}
                         </span>
                       )}
                     </td>

@@ -31,33 +31,48 @@ function useCounts(): Record<string, number | null> {
   };
 }
 
-function NavRow({ stage, count }: { stage: NavStage; count: number | null }) {
+function NavRow({
+  stage,
+  count,
+  branch,
+}: {
+  stage: NavStage;
+  count: number | null;
+  branch?: boolean; // a parallel branch that shares the step number of the row above
+}) {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const lang = useStore((s) => s.lang);
   const active = view === stage.key;
   const primary = lang === "zh" ? stage.zh : stage.en;
-  const secondary = lang === "zh" ? stage.en : stage.zh;
+  const hint = stage.hint ? (lang === "zh" ? stage.hint.zh : stage.hint.en) : lang === "zh" ? stage.en : stage.zh;
   return (
     <button
       onClick={() => setView(stage.key)}
-      className={`flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors ${
+      className={`relative flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors ${
         active ? "text-text" : "text-muted hover:bg-[#0E141D] hover:text-text"
       }`}
     >
       {active && <span className="absolute left-0 h-6 w-[3px] rounded-r bg-signal" />}
-      {stage.step != null && (
-        <span
-          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[10px] font-semibold transition-colors ${
-            active ? "border-signal bg-signal text-ink" : "border-line2 text-muted2"
-          }`}
-        >
-          {stage.step}
-        </span>
-      )}
+      {stage.step != null &&
+        (branch ? (
+          // parallel branch: a dot connected up to the numbered row above it
+          <span className="relative grid h-5 w-5 flex-none place-items-center">
+            <span className="absolute left-1/2 bottom-1/2 h-[18px] w-px -translate-x-1/2 bg-line2" />
+            <span className={`z-[1] h-2 w-2 rounded-full ${active ? "bg-signal" : "border border-line2 bg-panel2"}`} />
+          </span>
+        ) : (
+          <span
+            className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[10px] font-semibold transition-colors ${
+              active ? "border-signal bg-signal text-ink" : "border-line2 text-muted2"
+            }`}
+          >
+            {stage.step}
+          </span>
+        ))}
       <span className="min-w-0 flex-1">
         <span className="block text-[13px]">{primary}</span>
-        <span className="block text-[10px] text-muted2">{secondary}</span>
+        <span className="block text-[10px] text-muted2">{hint}</span>
       </span>
       <span className="font-mono text-[13px] font-semibold text-text">
         {count == null ? <span className="text-muted2">—</span> : count}
@@ -78,9 +93,10 @@ export function FunnelRail() {
       <div className="px-5 pb-2 pt-4 text-[10.5px] uppercase tracking-[0.14em] text-muted2">
         {lang === "zh" ? "发现漏斗 · Funnel" : "Discovery Funnel"}
       </div>
-      {FUNNEL.map((s) => (
+      {FUNNEL.map((s, i) => (
         <div key={s.key} className="relative">
-          <NavRow stage={s} count={counts[s.key]} />
+          {/* a stage that repeats the previous stage's number is a parallel branch */}
+          <NavRow stage={s} count={counts[s.key]} branch={i > 0 && FUNNEL[i - 1].step === s.step} />
         </div>
       ))}
 

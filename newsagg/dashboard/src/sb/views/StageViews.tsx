@@ -28,7 +28,7 @@ export function CatalystView() {
   return (
     <div className="view-in">
       <ViewHead
-        eyebrow={t("Stage 4 · Catalyst", "Stage 4 · 催化剂")}
+        eyebrow={t("Stage 3 · Catalyst", "Stage 3 · 催化剂")}
         title={t("Catalyst Score · T × P × M × N", "催化剂评分 · T × P × M × N")}
         desc={t(
           "Pull every candidate catalyst on the ticker (seed table + earnings calendar), score each on TPMN, take the strongest as the primary (not summed); the rest are secondary catalysts.",
@@ -58,7 +58,7 @@ export function ConvictionView() {
   return (
     <div className="view-in">
       <ViewHead
-        eyebrow={t("Stage 5 · Conviction", "Stage 5 · Conviction")}
+        eyebrow={t("Stage 4 · Conviction", "Stage 4 · Conviction")}
         title={t("Management Conviction · Four Tones", "管理层 Conviction · 四层语气")}
         desc={t(
           "Score management tone from calls/filings, out of 10 (L1+L2+L3+L4), each layer with source-text evidence + confidence, noting whether it's the ticker's own or an upstream anchor's call.",
@@ -89,7 +89,7 @@ export function TechnicalView() {
   return (
     <div className="view-in">
       <ViewHead
-        eyebrow={t("Stage 6 · Bollinger", "Stage 6 · Boll 技术")}
+        eyebrow={t("Stage 5 · Bollinger", "Stage 5 · Boll 技术")}
         title={t("Bollinger · Riding-the-Band Timing", "Boll 技术 · 骑轨择时")}
         desc={t(
           "Bollinger timing: close riding between +2σ and +3σ, SMA20 slope positive, bands expanding → entry. Overheated (≥+3σ) don't chase; unconfirmed (<+2σ) wait.",
