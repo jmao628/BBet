@@ -1,15 +1,26 @@
 import { useStore } from "../store";
-import { buildSeeds } from "./pipeline";
+import { buildSeeds, buildUniverse } from "./pipeline";
 import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 
-// Funnel counts. Only the seed count is real today; downstream gate counts
-// show "—" until their computations are wired.
+// Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
+// their computations are wired.
 function useCounts(): Record<string, number | null> {
   const data = useStore((s) => s.data);
+  const heat = useStore((s) => s.heat);
   const seeds = buildSeeds(data);
+
+  // Heat ignition among our seed universe (ignite or detonate).
+  let heatCount: number | null = null;
+  if (heat) {
+    const universe = new Set(buildUniverse(data).map((u) => u.ticker));
+    heatCount = Object.entries(heat.tickers).filter(
+      ([t, h]) => universe.has(t) && (h.phase === "ignite" || h.phase === "detonate"),
+    ).length;
+  }
+
   return {
     seeds: seeds.length,
-    heat: null,
+    heat: heatCount,
     screen: null,
     catalyst: null,
     conviction: null,

@@ -5,8 +5,8 @@ import { FunnelRail } from "./sb/FunnelRail";
 import { Banner } from "./sb/Banner";
 import { OverviewView } from "./sb/views/OverviewView";
 import { SeedsView } from "./sb/views/SeedsView";
+import { HeatView } from "./sb/views/HeatView";
 import {
-  HeatView,
   ScreenView,
   CatalystView,
   ConvictionView,

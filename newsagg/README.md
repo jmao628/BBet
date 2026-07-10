@@ -187,6 +187,26 @@ a few weeks. When the page stops updating, re-export cookies (see above) and the
 next daily run picks them up. Everything runs on your machine, so the page is
 only reachable while your Mac is on and logged in.
 
+## Heat Signal (Stage 2)
+
+Turns each ticker's daily mention series into z-score / velocity / phase. Ape
+Wisdom only exposes today's snapshot, so we **accumulate it daily** into
+`data/newsagg/mentions_history.json` and compute z off the growing series — heat
+gets meaningful after ~1–2 weeks of accumulation (before that, tickers read
+"warming").
+
+```bash
+python -m newsagg.heat            # fetch Ape Wisdom, append today, recompute
+python -m newsagg.heat --no-fetch # recompute from stored history only
+```
+
+Writes `data/newsagg/heat_latest.json` (per-ticker `{z, vel, accel, phase,
+series, z_series}`), which the dashboard's Heat view reads (table + dual chart:
+mention bars over a z curve with the 0.5 ignite / 2.0 detonate lines). Phases:
+`dead` (z<0.5) · `watch` (in band, no momentum) · `ignite` (z∈[0.5,2.0) &
+vel≥0.15 & accel≥0) · `detonate` (z≥2.0) · `ultralow` (median mentions <5). The
+`install_mac.sh` automation runs this daily alongside the SA scrape.
+
 ### Notes on robustness
 
 - Each collector is isolated: one failing source doesn't sink the run (errors

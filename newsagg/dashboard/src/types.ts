@@ -50,6 +50,23 @@ export interface SAData {
   errors?: string[];
 }
 
+export interface HeatTicker {
+  mentions: number;
+  z: number | null;
+  vel: number | null;
+  accel: number | null;
+  phase: "dead" | "ignite" | "detonate" | "watch" | "ultralow" | "warming";
+  days: number;
+  series: number[];
+  z_series: (number | null)[];
+}
+
+export interface HeatData {
+  generated_at: string | null;
+  params: Record<string, number>;
+  tickers: Record<string, HeatTicker>;
+}
+
 export interface Health {
   last_attempt: string | null;
   last_success: string | null;

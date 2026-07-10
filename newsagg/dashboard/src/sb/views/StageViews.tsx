@@ -23,34 +23,6 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function HeatView() {
-  return (
-    <div>
-      <ViewHead
-        eyebrow="Stage 2 · 热度信号"
-        title="热度信号 · z / 涨速 / 相位"
-        desc="把每只票的每日提及序列变成 z 分数、涨速、相位，并出一张两联图（提及柱+区间带 / z 曲线+点火线+相位色带）。"
-      />
-      <div className="grid gap-4">
-        <Pending
-          title="待接入：X 每日提及序列 + 计算"
-          needs={[
-            "Ape Wisdom 每票每日提及量序列 m（采集器已写，接入 mentions_*.json）",
-            "z 计算：x=ln(1+m)；μ=过去60天中位数(滞后1)，σ=1.4826×MAD，σ≥0.35；z=(x−μ)/σ",
-            "涨速 vel=最近3天 z 线性斜率；加速度 accel=vel 日变化",
-            "两联热度图（提及柱+区间带 / z 曲线+点火0.5/引爆2.0线）",
-          ]}
-        />
-        <Ref>
-          <Row k="相位 phase" v="死水 z<0.5 / 点火 z∈[0.5,2.0)&vel≥0.15&accel≥0 / 引爆 z≥2.0 / 超低覆盖 中位提及<5" />
-          <Row k="参数默认" v="窗口60 · 滞后1 · σ下限0.35 · z_low 0.5 · z_high 2.0 · 涨速门槛0.15 · 涨速窗3 · 超低阈5" />
-          <Row k="产出" v="每票 {z, vel, accel, phase} + 两联图" />
-        </Ref>
-      </div>
-    </div>
-  );
-}
-
 export function ScreenView() {
   return (
     <div>

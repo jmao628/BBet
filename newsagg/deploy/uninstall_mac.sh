@@ -6,7 +6,7 @@ set -uo pipefail
 
 LA_DIR="$HOME/Library/LaunchAgents"
 
-for label in com.newsagg.scrape com.newsagg.web; do
+for label in com.newsagg.scrape com.newsagg.heat com.newsagg.web; do
   plist="$LA_DIR/$label.plist"
   if [[ -f "$plist" ]]; then
     launchctl unload "$plist" 2>/dev/null || true
