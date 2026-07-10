@@ -32,16 +32,18 @@ echo "Python: $PY"
 [[ -n "$PROXY" ]] && echo "Proxy:  $PROXY" || echo "Proxy:  (none — set PROXY= if yfinance can't reach Yahoo)"
 echo
 
-echo "▶ 1/4 scrape  — refresh SA universe…"
+echo "▶ 1/6 scrape  — refresh SA universe…"
 "$PY" -m newsagg.sa_scrape || echo "  (scrape failed; keeping existing universe)"
-echo "▶ 2/4 marketcap…"
+echo "▶ 2/6 marketcap…"
 "$PY" -m newsagg.marketcap || echo "  (marketcap failed; keeping existing caps)"
-echo "▶ 3/5 technical…"
+echo "▶ 3/6 technical…"
 "$PY" -m newsagg.technical || echo "  (technical failed; keeping existing technicals)"
-echo "▶ 4/5 sectors…"
+echo "▶ 4/6 sectors…"
 "$PY" -m newsagg.sectors || echo "  (sectors failed; keeping existing sectors)"
-echo "▶ 5/5 heat…"
+echo "▶ 5/6 heat…"
 "$PY" -m newsagg.heat || echo "  (heat failed; keeping existing heat)"
+echo "▶ 6/6 supplychain (needs ANTHROPIC_API_KEY; skipped if unset)…"
+"$PY" -m newsagg.supplychain || echo "  (supplychain skipped/failed; keeping existing maps)"
 
 echo
 echo "✓ done — hard-refresh the dashboard (Cmd+Shift+R) to see the updated universe."

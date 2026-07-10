@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData, SectorData } from "./types";
+import type { HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 export type Lang = "en" | "zh";
@@ -19,6 +19,7 @@ interface DashboardState {
   heat: HeatData | null;
   technical: TechnicalData | null;
   sectors: SectorData | null;
+  supplychain: SupplyChainData | null;
   marketCaps: MarketCaps | null;
   health: Health | null;
   status: ConnStatus;
@@ -31,6 +32,7 @@ interface DashboardState {
   setHeat: (h: HeatData | null) => void;
   setTechnical: (t: TechnicalData | null) => void;
   setSectors: (s: SectorData | null) => void;
+  setSupplychain: (s: SupplyChainData | null) => void;
   setMarketCaps: (m: MarketCaps | null) => void;
   setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
@@ -46,6 +48,7 @@ export const useStore = create<DashboardState>((set) => ({
   heat: null,
   technical: null,
   sectors: null,
+  supplychain: null,
   marketCaps: null,
   health: null,
   status: "connecting",
@@ -58,6 +61,7 @@ export const useStore = create<DashboardState>((set) => ({
   setHeat: (h) => set({ heat: h }),
   setTechnical: (t) => set({ technical: t }),
   setSectors: (s) => set({ sectors: s }),
+  setSupplychain: (s) => set({ supplychain: s }),
   setMarketCaps: (m) => set({ marketCaps: m }),
   setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),

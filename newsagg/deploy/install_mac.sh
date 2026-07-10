@@ -8,6 +8,7 @@
 #   com.newsagg.technical  — yfinance price-volume + technicals    (:15)
 #   com.newsagg.sectors    — yfinance sector classification (cached)(:17)
 #   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
+#   com.newsagg.supplychain— LLM upstream/downstream/peers (cached)  (:25)
 #   com.newsagg.web        — local web server on http://localhost:8000
 #
 # Re-run this any time to update the schedule. Uninstall with uninstall_mac.sh.
@@ -31,6 +32,15 @@ if [[ -n "$PROXY" ]]; then
     <key>HTTP_PROXY</key><string>$PROXY</string>"
 fi
 
+# The supply-chain job needs ANTHROPIC_API_KEY, and launchd jobs do NOT inherit
+# your shell env — so we bake the key that's set *right now* (at install time)
+# into that one plist. The plist lives in ~/Library/LaunchAgents (not the repo),
+# so the key never touches version control. Re-run install after `export`ing it.
+ANTHROPIC_LINES=""
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  ANTHROPIC_LINES="    <key>ANTHROPIC_API_KEY</key><string>$ANTHROPIC_API_KEY</string>"
+fi
+
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -51,6 +61,7 @@ HEAT_PLIST="$LA_DIR/com.newsagg.heat.plist"
 MCAP_PLIST="$LA_DIR/com.newsagg.marketcap.plist"
 TECH_PLIST="$LA_DIR/com.newsagg.technical.plist"
 SECTOR_PLIST="$LA_DIR/com.newsagg.sectors.plist"
+SUPPLY_PLIST="$LA_DIR/com.newsagg.supplychain.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -200,6 +211,35 @@ $PROXY_LINES
 </plist>
 EOF
 
+cat > "$SUPPLY_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.supplychain</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.supplychain</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$ANTHROPIC_LINES
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>25</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/supplychain.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/supplychain.log</string>
+</dict>
+</plist>
+EOF
+
 cat > "$WEB_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -223,7 +263,7 @@ cat > "$WEB_PLIST" <<EOF
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

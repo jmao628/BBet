@@ -115,6 +115,21 @@ export interface TechnicalData {
 
 export type SectorData = Record<string, { sector: string; industry: string }>;
 
+// LLM-derived supply chain (newsagg/supplychain.py). One short reason per edge.
+export interface SupplyEdge {
+  ticker: string; // US ticker, or "" if not publicly traded / unknown
+  name: string;
+  reason: string;
+}
+export interface SupplyMap {
+  upstream: SupplyEdge[];
+  downstream: SupplyEdge[];
+  peers: SupplyEdge[];
+  model?: string;
+  ok?: boolean;
+}
+export type SupplyChainData = Record<string, SupplyMap>;
+
 export interface Health {
   last_attempt: string | null;
   last_success: string | null;

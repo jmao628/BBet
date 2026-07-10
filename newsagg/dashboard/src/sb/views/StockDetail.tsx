@@ -9,7 +9,7 @@ import {
   sectorLabel,
   capLabel,
 } from "../pipeline";
-import type { TechTicker } from "../../types";
+import type { SupplyEdge, SupplyMap, TechTicker } from "../../types";
 
 type L = { en: string; zh: string; color: string };
 const lbl = (m: L, lang: Lang) => (lang === "zh" ? m.zh : m.en);
@@ -132,6 +132,158 @@ function PriceChart({ closes, vols }: { closes: number[]; vols: number[] }) {
   );
 }
 
+// Radial ecosystem map: central ticker with upstream (suppliers, left),
+// downstream (customers, right) and peers (competitors, bottom). Nodes that are
+// in our own Buy universe glow and are clickable → their own detail page.
+const SC_GROUPS = {
+  upstream: { en: "Upstream · suppliers", zh: "上游 · 供应商", color: "#5fb0e8" },
+  downstream: { en: "Downstream · customers", zh: "下游 · 客户", color: "#48c78e" },
+  peers: { en: "Peers · competitors", zh: "同业 · 竞品", color: "#e9c46a" },
+} as const;
+
+function SupplyChainGraph({
+  ticker,
+  company,
+  map,
+  inUniverse,
+}: {
+  ticker: string;
+  company: string;
+  map: SupplyMap;
+  inUniverse: Set<string>;
+}) {
+  const openDetail = useStore((s) => s.openDetail);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
+
+  const W = 720;
+  const cx = W / 2;
+  // Column x-positions; peers sit along the bottom.
+  const groups: { key: keyof typeof SC_GROUPS; edges: SupplyEdge[] }[] = [
+    { key: "upstream", edges: map.upstream ?? [] },
+    { key: "downstream", edges: map.downstream ?? [] },
+    { key: "peers", edges: map.peers ?? [] },
+  ];
+  const nUp = groups[0].edges.length;
+  const nDown = groups[1].edges.length;
+  const nPeer = groups[2].edges.length;
+  if (nUp + nDown + nPeer === 0) return null;
+
+  const rows = Math.max(nUp, nDown, 1);
+  const rowH = 52;
+  const topPad = 46;
+  const sideY = (i: number, n: number) => topPad + (rows - (n - 1)) * (rowH / 2) + i * rowH;
+  const H = topPad + rows * rowH + (nPeer > 0 ? 74 : 20);
+  const cy = topPad + ((rows - 1) * rowH) / 2 + 6;
+  const peerY = H - 40;
+
+  type Node = { edge: SupplyEdge; x: number; y: number; color: string };
+  const nodes: Node[] = [];
+  groups[0].edges.forEach((e, i) => nodes.push({ edge: e, x: 92, y: sideY(i, nUp), color: SC_GROUPS.upstream.color }));
+  groups[1].edges.forEach((e, i) => nodes.push({ edge: e, x: W - 92, y: sideY(i, nDown), color: SC_GROUPS.downstream.color }));
+  groups[2].edges.forEach((e, i) =>
+    nodes.push({
+      edge: e,
+      x: nPeer === 1 ? cx : 150 + (i * (W - 300)) / (nPeer - 1),
+      y: peerY,
+      color: SC_GROUPS.peers.color,
+    }),
+  );
+
+  const nodeW = 96;
+  const nodeH = 30;
+
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Supply-Chain Ecosystem", "供应链生态图")}</div>
+        <div className="flex gap-3 text-[10.5px]">
+          {groups.map((g) => (
+            <span key={g.key} className="flex items-center gap-1 text-muted2">
+              <span className="h-2 w-2 rounded-full" style={{ background: SC_GROUPS[g.key].color }} />
+              {lbl({ ...SC_GROUPS[g.key] }, lang)}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="mb-2 text-[11px] leading-relaxed text-muted2">
+        {t(
+          "AI-derived, major relationships only — not exhaustive. Glowing nodes are in your Buy universe (click to open).",
+          "AI 推断，仅列主要关系，非穷举。发光的节点在你的 Buy universe 内（点击可进入）。",
+        )}
+        {map.model ? ` · ${map.model}` : ""}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: "100%" }}>
+        {/* connectors */}
+        {nodes.map((nd, i) => (
+          <line key={`l${i}`} x1={cx} y1={cy} x2={nd.x} y2={nd.y} stroke={`${nd.color}55`} strokeWidth="1.4" />
+        ))}
+        {/* center node */}
+        <g>
+          <rect
+            x={cx - 58}
+            y={cy - 20}
+            width={116}
+            height={40}
+            rx={10}
+            fill="#0e2a3a"
+            stroke="#3dd6c4"
+            strokeWidth="2"
+          />
+          <text x={cx} y={cy - 2} textAnchor="middle" fontSize="15" fontWeight="700" fill="#3dd6c4">
+            {ticker}
+          </text>
+          <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8.5" fill="#8aa">
+            {(company || "").slice(0, 22)}
+          </text>
+        </g>
+        {/* spoke nodes */}
+        {nodes.map((nd, i) => {
+          const hot = !!nd.edge.ticker && inUniverse.has(nd.edge.ticker);
+          const label = nd.edge.ticker || nd.edge.name.slice(0, 12);
+          return (
+            <g
+              key={`n${i}`}
+              style={{ cursor: hot ? "pointer" : "default" }}
+              onClick={hot ? () => openDetail(nd.edge.ticker) : undefined}
+            >
+              <title>
+                {(nd.edge.name || nd.edge.ticker) + (nd.edge.reason ? ` — ${nd.edge.reason}` : "")}
+              </title>
+              <rect
+                x={nd.x - nodeW / 2}
+                y={nd.y - nodeH / 2}
+                width={nodeW}
+                height={nodeH}
+                rx={8}
+                fill={hot ? `${nd.color}22` : "#14202b"}
+                stroke={nd.color}
+                strokeWidth={hot ? 2 : 1}
+                style={hot ? { filter: `drop-shadow(0 0 5px ${nd.color}aa)` } : undefined}
+              />
+              <text
+                x={nd.x}
+                y={nd.y - 1}
+                textAnchor="middle"
+                fontSize="11"
+                fontWeight={hot ? 700 : 500}
+                fill={hot ? nd.color : "#c7d2dc"}
+              >
+                {label}
+              </text>
+              {nd.edge.ticker && nd.edge.name && (
+                <text x={nd.x} y={nd.y + 10} textAnchor="middle" fontSize="7.5" fill="#7c8a97">
+                  {nd.edge.name.slice(0, 16)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export function StockDetail() {
   const ticker = useStore((s) => s.detail);
   const close = useStore((s) => s.closeDetail);
@@ -139,6 +291,7 @@ export function StockDetail() {
   const heat = useStore((s) => s.heat);
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
+  const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   const lang = useStore((s) => s.lang);
   const t = useT();
@@ -156,6 +309,10 @@ export function StockDetail() {
   const caps = useMemo(
     () => (ticker ? buildUniverse(data).find((u) => u.ticker === ticker)?.caps ?? [] : []),
     [data, ticker],
+  );
+  const inUniverse = useMemo(
+    () => new Set(buildUniverse(data).map((u) => u.ticker)),
+    [data],
   );
 
   if (!ticker) return null;
@@ -316,6 +473,28 @@ export function StockDetail() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* supply-chain ecosystem */}
+          {supplychain?.[ticker] &&
+            (supplychain[ticker].upstream?.length ||
+              supplychain[ticker].downstream?.length ||
+              supplychain[ticker].peers?.length) ? (
+            <SupplyChainGraph
+              ticker={ticker}
+              company={company}
+              map={supplychain[ticker]}
+              inUniverse={inUniverse}
+            />
+          ) : (
+            <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-4 text-center text-[12px] text-muted2">
+              {t(
+                "No supply-chain map yet. It appears after ",
+                "还没有供应链生态图。在 Mac 上运行 ",
+              )}
+              <code className="font-mono text-signal">python -m newsagg.supplychain</code>
+              {t(" runs on the Mac (needs ANTHROPIC_API_KEY).", " 后出现（需 ANTHROPIC_API_KEY）。")}
+            </div>
           )}
 
           {/* SA thesis */}
