@@ -278,7 +278,9 @@ export interface RankItem {
   display: string;
   rank: number;
   meetsBar: boolean; // value clears this lens's minimum threshold
-  advancing: boolean; // top-N in this lens AND meets the bar
+  inTop: boolean; // top-N of this lens AND clears the bar (the ranking path)
+  strongBuy: boolean; // technical gauge = 强力买入 (a separate advance path)
+  advancing: boolean; // inTop || strongBuy
 }
 
 export interface Ranking {
@@ -319,6 +321,7 @@ export function buildRankings(
   const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
   const attn = (t: string) => technical?.tickers?.[t]?.attention;
+  const isStrongBuy = (t: string) => technical?.tickers?.[t]?.gauge?.summary === "strong_buy";
 
   const momentum = (t: string): number | null => {
     const cs = technical?.tickers?.[t]?.close_series;
@@ -377,6 +380,8 @@ export function buildRankings(
       .sort((a, b) => b.v - a.v || (L.tie?.(b.t) ?? 0) - (L.tie?.(a.t) ?? 0))
       .map((x, i) => {
         const meetsBar = x.v >= L.min;
+        const inTop = i < topN && meetsBar;
+        const strongBuy = isStrongBuy(x.t);
         return {
           ticker: x.t,
           company: cmap.get(x.t) ?? "",
@@ -386,16 +391,27 @@ export function buildRankings(
           display: L.fmt(x.v),
           rank: i + 1,
           meetsBar,
-          advancing: i < topN && meetsBar,
+          inTop,
+          strongBuy,
+          advancing: inTop || strongBuy,
         };
       });
     if (!rows.length) continue;
     rankings.push({ key: L.key, label: L.label, desc: L.desc, rows });
     for (const r of rows) {
-      if (r.rank > topN) break;
-      if (!r.advancing) continue; // top-N but below the bar → stays dim, doesn't advance
+      if (!r.inTop) continue; // ranking path: top-N clearing the bar
       advancing.add(r.ticker);
       advancingBy.set(r.ticker, [...(advancingBy.get(r.ticker) ?? []), L.key]);
+    }
+  }
+
+  // Strong-Buy path: any rated ticker whose technical gauge reads 强力买入
+  // advances regardless of rank (not tied to the top-10 line).
+  for (const u of uni) {
+    if (isStrongBuy(u.ticker)) {
+      advancing.add(u.ticker);
+      const prev = advancingBy.get(u.ticker) ?? [];
+      if (!prev.includes("strongbuy")) advancingBy.set(u.ticker, [...prev, "strongbuy"]);
     }
   }
 

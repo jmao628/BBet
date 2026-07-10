@@ -14,14 +14,16 @@ const LENS_COLOR: Record<string, string> = {
 function RankingCard({ ranking, filter }: { ranking: Ranking; filter: string | null }) {
   const openDetail = useStore((s) => s.openDetail);
   const color = LENS_COLOR[ranking.key] ?? "#3dd6c4";
-  const advancing = ranking.rows.filter((r) => r.advancing).length;
+  const inTopCount = ranking.rows.filter((r) => r.inTop).length;
+  const sbCount = ranking.rows.filter((r) => !r.inTop && r.strongBuy).length;
   const rows = (filter ? ranking.rows.filter((r) => r.sector === filter) : ranking.rows).slice(0, 15);
-  // Index of the last 入选 row in the shown slice — we draw a "达标线" after it.
-  const lastAdv = rows.reduce((a, r, i) => (r.advancing ? i : a), -1);
+  // Draw the "达标线" after the last top-10-clearing row; 强买 rows below it still
+  // highlight (a separate advance path), tagged 强买.
+  const lastInTop = rows.reduce((a, r, i) => (r.inTop ? i : a), -1);
   return (
     <Card
       title={ranking.label}
-      sub={`${advancing} 达标入选 · 共 ${ranking.rows.length} 只`}
+      sub={`${inTopCount} 达标 · ${sbCount} 强买 · 共 ${ranking.rows.length} 只`}
       pad0
       right={<span className="h-2 w-2 rounded-full" style={{ background: color }} />}
     >
@@ -56,18 +58,22 @@ function RankingCard({ ranking, filter }: { ranking: Ranking; filter: string | n
                   >
                     {r.display}
                   </td>
-                  <td className="w-12 py-2 pr-[18px] text-right">
-                    {r.advancing && (
+                  <td className="w-16 py-2 pr-[18px] text-right">
+                    {r.inTop ? (
                       <span
-                        className="rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+                        className="whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium"
                         style={{ color, borderColor: `${color}66`, background: `${color}18` }}
                       >
                         入选
                       </span>
-                    )}
+                    ) : r.strongBuy ? (
+                      <span className="whitespace-nowrap rounded-full border border-gold/45 bg-gold/10 px-2 py-0.5 text-[10px] font-medium text-gold">
+                        强买
+                      </span>
+                    ) : null}
                   </td>
                 </tr>
-                {i === lastAdv && i < rows.length - 1 && (
+                {i === lastInTop && i < rows.length - 1 && (
                   <tr>
                     <td colSpan={5} className="px-[18px] py-1">
                       <div className="flex items-center gap-2">
@@ -167,7 +173,7 @@ export function HeatView() {
           {
             k: "入选下一轮",
             v: bundle.advancing.size,
-            d: `排名达标 ${bundle.advancing.size - bypassOnly.length} + 大票直通 ${bypassOnly.length}`,
+            d: "各维度前10 + 强买 + 大票直通 的并集",
             color: "#3dd6c4",
           },
           { k: "排名维度", v: bundle.rankings.length, d: "量价/放量/动量/社交(有数据的)" },
