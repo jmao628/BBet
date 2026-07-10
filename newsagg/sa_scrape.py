@@ -36,7 +36,20 @@ logger = logging.getLogger("newsagg.sa_scrape")
 TOP_ANALYSTS_URL = "https://seekingalpha.com/top-performing-analysts"
 HOME_URL = "https://seekingalpha.com/"
 
+# SA saved-screener pages to fold into the seed universe. Each is a curated
+# Strong Buy / Buy list — far broader than the homepage widgets. Reached with
+# the same logged-in session, so no separate auth. Add/remove URLs freely.
+SCREENERS: list[tuple[str, str]] = [
+    ("Top Technology Stocks", "https://seekingalpha.com/screeners/9679329f-Top-Technology-Stocks"),
+    ("Top Rated Stocks", "https://seekingalpha.com/screeners/96793299-Top-Rated-Stocks"),
+    ("Trending AI Stocks", "https://seekingalpha.com/screeners/9ec83fbab1-Trending-AI-Stocks"),
+]
+
 _AUTHOR_HREF = re.compile(r"/author/([a-z0-9\-]+)")
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 # Extractor for the "My Analysts" article feed: one record per article link,
 # pulling its rating badge, ticker, author, title and date text from the row.
@@ -237,6 +250,59 @@ _HOME_WIDGETS_JS = r"""
 """
 
 
+# In-page extractor for a SA screener results table. Each data row has a
+# /symbol/ link and a quant-rating number (0.00–5.00); we pull ticker, company
+# and that rating. Robust to table- or grid-style layouts.
+_SCREENER_JS = r"""
+() => {
+  const norm = s => (s || "").replace(/\s+/g, " ").trim();
+  const out = [];
+  const seen = new Set();
+
+  // Collect candidate row containers: the nearest ancestor of each /symbol/
+  // link that also holds a quant-rating number.
+  const rowEls = new Set();
+  for (const a of document.querySelectorAll('a[href*="/symbol/"]')) {
+    let r = a.closest("tr") || a.closest('[role="row"]') || a.parentElement;
+    for (let i = 0; i < 5 && r && r.parentElement; i++) {
+      if (/\b[0-5]\.\d{2}\b/.test(norm(r.innerText))) break;
+      r = r.parentElement;
+    }
+    if (r) rowEls.add(r);
+  }
+
+  for (const r of rowEls) {
+    const text = norm(r.innerText);
+    const ratingM = text.match(/\b[0-5]\.\d{2}\b/);
+    if (!ratingM) continue; // not a screener data row
+
+    let ticker = null;
+    let company = null;
+    for (const a of r.querySelectorAll('a[href*="/symbol/"]')) {
+      const m = a.getAttribute("href").match(/\/symbol\/([A-Z][A-Z.:\-]{0,7})/);
+      if (!m) continue;
+      const t = m[1];
+      const txt = norm(a.textContent);
+      if (!ticker) ticker = t;
+      // the link whose text IS the symbol = ticker; the longer one = company
+      if (txt && txt !== t && txt.length > (company || "").length) company = txt;
+    }
+    if (!ticker || seen.has(ticker)) continue;
+    seen.add(ticker);
+    out.push({
+      ticker,
+      company: company ? company.slice(0, 60) : null,
+      rating: ratingM[0],
+      article: null,
+      article_url: null,
+      analyst: null,
+    });
+  }
+  return out;
+}
+"""
+
+
 def parse_key_comparisons(captures: list[tuple[str, dict]]) -> list[dict]:
     """Parse SA's homepage ``key_comparisons`` API response into named baskets.
 
@@ -362,6 +428,9 @@ class SeekingAlphaScraper:
 
             try:
                 await self._scrape_homepage(page, result)
+                # Fold the configured SA screeners into the seed universe (same
+                # logged-in session). Broadens coverage well beyond the homepage.
+                await self._scrape_screeners(page, result)
                 # My Analysts (/account/people) is hard-blocked by PerimeterX on
                 # direct load; disabled — homepage widgets already carry broad
                 # analyst coverage. (_scrape_my_analysts remains for later use.)
@@ -439,6 +508,46 @@ class SeekingAlphaScraper:
                 len(w["groups"]),
                 sum(len(g["rows"]) for g in w["groups"]),
             )
+
+    # --- SA screeners -------------------------------------------------------
+    async def _scrape_screeners(self, page, result: SAScrapeResult) -> None:
+        """Fold each configured SA screener's results into the seed universe.
+
+        Every screener is appended to ``home_widgets`` as its own widget, so the
+        rest of the pipeline (seed table, universe, market cap, technicals,
+        sectors, rankings) picks the tickers up with no further changes.
+        """
+        for name, url in SCREENERS:
+            try:
+                ok = await self._load_past_block(page, url, f"screener:{name}", tries=3)
+                if not ok:
+                    logger.warning("screener %r blocked by bot wall; skipping", name)
+                    result.errors.append(f"screener {name} blocked")
+                    continue
+                # Results are lazy-rendered / may paginate on scroll — load them.
+                for _ in range(10):
+                    await page.mouse.wheel(0, 2200)
+                    await page.wait_for_timeout(400)
+                try:
+                    await page.evaluate("window.scrollTo(0, 0)")
+                except Exception:  # noqa: BLE001
+                    pass
+                await page.wait_for_timeout(600)
+
+                rows = await page.evaluate(_SCREENER_JS)
+                await self._save_debug(page, f"screener_{_slug(name)}")
+                rows = (rows or [])[:400]
+                if rows:
+                    result.home_widgets.append(
+                        {"title": name, "description": url, "groups": [{"label": "", "rows": rows}]}
+                    )
+                    logger.info("screener %r: %d tickers", name, len(rows))
+                else:
+                    logger.warning("screener %r: 0 rows (see sa_debug/screener_%s.*)", name, _slug(name))
+                    result.errors.append(f"screener {name} empty")
+            except Exception as exc:  # noqa: BLE001 — keep going to the next screener
+                logger.exception("screener %r error", name)
+                result.errors.append(f"screener {name}: {exc}")
 
     async def _scroll_through(self, page) -> None:
         """Scroll top→bottom to trigger lazy rendering, then back to top."""
