@@ -106,37 +106,74 @@ export function ScreenView() {
               )}
             </div>
           ) : (
-            <div className="space-y-2">
-              {links.map((r) => (
-                <div
-                  key={r.ticker}
-                  onClick={() => openDetail(r.ticker)}
-                  className="flex cursor-pointer flex-wrap items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-2 hover:bg-white/[0.04]"
-                >
-                  <span className="font-mono text-[13px] font-semibold text-signal">{r.ticker}</span>
-                  {r.company && <span className="text-[11px] text-muted">{r.company.slice(0, 22)}</span>}
-                  <span className="ml-auto flex flex-wrap items-center gap-1.5">
-                    <span className="mr-1 text-[10.5px] text-muted2">
-                      {t(`${r.neighbors.length} links`, `${r.neighbors.length} 关联`)}
-                    </span>
-                    {r.neighbors.map((n) => (
-                      <button
-                        key={n.ticker}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openDetail(n.ticker);
-                        }}
-                        className="rounded-full border px-2 py-0.5 font-mono text-[11px] font-medium"
-                        style={{ color: GRP_COLOR[n.kind], borderColor: `${GRP_COLOR[n.kind]}66`, background: `${GRP_COLOR[n.kind]}14` }}
-                        title={n.kind}
-                      >
-                        {n.ticker}
-                      </button>
-                    ))}
+            <>
+              {/* the rule: a chip's colour = that ticker's role *relative to the row ticker* */}
+              <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-inset px-3 py-2 text-[11px]">
+                <span className="text-muted2">
+                  {t("Chip colour = its role vs the row ticker:", "标签颜色 = 它相对左侧票的角色：")}
+                </span>
+                {(["upstream", "downstream", "peers"] as const).map((k) => (
+                  <span key={k} className="flex items-center gap-1.5" style={{ color: GRP_COLOR[k] }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: GRP_COLOR[k] }} />
+                    {k === "upstream"
+                      ? t("supplier (upstream)", "供应商（上游）")
+                      : k === "downstream"
+                        ? t("customer (downstream)", "客户（下游）")
+                        : t("peer", "同业")}
                   </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                {links.map((r, idx) => {
+                  const maxN = links[0].neighbors.length || 1;
+                  return (
+                    <div
+                      key={r.ticker}
+                      onClick={() => openDetail(r.ticker)}
+                      className="group flex cursor-pointer items-center gap-3 rounded-lg border border-line bg-panel2 px-3 py-2 transition-colors hover:border-line2 hover:bg-white/[0.05]"
+                    >
+                      <span className="w-5 flex-none text-right font-mono text-[11px] text-muted2">{idx + 1}</span>
+                      <div className="flex w-[168px] flex-none items-baseline gap-2">
+                        <span className="font-mono text-[13px] font-semibold text-signal group-hover:underline">{r.ticker}</span>
+                        {r.company && <span className="truncate text-[11px] text-muted">{r.company}</span>}
+                      </div>
+                      {/* strength bar */}
+                      <div className="hidden h-1.5 w-16 flex-none overflow-hidden rounded-full bg-inset sm:block">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${(r.neighbors.length / maxN) * 100}%`, background: "#3dd6c4" }}
+                        />
+                      </div>
+                      <span className="w-14 flex-none font-mono text-[11px] text-muted2">
+                        {t(`${r.neighbors.length} link${r.neighbors.length > 1 ? "s" : ""}`, `${r.neighbors.length} 关联`)}
+                      </span>
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {r.neighbors.map((n) => (
+                          <button
+                            key={n.ticker}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDetail(n.ticker);
+                            }}
+                            className="rounded-full border px-2 py-0.5 font-mono text-[11px] font-medium transition-transform hover:scale-105"
+                            style={{ color: GRP_COLOR[n.kind], borderColor: `${GRP_COLOR[n.kind]}66`, background: `${GRP_COLOR[n.kind]}16` }}
+                            title={
+                              n.kind === "upstream"
+                                ? t(`${n.ticker} is ${r.ticker}'s supplier`, `${n.ticker} 是 ${r.ticker} 的供应商`)
+                                : n.kind === "downstream"
+                                  ? t(`${n.ticker} is ${r.ticker}'s customer`, `${n.ticker} 是 ${r.ticker} 的客户`)
+                                  : t(`${n.ticker} competes with ${r.ticker}`, `${n.ticker} 与 ${r.ticker} 同业竞争`)
+                            }
+                          >
+                            {n.ticker}
+                          </button>
+                        ))}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </Card>
         </div>

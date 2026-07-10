@@ -132,14 +132,17 @@ function PriceChart({ closes, vols }: { closes: number[]; vols: number[] }) {
   );
 }
 
-// Radial ecosystem map: central ticker with upstream (suppliers, left),
-// downstream (customers, right) and peers (competitors, bottom). Nodes that are
-// in our own Buy universe glow and are clickable → their own detail page.
+// Ecosystem map. Suppliers flow in from the left, customers out to the right —
+// a clean two-sided value chain (links stay in their own half, so they never
+// cross). Competitors (peers) aren't a flow, so they sit in a chip strip below.
+// Nodes in our own Buy universe glow with a ↗ badge and are clickable.
 const SC_GROUPS = {
   upstream: { en: "Upstream · suppliers", zh: "上游 · 供应商", color: "#5fb0e8" },
   downstream: { en: "Downstream · customers", zh: "下游 · 客户", color: "#48c78e" },
   peers: { en: "Peers · competitors", zh: "同业 · 竞品", color: "#e9c46a" },
 } as const;
+
+const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 function SupplyChainGraph({
   ticker,
@@ -156,43 +159,83 @@ function SupplyChainGraph({
   const lang = useStore((s) => s.lang);
   const t = useT();
 
-  const W = 720;
-  const cx = W / 2;
-  // Column x-positions; peers sit along the bottom.
+  const up = map.upstream ?? [];
+  const down = map.downstream ?? [];
+  const peers = map.peers ?? [];
   const groups: { key: keyof typeof SC_GROUPS; edges: SupplyEdge[] }[] = [
-    { key: "upstream", edges: map.upstream ?? [] },
-    { key: "downstream", edges: map.downstream ?? [] },
-    { key: "peers", edges: map.peers ?? [] },
+    { key: "upstream", edges: up },
+    { key: "downstream", edges: down },
+    { key: "peers", edges: peers },
   ];
-  const nUp = groups[0].edges.length;
-  const nDown = groups[1].edges.length;
-  const nPeer = groups[2].edges.length;
-  if (nUp + nDown + nPeer === 0) return null;
+  if (up.length + down.length + peers.length === 0) return null;
 
-  const rows = Math.max(nUp, nDown, 1);
-  const rowH = 52;
-  const topPad = 46;
-  const sideY = (i: number, n: number) => topPad + (rows - (n - 1)) * (rowH / 2) + i * rowH;
-  const H = topPad + rows * rowH + (nPeer > 0 ? 74 : 20);
-  const cy = topPad + ((rows - 1) * rowH) / 2 + 6;
-  const peerY = H - 40;
-
-  type Node = { edge: SupplyEdge; x: number; y: number; color: string };
-  const nodes: Node[] = [];
-  groups[0].edges.forEach((e, i) => nodes.push({ edge: e, x: 92, y: sideY(i, nUp), color: SC_GROUPS.upstream.color }));
-  groups[1].edges.forEach((e, i) => nodes.push({ edge: e, x: W - 92, y: sideY(i, nDown), color: SC_GROUPS.downstream.color }));
-  groups[2].edges.forEach((e, i) =>
-    nodes.push({
-      edge: e,
-      x: nPeer === 1 ? cx : 150 + (i * (W - 300)) / (nPeer - 1),
-      y: peerY,
-      color: SC_GROUPS.peers.color,
-    }),
-  );
-
-  const nodeW = 100;
-  const nodeH = 30;
   const inUni = (e: SupplyEdge) => !!e.ticker && e.ticker !== ticker && inUniverse.has(e.ticker);
+
+  // --- two-column flow geometry ---
+  const W = 640;
+  const cx = W / 2;
+  const nodeW = 108;
+  const nodeH = 34;
+  const rowH = 54;
+  const topPad = 18;
+  const rows = Math.max(up.length, down.length, 1);
+  const H = topPad * 2 + rows * rowH;
+  const cy = topPad + (rows * rowH) / 2;
+  const leftX = 92;
+  const rightX = W - 92;
+  const colY = (i: number, n: number) => cy + (i - (n - 1) / 2) * rowH;
+  const cW = 138;
+  const cH = 46;
+
+  function SideNode({ e, x, y, color, dir }: { e: SupplyEdge; x: number; y: number; color: string; dir: 1 | -1 }) {
+    const hot = inUni(e);
+    const hasBoth = !!e.ticker && !!e.name;
+    const label = e.ticker || trunc(e.name, 15);
+    const bx = x + (nodeW / 2) * dir; // outer corner for the badge
+    return (
+      <g
+        style={{ cursor: hot ? "pointer" : "default" }}
+        onClick={hot ? () => openDetail(e.ticker) : undefined}
+      >
+        <title>{(e.name || e.ticker) + (e.reason ? ` — ${e.reason}` : "")}</title>
+        <rect
+          x={x - nodeW / 2}
+          y={y - nodeH / 2}
+          width={nodeW}
+          height={nodeH}
+          rx={9}
+          fill={hot ? `${color}2b` : "#131c25"}
+          stroke={hot ? color : `${color}3a`}
+          strokeWidth={hot ? 2.4 : 1}
+          style={hot ? { filter: `drop-shadow(0 0 7px ${color})` } : undefined}
+        />
+        <text
+          x={x}
+          y={hasBoth ? y - 1 : y + 3.5}
+          textAnchor="middle"
+          fontSize={e.ticker ? 12 : 10.5}
+          fontFamily={e.ticker ? "ui-monospace, monospace" : "inherit"}
+          fontWeight={hot ? 700 : 500}
+          fill={hot ? "#fff" : "#9aa7b3"}
+        >
+          {label}
+        </text>
+        {hasBoth && (
+          <text x={x} y={y + 10} textAnchor="middle" fontSize="7.5" fill={hot ? color : "#5f6d7a"}>
+            {trunc(e.name, 18)}
+          </text>
+        )}
+        {hot && (
+          <>
+            <circle cx={bx - 3 * dir} cy={y - nodeH / 2 + 3} r="7.5" fill={color} />
+            <text x={bx - 3 * dir} y={y - nodeH / 2 + 6.5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#0c141b">
+              ↗
+            </text>
+          </>
+        )}
+      </g>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-line bg-panel2 p-4">
@@ -209,106 +252,99 @@ function SupplyChainGraph({
       </div>
       <div className="mb-2 text-[11px] leading-relaxed text-muted2">
         {t(
-          "AI-derived, major relationships only — not exhaustive. A node with a ↗ badge is in your Buy universe — click it (or its card below) to open that ticker.",
-          "AI 推断，仅列主要关系，非穷举。带 ↗ 角标的节点在你的 Buy universe 内——点它（或下方卡片）即可跳到那只票。",
+          "AI-derived, major relationships only — not exhaustive. Suppliers flow in from the left, customers out to the right. A ↗ node is in your Buy universe — click it (or its card below) to open that ticker.",
+          "AI 推断，仅列主要关系，非穷举。左边流入的是供应商，右边流出的是客户。带 ↗ 的节点在你的 Buy universe 内——点它（或下方卡片）即可跳到那只票。",
         )}
         {map.model ? ` · ${map.model}` : ""}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: "100%" }}>
-        {/* connectors */}
-        {nodes.map((nd, i) => {
-          const hot = inUni(nd.edge);
+        {/* curved connectors — left links stay left, right links stay right */}
+        {up.map((e, i) => {
+          const y = colY(i, up.length);
+          const sx = cx - cW / 2;
+          const ex = leftX + nodeW / 2;
+          const hot = inUni(e);
           return (
-            <line
-              key={`l${i}`}
-              x1={cx}
-              y1={cy}
-              x2={nd.x}
-              y2={nd.y}
-              stroke={hot ? nd.color : `${nd.color}44`}
+            <path
+              key={`ul${i}`}
+              d={`M${sx},${cy} C${sx - 46},${cy} ${ex + 46},${y} ${ex},${y}`}
+              fill="none"
+              stroke={hot ? SC_GROUPS.upstream.color : `${SC_GROUPS.upstream.color}40`}
+              strokeWidth={hot ? 2 : 1.1}
+            />
+          );
+        })}
+        {down.map((e, i) => {
+          const y = colY(i, down.length);
+          const sx = cx + cW / 2;
+          const ex = rightX - nodeW / 2;
+          const hot = inUni(e);
+          return (
+            <path
+              key={`dl${i}`}
+              d={`M${sx},${cy} C${sx + 46},${cy} ${ex - 46},${y} ${ex},${y}`}
+              fill="none"
+              stroke={hot ? SC_GROUPS.downstream.color : `${SC_GROUPS.downstream.color}40`}
               strokeWidth={hot ? 2 : 1.1}
             />
           );
         })}
         {/* center node */}
-        <g>
-          <rect
-            x={cx - 60}
-            y={cy - 21}
-            width={120}
-            height={42}
-            rx={10}
-            fill="#0e2a3a"
-            stroke="#3dd6c4"
-            strokeWidth="2"
-            style={{ filter: "drop-shadow(0 0 8px #3dd6c477)" }}
-          />
-          <text x={cx} y={cy - 2} textAnchor="middle" fontSize="15" fontWeight="700" fill="#3dd6c4">
-            {ticker}
-          </text>
-          <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8.5" fill="#8aa">
-            {(company || "").slice(0, 22)}
-          </text>
-        </g>
-        {/* spoke nodes */}
-        {nodes.map((nd, i) => {
-          const hot = inUni(nd.edge);
-          const label = nd.edge.ticker || nd.edge.name.slice(0, 12);
-          const rx = nd.x + nodeW / 2;
-          const ry = nd.y - nodeH / 2;
-          return (
-            <g
-              key={`n${i}`}
-              style={{ cursor: hot ? "pointer" : "default" }}
-              onClick={hot ? () => openDetail(nd.edge.ticker) : undefined}
-            >
-              <title>
-                {(nd.edge.name || nd.edge.ticker) + (nd.edge.reason ? ` — ${nd.edge.reason}` : "")}
-              </title>
-              <rect
-                x={nd.x - nodeW / 2}
-                y={nd.y - nodeH / 2}
-                width={nodeW}
-                height={nodeH}
-                rx={8}
-                fill={hot ? `${nd.color}2b` : "#131c25"}
-                stroke={hot ? nd.color : `${nd.color}3a`}
-                strokeWidth={hot ? 2.5 : 1}
-                style={hot ? { filter: `drop-shadow(0 0 7px ${nd.color})` } : undefined}
-              />
-              <text
-                x={nd.x}
-                y={nd.edge.ticker && nd.edge.name ? nd.y - 1 : nd.y + 3.5}
-                textAnchor="middle"
-                fontSize="11"
-                fontWeight={hot ? 700 : 500}
-                fill={hot ? "#fff" : "#8695a3"}
-              >
-                {label}
-              </text>
-              {nd.edge.ticker && nd.edge.name && (
-                <text
-                  x={nd.x}
-                  y={nd.y + 10}
-                  textAnchor="middle"
-                  fontSize="7.5"
-                  fill={hot ? nd.color : "#5f6d7a"}
-                >
-                  {nd.edge.name.slice(0, 16)}
-                </text>
-              )}
-              {hot && (
-                <>
-                  <circle cx={rx - 3} cy={ry + 3} r="8" fill={nd.color} />
-                  <text x={rx - 3} y={ry + 6.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#0c141b">
-                    ↗
-                  </text>
-                </>
-              )}
-            </g>
-          );
-        })}
+        <rect
+          x={cx - cW / 2}
+          y={cy - cH / 2}
+          width={cW}
+          height={cH}
+          rx={11}
+          fill="#0e2a3a"
+          stroke="#3dd6c4"
+          strokeWidth="2"
+          style={{ filter: "drop-shadow(0 0 9px #3dd6c477)" }}
+        />
+        <text x={cx} y={cy - 2} textAnchor="middle" fontSize="15" fontFamily="ui-monospace, monospace" fontWeight="700" fill="#3dd6c4">
+          {ticker}
+        </text>
+        <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8.5" fill="#8aa">
+          {trunc(company || "", 24)}
+        </text>
+        {/* nodes */}
+        {up.map((e, i) => (
+          <SideNode key={`un${i}`} e={e} x={leftX} y={colY(i, up.length)} color={SC_GROUPS.upstream.color} dir={-1} />
+        ))}
+        {down.map((e, i) => (
+          <SideNode key={`dn${i}`} e={e} x={rightX} y={colY(i, down.length)} color={SC_GROUPS.downstream.color} dir={1} />
+        ))}
       </svg>
+
+      {/* peers — a competitor strip (not a flow), clickable when in-universe */}
+      {peers.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <span className="flex items-center gap-1 text-[11px] font-semibold" style={{ color: SC_GROUPS.peers.color }}>
+            <span className="h-2 w-2 rounded-full" style={{ background: SC_GROUPS.peers.color }} />
+            {lbl({ ...SC_GROUPS.peers }, lang)}
+          </span>
+          {peers.map((e, i) => {
+            const hot = inUni(e);
+            return (
+              <button
+                key={i}
+                onClick={hot ? () => openDetail(e.ticker) : undefined}
+                title={(e.name || e.ticker) + (e.reason ? ` — ${e.reason}` : "")}
+                className={`rounded-full border px-2.5 py-0.5 font-mono text-[11.5px] font-medium ${hot ? "cursor-pointer text-white" : "cursor-default"}`}
+                style={{
+                  borderColor: hot ? SC_GROUPS.peers.color : `${SC_GROUPS.peers.color}3a`,
+                  background: hot ? `${SC_GROUPS.peers.color}26` : "transparent",
+                  color: hot ? "#fff" : "#9aa7b3",
+                  boxShadow: hot ? `0 0 7px ${SC_GROUPS.peers.color}` : undefined,
+                }}
+              >
+                {e.ticker || trunc(e.name, 16)}
+                {hot ? " ↗" : ""}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* relationship reader — every edge with its reason, always visible */}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -336,7 +372,7 @@ function SupplyChainGraph({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[12px] font-semibold" style={{ color: hot ? SC_GROUPS[g.key].color : "#c7d2dc" }}>
-                        {e.ticker || e.name.slice(0, 14)}
+                        {e.ticker || trunc(e.name, 15)}
                       </span>
                       {hot && (
                         <span

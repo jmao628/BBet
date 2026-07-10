@@ -141,15 +141,18 @@ def _clean_edges(raw: list) -> list[dict]:
     return out
 
 
-def _fetch_one(client, ticker: str, name: str) -> dict | None:
+def _fetch_one(client, ticker: str, name: str, model: str = MODEL) -> dict | None:
     """One structured call. Returns the cleaned map, or None on failure."""
     try:
+        # Adaptive thinking only exists on Claude 4.6+; skip it for other models
+        # (e.g. Haiku) so the request doesn't 400.
+        kwargs = {"thinking": {"type": "adaptive"}} if model.startswith("claude-opus") or model.startswith("claude-sonnet") else {}
         msg = client.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=1500,
-            thinking={"type": "adaptive"},
             output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
             messages=[{"role": "user", "content": _prompt(ticker, name)}],
+            **kwargs,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("  %s: API error (%s)", ticker, exc)
@@ -167,13 +170,13 @@ def _fetch_one(client, ticker: str, name: str) -> dict | None:
         "upstream": _clean_edges(parsed.get("upstream") or []),
         "downstream": _clean_edges(parsed.get("downstream") or []),
         "peers": _clean_edges(parsed.get("peers") or []),
-        "model": MODEL,
+        "model": model,
         "ok": True,
     }
 
 
 def fetch_missing(
-    tickers: dict[str, str], have: dict[str, dict], workers: int = 4
+    tickers: dict[str, str], have: dict[str, dict], workers: int = 4, model: str = MODEL
 ) -> dict[str, dict]:
     """Look up the supply chain for tickers not already cached."""
     try:
@@ -190,14 +193,14 @@ def fetch_missing(
     if not missing:
         logger.info("no new tickers — supply-chain cache already complete (%d)", len(have))
         return {}
-    logger.info("mapping supply chain for %d new tickers via %s…", len(missing), MODEL)
+    logger.info("mapping supply chain for %d new tickers via %s…", len(missing), model)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     client = anthropic.Anthropic()
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(_fetch_one, client, t, n): t for t, n in missing.items()}
+        futures = {ex.submit(_fetch_one, client, t, n, model): t for t, n in missing.items()}
         for i, fut in enumerate(as_completed(futures), 1):
             t = futures[fut]
             res = fut.result()
@@ -214,6 +217,7 @@ def main() -> int:
     ap.add_argument("--tickers", default=None, help="comma-separated override")
     ap.add_argument("--refresh", action="store_true", help="re-map all, ignore cache")
     ap.add_argument("--limit", type=int, default=None, help="cap how many new tickers to map this run")
+    ap.add_argument("--model", default=MODEL, help=f"model id (default {MODEL}; e.g. claude-haiku-4-5 to save cost)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
 
@@ -234,7 +238,7 @@ def main() -> int:
         pending = [t for t in names if t not in have][: args.limit]
         names = {t: names[t] for t in pending}
 
-    fetched = fetch_missing(names, have)
+    fetched = fetch_missing(names, have, model=args.model)
     merged = {**have, **fetched}
     if not merged:
         logger.warning("no supply-chain data resolved (no key / API error); keeping existing file")
