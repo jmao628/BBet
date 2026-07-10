@@ -188,9 +188,17 @@ export function HeatView() {
         </div>
       )}
 
+      {/* the multi-lens board is the core of the step — show it first */}
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]">
+        {bundle.rankings.map((r) => (
+          <RankingCard key={r.key} ranking={r} filter={filter} />
+        ))}
+      </div>
+
       {(() => {
         const bpRows = filter ? bypassOnly.filter((tk) => (sectors?.[tk]?.sector ?? "") === filter) : bypassOnly;
         return bpRows.length > 0 ? (
+          <div className="mt-4">
           <Card
             title={t("Mega-Cap Bypass", "大票直通")}
             sub={t(
@@ -228,6 +236,7 @@ export function HeatView() {
               </table>
             </div>
           </Card>
+          </div>
         ) : null;
       })()}
 
@@ -276,12 +285,6 @@ export function HeatView() {
           </div>
         ) : null;
       })()}
-
-      <div className="mt-4 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]">
-        {bundle.rankings.map((r) => (
-          <RankingCard key={r.key} ranking={r} filter={filter} />
-        ))}
-      </div>
     </div>
   );
 }
