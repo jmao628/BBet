@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildUniverse, capSizeOf, passesHeatGate } from "./pipeline";
+import { buildSeeds, buildUniverse, capSizeFromCap, passesHeatGate } from "./pipeline";
 import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -7,13 +7,16 @@ import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 function useCounts(): Record<string, number | null> {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
+  const marketCaps = useStore((s) => s.marketCaps);
   const seeds = buildSeeds(data);
 
   // Heat gate over the seed universe: big caps pass straight through; mid/small
   // caps must ignite/detonate.
   let heatCount: number | null = null;
   if (heat) {
-    const capBy = new Map(buildUniverse(data).map((u) => [u.ticker, capSizeOf(u.caps)]));
+    const capBy = new Map(
+      buildUniverse(data).map((u) => [u.ticker, capSizeFromCap(marketCaps?.[u.ticker], u.caps)]),
+    );
     heatCount = [...capBy.entries()].filter(([t, cap]) => {
       if (cap === "large") return true; // bypass — counted as passing
       const h = heat.tickers[t];

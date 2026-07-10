@@ -50,6 +50,8 @@ export interface SAData {
   errors?: string[];
 }
 
+export type MarketCaps = Record<string, number>; // ticker -> market cap (USD)
+
 export interface HeatTicker {
   mentions: number;
   z: number | null;

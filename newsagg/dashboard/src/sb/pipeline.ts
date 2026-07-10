@@ -183,6 +183,17 @@ export function capSizeOf(caps: string[]): CapSize {
   return "unknown";
 }
 
+// Cap-size from real market cap (USD), falling back to SA cap-group labels
+// when we don't have a market cap for the ticker. Large ≥ $10B, Mid ≥ $2B.
+export function capSizeFromCap(marketCap: number | undefined, labels: string[]): CapSize {
+  if (marketCap && marketCap > 0) {
+    if (marketCap >= 10e9) return "large";
+    if (marketCap >= 2e9) return "mid";
+    return "small";
+  }
+  return capSizeOf(labels);
+}
+
 // Big caps are already well-covered, so they bypass the social-heat gate and
 // pass straight to screening; only mid/small caps need heat ignition.
 export function passesHeatGate(cap: CapSize, phase: string): boolean {

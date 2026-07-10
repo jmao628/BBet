@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../../store";
-import { companyMap, buildUniverse, capSizeOf, passesHeatGate, type CapSize } from "../pipeline";
+import { companyMap, buildUniverse, capSizeFromCap, passesHeatGate, type CapSize } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import type { HeatTicker } from "../../types";
 
@@ -61,11 +61,12 @@ export function HeatView() {
   const cmap = useMemo(() => companyMap(data), [data]);
   const [mineOnly, setMineOnly] = useState(true);
 
+  const marketCaps = useStore((s) => s.marketCaps);
   const capBy = useMemo(() => {
     const m = new Map<string, CapSize>();
-    for (const u of buildUniverse(data)) m.set(u.ticker, capSizeOf(u.caps));
+    for (const u of buildUniverse(data)) m.set(u.ticker, capSizeFromCap(marketCaps?.[u.ticker], u.caps));
     return m;
-  }, [data]);
+  }, [data, marketCaps]);
   const universe = useMemo(() => new Set(capBy.keys()), [capBy]);
 
   const allRows = useMemo(() => {

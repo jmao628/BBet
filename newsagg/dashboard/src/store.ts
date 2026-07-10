@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HeatData, Health, HomeWidget, SAData } from "./types";
+import type { HeatData, Health, HomeWidget, MarketCaps, SAData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 
@@ -16,6 +16,7 @@ export type ViewKey =
 interface DashboardState {
   data: SAData | null;
   heat: HeatData | null;
+  marketCaps: MarketCaps | null;
   health: Health | null;
   status: ConnStatus;
   lastUpdated: number | null; // epoch ms of last successful fetch
@@ -23,6 +24,7 @@ interface DashboardState {
   ticker: string; // focused ticker (search / row click)
   setData: (d: SAData) => void;
   setHeat: (h: HeatData | null) => void;
+  setMarketCaps: (m: MarketCaps | null) => void;
   setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
   setView: (v: ViewKey) => void;
@@ -32,6 +34,7 @@ interface DashboardState {
 export const useStore = create<DashboardState>((set) => ({
   data: null,
   heat: null,
+  marketCaps: null,
   health: null,
   status: "connecting",
   lastUpdated: null,
@@ -39,6 +42,7 @@ export const useStore = create<DashboardState>((set) => ({
   ticker: "",
   setData: (d) => set({ data: d, status: "live", lastUpdated: Date.now() }),
   setHeat: (h) => set({ heat: h }),
+  setMarketCaps: (m) => set({ marketCaps: m }),
   setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),
   setView: (v) => set({ view: v }),

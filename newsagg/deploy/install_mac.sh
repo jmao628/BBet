@@ -35,6 +35,7 @@ mkdir -p "$LA_DIR" "$LOG_DIR"
 
 SCRAPE_PLIST="$LA_DIR/com.newsagg.scrape.plist"
 HEAT_PLIST="$LA_DIR/com.newsagg.heat.plist"
+MCAP_PLIST="$LA_DIR/com.newsagg.marketcap.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -97,6 +98,34 @@ cat > "$HEAT_PLIST" <<EOF
 </plist>
 EOF
 
+cat > "$MCAP_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.marketcap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.marketcap</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>10</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/marketcap.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/marketcap.log</string>
+</dict>
+</plist>
+EOF
+
 cat > "$WEB_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -120,7 +149,7 @@ cat > "$WEB_PLIST" <<EOF
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

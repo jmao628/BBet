@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { HeatData, Health, SAData } from "../types";
+import type { HeatData, Health, MarketCaps, SAData } from "../types";
 
 // The scraped snapshot. Served same-origin by the local http.server (built) or
 // proxied by Vite in dev. Data updates daily today; polling is the pragmatic
 // "realtime" until a streaming source (Schwab/X) is wired to a WS/SSE endpoint.
 const DATA_URL = "/data/newsagg/seekingalpha_latest.json";
 const HEAT_URL = "/data/newsagg/heat_latest.json";
+const MCAP_URL = "/data/newsagg/marketcaps.json";
 const HEALTH_URL = "/data/newsagg/health.json";
 const POLL_MS = 15_000;
 const STALE_MS = 36 * 60 * 60 * 1000; // flag data older than ~1.5 days
@@ -14,6 +15,7 @@ const STALE_MS = 36 * 60 * 60 * 1000; // flag data older than ~1.5 days
 export function usePoller() {
   const setData = useStore((s) => s.setData);
   const setHeat = useStore((s) => s.setHeat);
+  const setMarketCaps = useStore((s) => s.setMarketCaps);
   const setHealth = useStore((s) => s.setHealth);
   const setStatus = useStore((s) => s.setStatus);
 
@@ -34,10 +36,16 @@ export function usePoller() {
       } catch {
         if (alive) setStatus("error");
       }
-      // Heat + health are best-effort; absent files just mean no data yet.
+      // Heat / market caps / health are best-effort; absent = no data yet.
       try {
         const hres = await fetch(`${HEAT_URL}?t=${Date.now()}`);
         if (alive) setHeat(hres.ok ? ((await hres.json()) as HeatData) : null);
+      } catch {
+        /* ignore */
+      }
+      try {
+        const mres = await fetch(`${MCAP_URL}?t=${Date.now()}`);
+        if (alive) setMarketCaps(mres.ok ? ((await mres.json()) as MarketCaps) : null);
       } catch {
         /* ignore */
       }
@@ -55,5 +63,5 @@ export function usePoller() {
       alive = false;
       clearInterval(id);
     };
-  }, [setData, setHeat, setHealth, setStatus]);
+  }, [setData, setHeat, setMarketCaps, setHealth, setStatus]);
 }
