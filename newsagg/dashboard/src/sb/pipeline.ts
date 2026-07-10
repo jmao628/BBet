@@ -290,10 +290,20 @@ export interface Ranking {
   rows: RankItem[];
 }
 
+export interface StrongBuyItem {
+  ticker: string;
+  company: string;
+  cap: CapSize;
+  sector: string;
+  score: number; // price-volume attention score (for sorting)
+  rvol: number | null;
+}
+
 export interface RankBundle {
   rankings: Ranking[];
   advancing: Set<string>; // union of every lens's top-N (+ mega caps)
   advancingBy: Map<string, string[]>; // ticker -> lens keys it advanced in
+  strongBuys: StrongBuyItem[]; // every rated ticker with a 强力买入 gauge, sorted
   universe: number; // rated seed count
 }
 
@@ -423,7 +433,20 @@ export function buildRankings(
     }
   }
 
-  return { rankings, advancing, advancingBy, universe: uni.length };
+  // Full 强力买入 list, sorted by attention score (then RVOL), for its own card.
+  const strongBuys: StrongBuyItem[] = uni
+    .filter((u) => isStrongBuy(u.ticker))
+    .map((u) => ({
+      ticker: u.ticker,
+      company: cmap.get(u.ticker) ?? "",
+      cap: capOf(u.ticker),
+      sector: sectorOf(u.ticker),
+      score: attn(u.ticker)?.score ?? 0,
+      rvol: attn(u.ticker)?.rvol ?? null,
+    }))
+    .sort((a, b) => b.score - a.score || (b.rvol ?? 0) - (a.rvol ?? 0));
+
+  return { rankings, advancing, advancingBy, strongBuys, universe: uni.length };
 }
 
 // Stage 3 — Screen. A seed becomes a discovery candidate when it (0) has an SA

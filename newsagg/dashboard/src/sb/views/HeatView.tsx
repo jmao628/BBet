@@ -235,6 +235,51 @@ export function HeatView() {
         </Card>
       )}
 
+      {(() => {
+        const sbRows = filter ? bundle.strongBuys.filter((s) => s.sector === filter) : bundle.strongBuys;
+        return sbRows.length > 0 ? (
+          <div className="mt-4">
+          <Card
+            title="强力买入 · 全部"
+            sub={`${sbRows.length} 只 · 技术表针=强买 · 按注意力分排序`}
+            pad0
+          >
+            <div className="max-h-[300px] overflow-y-auto">
+              <table className="w-full text-[13px]">
+                <tbody>
+                  {sbRows.map((s, i) => (
+                    <tr
+                      key={s.ticker}
+                      onClick={() => openDetail(s.ticker)}
+                      className="cursor-pointer border-t border-line hover:bg-white/[0.03]"
+                    >
+                      <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
+                        {i + 1}
+                      </td>
+                      <td className="py-2 pl-2">
+                        <span className="font-mono font-semibold text-signal">{s.ticker}</span>
+                        <span className="ml-2 text-[11px] text-muted">{s.company}</span>
+                      </td>
+                      <td className="py-2 text-[11px] text-muted2">{sectorCN(s.sector)}</td>
+                      <td className="py-2 text-right font-mono tabular-nums text-gold">{s.score} 分</td>
+                      <td className="w-16 py-2 pr-1 text-right font-mono tabular-nums text-muted">
+                        {s.rvol != null ? `${s.rvol.toFixed(2)}×` : "—"}
+                      </td>
+                      <td className="w-14 py-2 pr-[18px] text-right">
+                        <span className="whitespace-nowrap rounded-full border border-gold/45 bg-gold/10 px-2 py-0.5 text-[10px] font-medium text-gold">
+                          强买
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+          </div>
+        ) : null;
+      })()}
+
       <div className="mt-4 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(360px,1fr))]">
         {bundle.rankings.map((r) => (
           <RankingCard key={r.key} ranking={r} filter={filter} />
