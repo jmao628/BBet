@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../../store";
-import { companyMap, buildUniverse, capSizeFromCap, passesHeatGate, type CapSize } from "../pipeline";
+import {
+  companyMap,
+  buildUniverse,
+  capSizeFromCap,
+  bypassesHeat,
+  passesHeatGate,
+  type CapSize,
+} from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import type { HeatTicker } from "../../types";
 
@@ -33,15 +40,15 @@ const CAP_CN: Record<CapSize, string> = {
   unknown: "—",
 };
 
-// Heat gate: big caps pass straight through; mid/small caps must ignite.
-function GateChip({ cap, phase }: { cap: CapSize; phase: string }) {
-  if (cap === "large")
+// Heat gate: mega caps (≥$100B) pass straight through; everything else must ignite.
+function GateChip({ marketCap, phase }: { marketCap: number | undefined; phase: string }) {
+  if (bypassesHeat(marketCap))
     return (
       <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
         大票直通
       </span>
     );
-  const ok = passesHeatGate(cap, phase);
+  const ok = passesHeatGate(marketCap, phase);
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
@@ -205,7 +212,7 @@ export function HeatView() {
                         <PhaseChip phase={r.phase} />
                       </td>
                       <td className="px-3 py-2">
-                        <GateChip cap={cap} phase={r.phase} />
+                        <GateChip marketCap={marketCaps?.[r.ticker]} phase={r.phase} />
                       </td>
                     </tr>
                   );

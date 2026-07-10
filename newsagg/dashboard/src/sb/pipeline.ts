@@ -194,11 +194,17 @@ export function capSizeFromCap(marketCap: number | undefined, labels: string[]):
   return capSizeOf(labels);
 }
 
-// Big caps are already well-covered, so they bypass the social-heat gate and
-// pass straight to screening; only mid/small caps need heat ignition.
-export function passesHeatGate(cap: CapSize, phase: string): boolean {
-  if (cap === "large") return true;
-  return phase === "ignite" || phase === "detonate";
+// Only true mega caps are "already discovered" enough to skip social heat.
+// Everything below this still runs the heat/discovery funnel.
+export const BYPASS_MARKET_CAP = 100e9; // ≥ $100B
+
+export function bypassesHeat(marketCap: number | undefined): boolean {
+  return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
+}
+
+// Passes the heat gate if it's a mega cap (bypass) or it has ignited/detonated.
+export function passesHeatGate(marketCap: number | undefined, phase: string): boolean {
+  return bypassesHeat(marketCap) || phase === "ignite" || phase === "detonate";
 }
 
 export function buildUniverse(data: SAData | null): UniStock[] {
@@ -231,6 +237,7 @@ export interface ScreenRow {
   ticker: string;
   company: string;
   cap: CapSize;
+  bypass: boolean; // mega cap that skipped social heat
   phase: string | null;
   hasThesis: boolean;
   author: string | null;
@@ -253,16 +260,18 @@ export function buildScreen(
   let passedHeat = 0;
 
   for (const s of seeds) {
-    const cap = capSizeFromCap(marketCaps?.[s.ticker], uniCaps.get(s.ticker) ?? []);
+    const mc = marketCaps?.[s.ticker];
+    const cap = capSizeFromCap(mc, uniCaps.get(s.ticker) ?? []);
     const ht = heat?.tickers?.[s.ticker];
     const phase = ht?.phase ?? null;
-    const passHeat = passesHeatGate(cap, phase ?? "");
+    const passHeat = passesHeatGate(mc, phase ?? "");
     if (passHeat) passedHeat++;
     if (passHeat && s.hasThesis) {
       candidates.push({
         ticker: s.ticker,
         company: s.company,
         cap,
+        bypass: bypassesHeat(mc),
         phase,
         hasThesis: s.hasThesis,
         author: s.author,

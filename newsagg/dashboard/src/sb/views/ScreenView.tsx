@@ -76,7 +76,7 @@ export function ScreenView() {
                     </td>
                     <td className="px-3 py-2.5 text-[12px] text-muted">{CAP_CN[c.cap]}</td>
                     <td className="px-3 py-2.5">
-                      {c.cap === "large" ? (
+                      {c.bypass ? (
                         <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
                           大票直通
                         </span>
