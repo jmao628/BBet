@@ -783,6 +783,38 @@ _TICKER_STOP = {
 }
 
 
+def _extract_tickers(text: str) -> list[str]:
+    """Pull ticker symbols out of a pasted screener / list.
+
+    Preferred (and cleanest) shape is one field per line, so the Symbol sits
+    alone on its own line — we take every line that is *exactly* a ticker. That
+    ignores company-name abbreviations (TD SYNNEX → TD, RF Industries → RF) and
+    topic text (AI and Machine Learning). If almost none are found, we fall back
+    to the first ticker-like token on each line so a single-line table still
+    works.
+    """
+    strict: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        s = line.strip()
+        if _TICKER_RE.match(s) and s not in _TICKER_STOP and s not in seen:
+            seen.add(s)
+            strict.append(s)
+    if len(strict) >= 3:
+        return strict
+
+    loose: list[str] = []
+    seen = set()
+    for line in text.splitlines():
+        for tok in re.split(r"[,\t;| ]+", line.strip()):
+            if _TICKER_RE.match(tok) and tok not in _TICKER_STOP:
+                if tok not in seen:
+                    seen.add(tok)
+                    loose.append(tok)
+                break  # first symbol-like token per line = the Symbol column
+    return loose
+
+
 def load_manual_watchlists(output_dir: Path) -> list[dict]:
     """Fold user-maintained ticker lists into the seed universe — zero scraping.
 
@@ -790,28 +822,17 @@ def load_manual_watchlists(output_dir: Path) -> list[dict]:
     You paste/export the Symbol column from any SA screener (or anywhere) while
     logged in to normal Chrome; SA's bot wall never enters the picture. Each
     file becomes its own widget, so the whole funnel picks the tickers up.
-
-    Parsing is lenient: the first ALL-CAPS 1–5 letter token on each line is
-    taken as the symbol, so a raw table paste or a bare symbol list both work.
     """
     d = output_dir / "screeners"
     if not d.exists():
         return []
     widgets: list[dict] = []
     for path in sorted(d.glob("*.txt")) + sorted(d.glob("*.csv")):
-        tickers: list[str] = []
-        seen: set[str] = set()
         try:
             text = path.read_text()
         except OSError:
             continue
-        for line in text.splitlines():
-            for tok in re.split(r"[,\t;| ]+", line.strip()):
-                if _TICKER_RE.match(tok) and tok not in _TICKER_STOP:
-                    if tok not in seen:
-                        seen.add(tok)
-                        tickers.append(tok)
-                    break  # first symbol-like token per line = the Symbol column
+        tickers = _extract_tickers(text)
         if not tickers:
             continue
         title = path.stem.replace("_", " ").replace("-", " ").strip().title() or "Watchlist"
