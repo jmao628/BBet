@@ -243,6 +243,132 @@ export function buildUniverse(data: SAData | null): UniStock[] {
   return [...map.values()].sort((a, b) => (b.quant ?? -1) - (a.quant ?? -1));
 }
 
+// Stage 2 — Rankings. The whole rated seed universe (all ~277) is ranked by
+// several independent lenses (price-volume attention, raw relative volume,
+// momentum, social heat). The top `topN` of EACH lens advances to Stage 3 —
+// so a name can qualify by volume even if it's socially silent, and vice
+// versa. Mega caps auto-advance (already discovered). This replaces the old
+// binary ignite gate, which surfaced too few names.
+export interface RankItem {
+  ticker: string;
+  company: string;
+  cap: CapSize;
+  value: number;
+  display: string;
+  rank: number;
+  advancing: boolean; // top-N in this lens
+}
+
+export interface Ranking {
+  key: string;
+  label: string;
+  desc: string;
+  rows: RankItem[];
+}
+
+export interface RankBundle {
+  rankings: Ranking[];
+  advancing: Set<string>; // union of every lens's top-N (+ mega caps)
+  advancingBy: Map<string, string[]>; // ticker -> lens keys it advanced in
+  universe: number; // rated seed count
+}
+
+interface Lens {
+  key: string;
+  label: string;
+  desc: string;
+  get: (t: string) => number | null;
+  fmt: (v: number) => string;
+}
+
+export function buildRankings(
+  data: SAData | null,
+  heat: HeatData | null,
+  technical: TechnicalData | null,
+  marketCaps: MarketCaps | null,
+  topN = 10,
+): RankBundle {
+  const uni = buildUniverse(data).filter((u) => u.rated);
+  const cmap = companyMap(data);
+  const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
+  const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
+  const attn = (t: string) => technical?.tickers?.[t]?.attention;
+
+  const momentum = (t: string): number | null => {
+    const cs = technical?.tickers?.[t]?.close_series;
+    if (!cs || cs.length < 2 || !cs[0]) return null;
+    return (cs[cs.length - 1] / cs[0] - 1) * 100;
+  };
+
+  const lenses: Lens[] = [
+    {
+      key: "attention",
+      label: "量价注意力",
+      desc: "RVOL + 突破 + OBV + 趋势 综合分",
+      get: (t) => attn(t)?.score ?? null,
+      fmt: (v) => `${Math.round(v)} 分`,
+    },
+    {
+      key: "rvol",
+      label: "放量 RVOL",
+      desc: "近 5 日 / 20 日均量,纯资金异动",
+      get: (t) => attn(t)?.rvol ?? null,
+      fmt: (v) => `${v.toFixed(2)}×`,
+    },
+    {
+      key: "momentum",
+      label: "动量 60 日",
+      desc: "近 60 个交易日涨幅",
+      get: (t) => momentum(t),
+      fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`,
+    },
+    {
+      key: "social",
+      label: "社交热度",
+      desc: "Ape Wisdom z 分数(提及异常度)",
+      get: (t) => heat?.tickers?.[t]?.z ?? null,
+      fmt: (v) => v.toFixed(2),
+    },
+  ];
+
+  const rankings: Ranking[] = [];
+  const advancing = new Set<string>();
+  const advancingBy = new Map<string, string[]>();
+
+  for (const L of lenses) {
+    const rows: RankItem[] = uni
+      .map((u) => ({ t: u.ticker, v: L.get(u.ticker) }))
+      .filter((x): x is { t: string; v: number } => x.v != null && !Number.isNaN(x.v))
+      .sort((a, b) => b.v - a.v)
+      .map((x, i) => ({
+        ticker: x.t,
+        company: cmap.get(x.t) ?? "",
+        cap: capOf(x.t),
+        value: x.v,
+        display: L.fmt(x.v),
+        rank: i + 1,
+        advancing: i < topN,
+      }));
+    if (!rows.length) continue;
+    rankings.push({ key: L.key, label: L.label, desc: L.desc, rows });
+    for (const r of rows) {
+      if (!r.advancing) break;
+      advancing.add(r.ticker);
+      advancingBy.set(r.ticker, [...(advancingBy.get(r.ticker) ?? []), L.key]);
+    }
+  }
+
+  // Mega caps are already discovered — auto-advance them.
+  for (const u of uni) {
+    if (bypassesHeat(marketCaps?.[u.ticker])) {
+      advancing.add(u.ticker);
+      if (!advancingBy.has(u.ticker)) advancingBy.set(u.ticker, ["bypass"]);
+    }
+  }
+
+  return { rankings, advancing, advancingBy, universe: uni.length };
+}
+
 // Stage 3 — Screen. A seed becomes a discovery candidate when it (0) has an SA
 // rating (quant score or BUY/STRONG BUY — analyst-thesis-only mentions with no
 // rating, e.g. IREN, don't qualify), (1) passes the heat gate (big cap bypass,
@@ -256,6 +382,7 @@ export interface ScreenRow {
   cap: CapSize;
   bypass: boolean; // mega cap that skipped social heat
   via: GateVia; // how it passed the heat gate
+  lenses: string[]; // ranking lenses it advanced in (attention/rvol/momentum/social)
   phase: string | null; // social heat phase
   attnPhase: string | null; // price-volume attention phase
   attnScore: number | null;
@@ -278,6 +405,7 @@ export function buildScreen(
 ): { candidates: ScreenRow[]; total: number; passedHeat: number } {
   const seeds = buildSeeds(data);
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
+  const { advancing, advancingBy } = buildRankings(data, heat, technical, marketCaps);
   const candidates: ScreenRow[] = [];
   let passedHeat = 0;
 
@@ -289,17 +417,23 @@ export function buildScreen(
     const ht = heat?.tickers?.[s.ticker];
     const phase = ht?.phase ?? null;
     const attn = technical?.tickers?.[s.ticker]?.attention;
-    const socialIgnite = phase === "ignite" || phase === "detonate";
-    const passHeat = passesHeatGate(mc, phase ?? "", attn?.ignites ?? false);
-    if (passHeat) passedHeat++;
-    if (passHeat && s.hasThesis) {
-      const via: GateVia = bypassesHeat(mc) ? "bypass" : socialIgnite ? "social" : "volume";
+    // Stage 2 — advances if it's top-N in ANY ranking lens (or a mega cap).
+    const advanced = advancing.has(s.ticker);
+    const lenses = advancingBy.get(s.ticker) ?? [];
+    if (advanced) passedHeat++;
+    if (advanced && s.hasThesis) {
+      const via: GateVia = bypassesHeat(mc)
+        ? "bypass"
+        : lenses.includes("social")
+          ? "social"
+          : "volume";
       candidates.push({
         ticker: s.ticker,
         company: s.company,
         cap,
         bypass: bypassesHeat(mc),
         via,
+        lenses,
         phase,
         attnPhase: attn?.phase ?? null,
         attnScore: attn?.score ?? null,

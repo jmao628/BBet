@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildUniverse, buildScreen, passesHeatGate } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings } from "./pipeline";
 import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -11,19 +11,10 @@ function useCounts(): Record<string, number | null> {
   const marketCaps = useStore((s) => s.marketCaps);
   const seeds = buildSeeds(data);
 
-  // Heat gate over the rated seed universe: only SA-rated tickers enter; big caps
-  // pass straight through; mid/small caps must ignite socially OR on price-volume.
+  // Stage 2 advances the union of every ranking lens's top-N (+ mega caps).
   let heatCount: number | null = null;
   if (heat || technical) {
-    heatCount = buildUniverse(data).filter(
-      (u) =>
-        u.rated &&
-        passesHeatGate(
-          marketCaps?.[u.ticker],
-          heat?.tickers[u.ticker]?.phase ?? "",
-          technical?.tickers[u.ticker]?.attention?.ignites ?? false,
-        ),
-    ).length;
+    heatCount = buildRankings(data, heat, technical, marketCaps).advancing.size;
   }
 
   const screenCount =
