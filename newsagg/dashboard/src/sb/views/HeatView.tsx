@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { buildRankings, companyMap, sectorCN, type Ranking } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
@@ -14,83 +14,55 @@ const LENS_COLOR: Record<string, string> = {
 function RankingCard({ ranking, filter }: { ranking: Ranking; filter: string | null }) {
   const openDetail = useStore((s) => s.openDetail);
   const color = LENS_COLOR[ranking.key] ?? "#3dd6c4";
-  const inTopCount = ranking.rows.filter((r) => r.inTop).length;
-  const sbCount = ranking.rows.filter((r) => !r.inTop && r.strongBuy).length;
-  const rows = (filter ? ranking.rows.filter((r) => r.sector === filter) : ranking.rows).slice(0, 15);
-  // Draw the "达标线" after the last top-10-clearing row; 强买 rows below it still
-  // highlight (a separate advance path), tagged 强买.
-  const lastInTop = rows.reduce((a, r, i) => (r.inTop ? i : a), -1);
+  const base = filter ? ranking.rows.filter((r) => r.sector === filter) : ranking.rows;
+  // Only the 达标 top-10 winners of this lens — strong buys live in their own
+  // card, so we don't repeat them here.
+  const rows = base.filter((r) => r.inTop);
   return (
     <Card
       title={ranking.label}
-      sub={`${inTopCount} 达标 · ${sbCount} 强买 · 共 ${ranking.rows.length} 只`}
+      sub={`${rows.length} 达标入选 · 共 ${base.length} 只`}
       pad0
       right={<span className="h-2 w-2 rounded-full" style={{ background: color }} />}
     >
       <div className="px-[18px] pb-1 pt-2 text-[11px] text-muted2">{ranking.desc}</div>
-      <div className="max-h-[360px] overflow-y-auto">
-        <table className="w-full text-[13px]">
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td className="px-[18px] py-4 text-[12px] text-muted2">该板块在此维度暂无标的。</td>
-              </tr>
-            )}
-            {rows.map((r, i) => (
-              <Fragment key={r.ticker}>
-                <tr
-                  onClick={() => openDetail(r.ticker)}
-                  className={`cursor-pointer border-t border-line hover:bg-white/[0.03] ${
-                    r.advancing ? "" : "opacity-45"
-                  }`}
-                >
-                  <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
-                    {r.rank}
-                  </td>
-                  <td className="py-2 pl-2">
-                    <span className="font-mono font-semibold text-signal">{r.ticker}</span>
-                    <span className="ml-2 text-[11px] text-muted">{r.company}</span>
-                  </td>
-                  <td className="py-2 text-[11px] text-muted2">{sectorCN(r.sector)}</td>
-                  <td
-                    className="py-2 pr-2 text-right font-mono tabular-nums"
-                    style={{ color: r.advancing ? color : undefined }}
+      <table className="w-full text-[13px]">
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td className="px-[18px] py-4 text-[12px] text-muted2">今日无票达标此维度。</td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr
+                key={r.ticker}
+                onClick={() => openDetail(r.ticker)}
+                className="cursor-pointer border-t border-line hover:bg-white/[0.03]"
+              >
+                <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
+                  {r.rank}
+                </td>
+                <td className="py-2 pl-2">
+                  <span className="font-mono font-semibold text-signal">{r.ticker}</span>
+                  <span className="ml-2 text-[11px] text-muted">{r.company}</span>
+                </td>
+                <td className="py-2 text-[11px] text-muted2">{sectorCN(r.sector)}</td>
+                <td className="py-2 pr-2 text-right font-mono tabular-nums" style={{ color }}>
+                  {r.display}
+                </td>
+                <td className="w-14 py-2 pr-[18px] text-right">
+                  <span
+                    className="whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                    style={{ color, borderColor: `${color}66`, background: `${color}18` }}
                   >
-                    {r.display}
-                  </td>
-                  <td className="w-16 py-2 pr-[18px] text-right">
-                    {r.inTop ? (
-                      <span
-                        className="whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium"
-                        style={{ color, borderColor: `${color}66`, background: `${color}18` }}
-                      >
-                        入选
-                      </span>
-                    ) : r.strongBuy ? (
-                      <span className="whitespace-nowrap rounded-full border border-gold/45 bg-gold/10 px-2 py-0.5 text-[10px] font-medium text-gold">
-                        强买
-                      </span>
-                    ) : null}
-                  </td>
-                </tr>
-                {i === lastInTop && i < rows.length - 1 && (
-                  <tr>
-                    <td colSpan={5} className="px-[18px] py-1">
-                      <div className="flex items-center gap-2">
-                        <div className="h-px flex-1" style={{ background: `${color}55` }} />
-                        <span className="text-[10px] font-medium" style={{ color }}>
-                          前 10 达标线 · 以下未入选
-                        </span>
-                        <div className="h-px flex-1" style={{ background: `${color}55` }} />
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    入选
+                  </span>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </Card>
   );
 }
