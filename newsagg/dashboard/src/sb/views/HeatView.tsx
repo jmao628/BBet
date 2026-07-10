@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { buildRankings, companyMap, sectorCN, type Ranking } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
@@ -16,6 +16,8 @@ function RankingCard({ ranking, filter }: { ranking: Ranking; filter: string | n
   const color = LENS_COLOR[ranking.key] ?? "#3dd6c4";
   const advancing = ranking.rows.filter((r) => r.advancing).length;
   const rows = (filter ? ranking.rows.filter((r) => r.sector === filter) : ranking.rows).slice(0, 15);
+  // Index of the last 入选 row in the shown slice — we draw a "达标线" after it.
+  const lastAdv = rows.reduce((a, r, i) => (r.advancing ? i : a), -1);
   return (
     <Card
       title={ranking.label}
@@ -32,39 +34,53 @@ function RankingCard({ ranking, filter }: { ranking: Ranking; filter: string | n
                 <td className="px-[18px] py-4 text-[12px] text-muted2">该板块在此维度暂无标的。</td>
               </tr>
             )}
-            {rows.map((r) => (
-              <tr
-                key={r.ticker}
-                onClick={() => openDetail(r.ticker)}
-                className={`cursor-pointer border-t border-line hover:bg-white/[0.03] ${
-                  r.advancing ? "" : "opacity-45"
-                }`}
-              >
-                <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
-                  {r.rank}
-                </td>
-                <td className="py-2 pl-2">
-                  <span className="font-mono font-semibold text-signal">{r.ticker}</span>
-                  <span className="ml-2 text-[11px] text-muted">{r.company}</span>
-                </td>
-                <td className="py-2 text-[11px] text-muted2">{sectorCN(r.sector)}</td>
-                <td
-                  className="py-2 pr-2 text-right font-mono tabular-nums"
-                  style={{ color: r.advancing ? color : undefined }}
+            {rows.map((r, i) => (
+              <Fragment key={r.ticker}>
+                <tr
+                  onClick={() => openDetail(r.ticker)}
+                  className={`cursor-pointer border-t border-line hover:bg-white/[0.03] ${
+                    r.advancing ? "" : "opacity-45"
+                  }`}
                 >
-                  {r.display}
-                </td>
-                <td className="w-12 py-2 pr-[18px] text-right">
-                  {r.advancing && (
-                    <span
-                      className="rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
-                      style={{ color, borderColor: `${color}66`, background: `${color}18` }}
-                    >
-                      入选
-                    </span>
-                  )}
-                </td>
-              </tr>
+                  <td className="w-8 py-2 pl-[18px] pr-1 text-right font-mono text-[11px] text-muted2">
+                    {r.rank}
+                  </td>
+                  <td className="py-2 pl-2">
+                    <span className="font-mono font-semibold text-signal">{r.ticker}</span>
+                    <span className="ml-2 text-[11px] text-muted">{r.company}</span>
+                  </td>
+                  <td className="py-2 text-[11px] text-muted2">{sectorCN(r.sector)}</td>
+                  <td
+                    className="py-2 pr-2 text-right font-mono tabular-nums"
+                    style={{ color: r.advancing ? color : undefined }}
+                  >
+                    {r.display}
+                  </td>
+                  <td className="w-12 py-2 pr-[18px] text-right">
+                    {r.advancing && (
+                      <span
+                        className="rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+                        style={{ color, borderColor: `${color}66`, background: `${color}18` }}
+                      >
+                        入选
+                      </span>
+                    )}
+                  </td>
+                </tr>
+                {i === lastAdv && i < rows.length - 1 && (
+                  <tr>
+                    <td colSpan={5} className="px-[18px] py-1">
+                      <div className="flex items-center gap-2">
+                        <div className="h-px flex-1" style={{ background: `${color}55` }} />
+                        <span className="text-[10px] font-medium" style={{ color }}>
+                          前 10 达标线 · 以下未入选
+                        </span>
+                        <div className="h-px flex-1" style={{ background: `${color}55` }} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -195,7 +211,7 @@ export function HeatView() {
           title="大票直通"
           sub={`≥ $1000亿 · ${bypassOnly.length} 只 · 已被充分覆盖,跳过热度闸(不在下方排名高亮)`}
         >
-          <div className="flex flex-wrap gap-2">
+          <div className="flex max-h-[104px] flex-wrap gap-2 overflow-y-auto">
             {bypassOnly.map((t) => (
               <button
                 key={t}

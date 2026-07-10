@@ -302,6 +302,7 @@ interface Lens {
   min: number; // value must clear this to count as "ignited" (else stays dim)
   get: (t: string) => number | null;
   fmt: (v: number) => string;
+  tie?: (t: string) => number; // continuous tiebreaker when many share a score
 }
 
 export function buildRankings(
@@ -335,6 +336,9 @@ export function buildRankings(
       min: 50,
       get: (t) => attn(t)?.score ?? null,
       fmt: (v) => `${Math.round(v)} 分`,
+      // The score is coarse (many tie at 60) — break ties by RVOL then momentum
+      // so who lands in the top-10 is meaningful, not arbitrary.
+      tie: (t) => (attn(t)?.rvol ?? 0) + (momentum(t) ?? 0) / 1000,
     },
     {
       key: "rvol",
@@ -370,7 +374,7 @@ export function buildRankings(
     const rows: RankItem[] = uni
       .map((u) => ({ t: u.ticker, v: L.get(u.ticker) }))
       .filter((x): x is { t: string; v: number } => x.v != null && !Number.isNaN(x.v))
-      .sort((a, b) => b.v - a.v)
+      .sort((a, b) => b.v - a.v || (L.tie?.(b.t) ?? 0) - (L.tie?.(a.t) ?? 0))
       .map((x, i) => {
         const meetsBar = x.v >= L.min;
         return {
