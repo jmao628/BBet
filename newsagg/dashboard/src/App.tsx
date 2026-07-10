@@ -7,6 +7,7 @@ import { OverviewView } from "./sb/views/OverviewView";
 import { SeedsView } from "./sb/views/SeedsView";
 import { HeatView } from "./sb/views/HeatView";
 import { ScreenView } from "./sb/views/ScreenView";
+import { FocusView } from "./sb/views/FocusView";
 import { StockDetail } from "./sb/views/StockDetail";
 import {
   CatalystView,
@@ -20,6 +21,7 @@ const VIEWS = {
   seeds: SeedsView,
   heat: HeatView,
   screen: ScreenView,
+  focus: FocusView,
   catalyst: CatalystView,
   conviction: ConvictionView,
   technical: TechnicalView,

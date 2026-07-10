@@ -22,6 +22,16 @@ export const FUNNEL: NavStage[] = [
   { key: "technical", step: 5, en: "Bollinger", zh: "Boll 技术" },
 ];
 
+// The synthesized output of step 2 — strong-buy × ecosystem, the shortlist that
+// carries into the deeper stages. Rendered as a highlighted output node.
+export const FOCUS: NavStage = {
+  key: "focus",
+  step: null,
+  en: "Focus List",
+  zh: "重点名单",
+  hint: { en: "strong-buy × ecosystem", zh: "强买 × 生态 · 交集" },
+};
+
 export const CANDIDATES: NavStage = {
   key: "candidates",
   step: null,

@@ -1,6 +1,6 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings } from "./pipeline";
-import { OVERVIEW, FUNNEL, CANDIDATES, type NavStage } from "./nav";
+import { buildSeeds, buildScreen, buildRankings, buildFocus } from "./pipeline";
+import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
 // their computations are wired.
@@ -8,6 +8,8 @@ function useCounts(): Record<string, number | null> {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
   const technical = useStore((s) => s.technical);
+  const sectors = useStore((s) => s.sectors);
+  const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   const seeds = buildSeeds(data);
 
@@ -20,10 +22,16 @@ function useCounts(): Record<string, number | null> {
   const screenCount =
     heat || technical ? buildScreen(data, heat, marketCaps, technical).candidates.length : null;
 
+  const focusCount =
+    technical || supplychain
+      ? buildFocus(data, heat, technical, marketCaps, sectors, supplychain).length
+      : null;
+
   return {
     seeds: seeds.length,
     heat: heatCount,
     screen: screenCount,
+    focus: focusCount,
     catalyst: null,
     conviction: null,
     technical: null,
@@ -97,6 +105,12 @@ export function FunnelRail() {
         <div key={s.key} className="relative">
           {/* a stage that repeats the previous stage's number is a parallel branch */}
           <NavRow stage={s} count={counts[s.key]} branch={i > 0 && FUNNEL[i - 1].step === s.step} />
+          {/* the synthesized step-2 output sits right after the Heat/Screen pair */}
+          {s.key === "screen" && (
+            <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
+              <NavRow stage={FOCUS} count={counts.focus} />
+            </div>
+          )}
         </div>
       ))}
 

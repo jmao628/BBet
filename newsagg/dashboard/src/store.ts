@@ -9,6 +9,7 @@ export type ViewKey =
   | "seeds"
   | "heat"
   | "screen"
+  | "focus"
   | "catalyst"
   | "conviction"
   | "technical"

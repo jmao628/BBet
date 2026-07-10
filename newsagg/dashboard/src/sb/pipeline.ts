@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { HeatData, MarketCaps, SAData, TechnicalData, SectorData } from "../types";
+import type { HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
 
 // yfinance GICS sectors → short Chinese labels.
 export const SECTOR_CN: Record<string, string> = {
@@ -597,4 +597,101 @@ export const CAP_LABEL: Record<CapSize, { en: string; zh: string }> = {
 
 export function capLabel(cap: CapSize, lang: "en" | "zh"): string {
   return lang === "zh" ? CAP_LABEL[cap].zh : CAP_LABEL[cap].en;
+}
+
+// Focus List — step 2's synthesized output. A name earns a spot if it is
+// technically strong (gauge = strong buy) OR ecosystem-connected (linked to
+// another universe name). Each carries a transparent composite score that
+// rewards being strong-buy, in both nets, well-connected (esp. to mega-cap
+// anchors) and getting price-volume attention. This is the shortlist that
+// carries into the deeper (catalyst / conviction / timing) stages.
+export interface FocusNeighbor {
+  ticker: string;
+  kind: "upstream" | "downstream" | "peers";
+  anchor: boolean;
+}
+export interface FocusItem {
+  ticker: string;
+  company: string;
+  cap: CapSize;
+  sector: string;
+  strongBuy: boolean;
+  inBoth: boolean; // in the Heat attention board AND the quality net
+  attnScore: number | null;
+  rvol: number | null;
+  z: number | null;
+  links: number;
+  anchors: number;
+  neighbors: FocusNeighbor[];
+  score: number;
+}
+
+export function buildFocus(
+  data: SAData | null,
+  heat: HeatData | null,
+  technical: TechnicalData | null,
+  marketCaps: MarketCaps | null,
+  sectors: SectorData | null,
+  supplychain: SupplyChainData | null,
+): FocusItem[] {
+  const uni = buildUniverse(data);
+  const inUni = new Set(uni.map((u) => u.ticker));
+  const cmap = companyMap(data);
+  const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
+  const { advancing } = buildRankings(data, heat, technical, marketCaps);
+  const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
+
+  const rated = uni.filter((u) => u.rated);
+  const items: FocusItem[] = [];
+  for (const u of rated) {
+    const t = u.ticker;
+    const gauge = technical?.tickers?.[t]?.gauge?.summary;
+    const strongBuy = gauge === "strong_buy";
+    const attn = technical?.tickers?.[t]?.attention;
+    const attnScore = attn?.score ?? null;
+
+    // ecosystem neighbors that are in-universe (deduped)
+    const seen = new Set<string>();
+    const neighbors: FocusNeighbor[] = [];
+    const sc = supplychain?.[t];
+    if (sc) {
+      for (const kind of ["upstream", "downstream", "peers"] as const) {
+        for (const e of sc[kind] ?? []) {
+          if (e.ticker && e.ticker !== t && inUni.has(e.ticker) && !seen.has(e.ticker)) {
+            seen.add(e.ticker);
+            neighbors.push({ ticker: e.ticker, kind, anchor: bypassesHeat(marketCaps?.[e.ticker]) });
+          }
+        }
+      }
+    }
+    const links = neighbors.length;
+    if (!strongBuy && links === 0) continue; // membership: strong-buy OR connected
+
+    const anchors = neighbors.filter((n) => n.anchor).length;
+    const inBoth = quality.has(t) && advancing.has(t);
+    const score =
+      (strongBuy ? 40 : 0) +
+      (inBoth ? 15 : 0) +
+      Math.min(links, 8) * 3 +
+      Math.min(anchors, 5) * 3 +
+      Math.round((attnScore ?? 0) * 0.25);
+
+    items.push({
+      ticker: t,
+      company: cmap.get(t) ?? "",
+      cap: capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []),
+      sector: sectors?.[t]?.sector ?? "",
+      strongBuy,
+      inBoth,
+      attnScore,
+      rvol: attn?.rvol ?? null,
+      z: heat?.tickers?.[t]?.z ?? null,
+      links,
+      anchors,
+      neighbors,
+      score,
+    });
+  }
+  items.sort((a, b) => b.score - a.score || b.links - a.links || a.ticker.localeCompare(b.ticker));
+  return items;
 }
