@@ -10,20 +10,26 @@ export function SeedsView() {
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
-  const seeds = useMemo(() => buildSeeds(data), [data]);
+  const allSeeds = useMemo(() => buildSeeds(data), [data]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
 
   const [thesisOnly, setThesisOnly] = useState(false);
-  const [noDataOnly, setNoDataOnly] = useState(false);
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
 
-  const thesisCount = seeds.filter((r) => r.hasThesis).length;
-  const noData = useMemo(
-    () => (technical ? seeds.filter((r) => !hasData(r.ticker)) : []),
-    [seeds, technical],
+  // OTC / foreign ADRs yfinance can't price are dropped from the universe once
+  // technical data exists — they can't flow through heat/technical anyway.
+  const excluded = useMemo(
+    () => (technical ? allSeeds.filter((r) => !hasData(r.ticker)) : []),
+    [allSeeds, technical],
   );
+  const seeds = useMemo(
+    () => (technical ? allSeeds.filter((r) => hasData(r.ticker)) : allSeeds),
+    [allSeeds, technical],
+  );
+
+  const thesisCount = seeds.filter((r) => r.hasThesis).length;
 
   const sectorCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -36,7 +42,6 @@ export function SeedsView() {
 
   let rows = seeds;
   if (thesisOnly) rows = rows.filter((r) => r.hasThesis);
-  if (noDataOnly) rows = rows.filter((r) => !hasData(r.ticker));
   if (sectorFilter) rows = rows.filter((r) => sectorOf(r.ticker) === sectorFilter);
 
   return (
@@ -66,16 +71,6 @@ export function SeedsView() {
             {t("★ Analyst thesis", "★ 有分析师论点")} {thesisCount}
           </button>
         </div>
-        {noData.length > 0 && (
-          <button
-            onClick={() => setNoDataOnly((v) => !v)}
-            className={`rounded-lg border px-3 py-1.5 text-[12px] ${
-              noDataOnly ? "border-bad/50 bg-bad/10 text-bad" : "border-line text-muted hover:text-text"
-            }`}
-          >
-            {t("⚠ No data", "⚠ 无数据")} {noData.length}
-          </button>
-        )}
         <span className="ml-auto font-mono text-[12px] text-muted2">{t(`${rows.length} rows · deduped`, `${rows.length} 条 · 已去重`)}</span>
       </div>
 
@@ -105,14 +100,13 @@ export function SeedsView() {
         </div>
       )}
 
-      {/* the no-data tickers, spelled out */}
-      {noData.length > 0 && (
-        <div className="mb-3 rounded-lg border border-bad/30 bg-bad/[0.06] px-3.5 py-2.5 text-[12px]">
-          <span className="font-medium text-bad">{t(`${noData.length} not found on yfinance`, `yfinance 未找到行情的 ${noData.length} 只`)}</span>
-          <span className="text-muted2">{t(" (mostly OTC / foreign ADRs, excluded from heat/technical): ", "（多为 OTC / 海外 ADR，不参与热度/技术）：")}</span>
-          <span className="ml-1 font-mono text-muted">
-            {noData.map((r) => r.ticker).join("  ·  ")}
-          </span>
+      {/* excluded OTC/foreign ADRs — one muted line, not the whole list */}
+      {excluded.length > 0 && (
+        <div className="mb-3 text-[11px] text-muted2">
+          {t(
+            `${excluded.length} OTC / foreign ADRs with no yfinance price were dropped from the universe.`,
+            `${excluded.length} 只 yfinance 无行情的 OTC / 海外 ADR 已从种子池剔除。`,
+          )}
         </div>
       )}
 

@@ -507,6 +507,8 @@ export function buildScreen(
   let passedHeat = 0;
 
   for (const s of seeds) {
+    // No yfinance data (OTC / foreign ADR) → excluded from the funnel entirely.
+    if (technical && !technical.tickers?.[s.ticker]) continue;
     // Quality net: must have an SA rating AND an analyst thesis. Independent of Heat.
     if (s.rating == null && s.quant == null) continue;
     if (!s.hasThesis) continue;
@@ -651,6 +653,7 @@ export function buildFocus(
   for (const u of rated) {
     const t = u.ticker;
     const tt = technical?.tickers?.[t];
+    if (technical && !tt) continue; // no yfinance data → out of the funnel
     const gauge = tt?.gauge?.summary;
     const strongBuy = gauge === "strong_buy";
     const buyStreak = tt?.buy_streak ?? 0;

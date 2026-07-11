@@ -11,7 +11,8 @@ function useCounts(): Record<string, number | null> {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
-  const seeds = buildSeeds(data);
+  // Exclude OTC/foreign ADRs with no yfinance data (once technical has loaded).
+  const seeds = buildSeeds(data).filter((r) => !technical || technical.tickers?.[r.ticker]);
 
   // Stage 2 advances the union of every ranking lens's top-N (+ mega caps).
   let heatCount: number | null = null;
