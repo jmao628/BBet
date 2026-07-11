@@ -179,8 +179,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap anchors (≥$100B); outer nodes = discovery targets, placed near the anchors they link to. A glowing node = high Focus score (≥7) on your side. Click any node.",
-                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票锚（≥$1000亿）；外圈 = 发现目标，摆在它关联的锚附近。发光节点 = 你的 Focus 分高（≥7）。点任意节点。",
+                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap SUPPLIERS (≥$100B, upstream hubs — peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = high Focus score (≥7) on your side. Click any node.",
+                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票**供应商**（≥$1000亿的上游枢纽；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标，摆在它依赖的供应商附近。发光节点 = 你的 Focus 分高（≥7）。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -358,12 +358,15 @@ function EcoGraph({
   const TOPT = 24;
   const pool = rows.filter((r) => r.anchors > 0).slice(0, TOPT);
 
-  // Anchors = mega-caps IN THE SAME SECTOR (so e.g. NVDA doesn't show up as a
-  // Healthcare anchor). Pick the most-referenced ones, cap the ring.
+  // Anchors = mega-caps in the SAME SECTOR that act as an UPSTREAM SUPPLIER to
+  // the targets (kind === "upstream"). Peers / customers-only mega-caps (e.g.
+  // UBER) are NOT supply-chain hubs, so they're excluded. Pick the most-cited
+  // suppliers, cap the ring.
   const freq = new Map<string, number>();
   for (const r of pool)
     for (const n of r.neighbors)
-      if (n.anchor && (!sector || sectorOf(n.ticker) === sector)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
+      if (n.anchor && n.kind === "upstream" && (!sector || sectorOf(n.ticker) === sector))
+        freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
   const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map((e) => e[0]);
   const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
 
