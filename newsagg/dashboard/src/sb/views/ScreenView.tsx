@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, buildEcoAdjacency, bypassesHeat, capLabel, sectorLabel } from "../pipeline";
+import { buildScreen, buildUniverse, buildEcoAdjacency, buildFocus, bypassesHeat, capLabel, sectorLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -110,6 +110,13 @@ export function ScreenView() {
   }, [links, sectors]);
   const ecoRows = ecoSector ? links.filter((r) => sectorOf(r.ticker) === ecoSector) : links;
 
+  // Nodes to "light up" = names scoring high on YOUR Focus List (score ≥ 7/10).
+  const hotScores = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of buildFocus(data, heat, technical, marketCaps, sectors, supplychain)) m.set(f.ticker, f.score);
+    return m;
+  }, [data, heat, technical, marketCaps, sectors, supplychain]);
+
   return (
     <div className="view-in">
       <ViewHead
@@ -197,7 +204,7 @@ export function ScreenView() {
                   ))}
                 </div>
               )}
-              <EcoGraph rows={ecoRows} onOpen={openDetail} t={t} />
+              <EcoGraph rows={ecoRows} scores={hotScores} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -321,12 +328,16 @@ export function ScreenView() {
 type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
 type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; anchors: number; crit: number };
 
+const HOT_SCORE = 7; // Focus score (0-10) at/above which a node lights up
+
 function EcoGraph({
   rows,
+  scores,
   onOpen,
   t,
 }: {
   rows: EcoRow[];
+  scores: Map<string, number>;
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
@@ -384,8 +395,8 @@ function EcoGraph({
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `Showing top ${targets.length} anchor-linked targets · ${anchors.length} anchors · click any node`,
-          `显示关联最强的 ${targets.length} 个目标 · ${anchors.length} 个大票锚 · 点任意节点`,
+          `Top ${targets.length} anchor-linked targets · ${anchors.length} anchors · glowing = high Focus score (≥${HOT_SCORE}) · click any node`,
+          `关联最强的 ${targets.length} 个目标 · ${anchors.length} 个大票锚 · 发光 = 你的 Focus 分高(≥${HOT_SCORE}) · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
@@ -447,7 +458,7 @@ function EcoGraph({
             );
           })}
 
-          {/* target nodes + labels */}
+          {/* target nodes + labels — glow = high Focus score on your side */}
           {withAngle.map(({ r }, ti) => {
             const p = tPos(ti);
             const rad = 5 + Math.min(r.neighbors.length, 8) * 0.9;
@@ -455,28 +466,30 @@ function EcoGraph({
             const lx = cx + (Ro + 15) * Math.cos(ang);
             const ly = cy + (Ro + 15) * Math.sin(ang);
             const anchorRight = Math.cos(ang) >= 0;
-            const crit = r.crit > 0;
+            const score = scores.get(r.ticker) ?? 0;
+            const hot = score >= HOT_SCORE;
             return (
               <g key={r.ticker} className="eco-node" onClick={() => onOpen(r.ticker)}>
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={rad}
-                  fill={crit ? "#3dd6c4" : "#14313a"}
-                  stroke="#3dd6c4"
-                  strokeWidth={crit ? 2 : 1.4}
-                  style={crit ? { filter: "drop-shadow(0 0 6px #3dd6c4)" } : undefined}
+                  r={hot ? rad + 1.5 : rad}
+                  fill={hot ? "#3dd6c4" : "#14313a"}
+                  stroke={hot ? "#7ff0e2" : "#3dd6c455"}
+                  strokeWidth={hot ? 2.5 : 1.2}
+                  style={hot ? { filter: "drop-shadow(0 0 8px #3dd6c4)" } : undefined}
                 />
                 <text
                   x={lx}
                   y={ly + 3}
                   textAnchor={anchorRight ? "start" : "end"}
-                  fontSize="10.5"
+                  fontSize={hot ? 11.5 : 10}
                   fontFamily="ui-monospace, monospace"
-                  fontWeight="600"
-                  fill={crit ? "#3dd6c4" : "#c7d2dc"}
+                  fontWeight={hot ? 700 : 500}
+                  fill={hot ? "#7ff0e2" : "#8695a3"}
                 >
                   {r.ticker}
+                  {hot ? ` ${score.toFixed(1)}` : ""}
                 </text>
               </g>
             );
