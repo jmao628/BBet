@@ -336,7 +336,11 @@ export function buildRankings(
   sectors: SectorData | null = null,
   topN = 10,
 ): RankBundle {
-  const uni = buildUniverse(data).filter((u) => u.rated);
+  // Rated seeds that actually have yfinance data (no-data OTC/foreign ADRs are
+  // excluded so every count on the page matches what's actually ranked).
+  const uni = buildUniverse(data).filter(
+    (u) => u.rated && (!technical || !!technical.tickers?.[u.ticker]),
+  );
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
   const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
@@ -555,7 +559,9 @@ export function buildScreen(
       (b.z ?? -99) - (a.z ?? -99) ||
       (b.attnScore ?? -1) - (a.attnScore ?? -1),
   );
-  return { candidates, total: seeds.length, passedHeat };
+  // Seed pool = deduped bulls with yfinance data (matches the seed table).
+  const total = technical ? seeds.filter((s) => technical.tickers?.[s.ticker]).length : seeds.length;
+  return { candidates, total, passedHeat };
 }
 
 export const CATALYST_CN: Record<CatalystType, string> = {
