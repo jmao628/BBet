@@ -199,7 +199,7 @@ export function FocusView() {
           ))}
         </div>
       ) : (
-        <FocusTable rows={shown} maxScore={shown[0]?.score || 1} onOpen={openDetail} lang={lang} t={t} />
+        <FocusTable rows={shown} maxScore={10} onOpen={openDetail} lang={lang} t={t} />
       )}
     </div>
   );
@@ -288,8 +288,8 @@ function FocusTable({
                         style={{ width: `${(i.score / maxScore) * 100}%`, background: i.gates >= 3 ? "#3dd6c4" : "#5a6a7c" }}
                       />
                     </div>
-                    <span className="w-7 text-right font-mono text-[13px] font-semibold" style={{ color: i.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
-                      {i.score}
+                    <span className="w-8 text-right font-mono text-[13px] font-semibold" style={{ color: i.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
+                      {i.score.toFixed(1)}
                     </span>
                   </div>
                 </td>
@@ -423,9 +423,9 @@ function FocusCard({
         <div className="flex items-center gap-2.5">
           <div className="leading-none">
             <span className="font-disp text-[26px] font-semibold" style={{ color: item.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
-              {item.score}
+              {item.score.toFixed(1)}
             </span>
-            <span className="ml-1 text-[10px] uppercase text-muted2">{t("score", "分")}</span>
+            <span className="ml-0.5 text-[11px] text-muted2">/10</span>
           </div>
           {/* segmented gate meter */}
           <div className="flex items-center gap-1" title={`${item.gates}/4`}>

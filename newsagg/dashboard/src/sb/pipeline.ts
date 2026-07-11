@@ -737,13 +737,15 @@ export function buildFocus(
     if (gates === 0 && links === 0 && buyStreak < 3) continue;
 
     const core = gBuy && gAttn && gEco; // the three hard signals all fire
-    const score =
-      gates * 12 + // reward passing more independent gates
-      (strongBuy ? 18 : 0) +
-      Math.min(buyStreak, 5) * 3 +
-      Math.round((attnScore ?? 0) * 0.25) +
-      Math.round(ecoWeight * 4) + // ecosystem heavily weighted
-      (inBoth ? 8 : 0);
+    // 0-10 score, each dimension CAPPED so no single one (e.g. a mega-cap's huge
+    // ecosystem) can dominate: Buy 0-3 · Attention 0-2.5 · Ecosystem 0-3 (capped)
+    // · Thesis 0-1 · both-nets bonus 0-0.5.
+    const buyPart = (strongBuy ? 2 : gBuy ? 1 : 0) + Math.min(buyStreak, 5) / 5;
+    const attnPart = Math.min((attnScore ?? 0) / 100, 1) * 2.5;
+    const ecoPart = Math.min(ecoWeight / 16, 1) * 3;
+    const thesisPart = gThesis ? 1 : 0;
+    const bonus = inBoth ? 0.5 : 0;
+    const score = Math.round((buyPart + attnPart + ecoPart + thesisPart + bonus) * 10) / 10;
 
     items.push({
       ticker: t,

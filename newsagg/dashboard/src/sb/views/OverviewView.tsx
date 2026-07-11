@@ -7,8 +7,6 @@ import {
   buildFocus,
   noDataSet,
   sectorLabel,
-  capLabel,
-  type FocusItem,
 } from "../pipeline";
 
 // A dynamic "today's run" landing page: a synthesized snapshot + the actionable
@@ -25,21 +23,6 @@ function timeAgo(iso: string | null | undefined, t: (en: string, zh: string) => 
   return t(`${Math.round(h / 24)}d ago`, `${Math.round(h / 24)} 天前`);
 }
 
-function MiniSpark({ data, up }: { data: number[]; up: boolean }) {
-  const W = 64;
-  const H = 22;
-  if (!data || data.length < 2) return <div style={{ width: W, height: H }} />;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const rng = max - min || 1;
-  const pts = data.map((v, i) => `${((i * W) / (data.length - 1)).toFixed(1)},${(H - 2 - ((v - min) / rng) * (H - 4)).toFixed(1)}`);
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-      <polyline points={pts.join(" ")} fill="none" stroke={up ? "#3dd6c4" : "#ff5a78"} strokeWidth="1.4" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 export function OverviewView() {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
@@ -48,7 +31,6 @@ export function OverviewView() {
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   const setView = useStore((s) => s.setView);
-  const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
 
@@ -67,7 +49,6 @@ export function OverviewView() {
     [data, heat, technical, marketCaps, sectors, supplychain],
   );
   const coreN = focus.filter((f) => f.core).length;
-  const picks = focus.slice(0, 6);
 
   // top sectors among the graded focus list
   const sectorTop = useMemo(() => {
@@ -157,112 +138,45 @@ export function OverviewView() {
         </div>
       </div>
 
-      {/* TOP PICKS + SIDE */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-2xl border border-line bg-panel2 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-[13px] font-semibold">{t("Today's Top Picks", "今日头号候选")}</div>
-            <button onClick={() => setView("focus")} className="text-[12px] text-signal hover:underline">
-              {t("Focus List →", "重点名单 →")}
-            </button>
+      {/* FRESHNESS + SECTOR HEAT */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* freshness */}
+        <div className="rounded-2xl border border-line bg-panel2 p-5">
+          <div className="mb-3 text-[13px] font-semibold">{t("Data Freshness", "数据新鲜度")}</div>
+          <div className="space-y-2.5">
+            {fresh.map((f) => {
+              const stale = f.iso ? Date.now() - new Date(f.iso).getTime() > 36 * 3600e3 : true;
+              return (
+                <div key={f.label} className="flex items-center justify-between text-[12px]">
+                  <span className="flex items-center gap-2 text-muted">
+                    <span className={`h-1.5 w-1.5 rounded-full ${f.iso ? (stale ? "bg-warn" : "animate-pulse bg-ok") : "bg-dead"}`} />
+                    {f.label}
+                  </span>
+                  <span className="font-mono text-muted2">{timeAgo(f.iso, t)}</span>
+                </div>
+              );
+            })}
           </div>
-          {picks.length === 0 ? (
-            <div className="py-8 text-center text-[13px] text-muted">
-              {t("No picks yet — run technical + supplychain on the Mac.", "暂无候选——在 Mac 上跑 technical + supplychain。")}
-            </div>
-          ) : (
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              {picks.map((p, i) => (
-                <PickRow key={p.ticker} p={p} rank={i} onOpen={openDetail} lang={lang} />
+        </div>
+
+        {/* sector heat */}
+        {sectorTop.length > 0 && (
+          <div className="rounded-2xl border border-line bg-panel2 p-5">
+            <div className="mb-3 text-[13px] font-semibold">{t("Where the Action Is", "热点板块")}</div>
+            <div className="space-y-2">
+              {sectorTop.map(([sec, n]) => (
+                <div key={sec} className="flex items-center gap-2 text-[12px]">
+                  <span className="w-16 flex-none truncate text-muted">{sectorLabel(sec, lang)}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-inset">
+                    <div className="h-full rounded-full bg-signal/70 transition-all duration-700" style={{ width: grown ? `${(n / sectorMax) * 100}%` : "0%" }} />
+                  </div>
+                  <span className="w-6 flex-none text-right font-mono text-muted2">{n}</span>
+                </div>
               ))}
             </div>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {/* freshness */}
-          <div className="rounded-2xl border border-line bg-panel2 p-5">
-            <div className="mb-3 text-[13px] font-semibold">{t("Data Freshness", "数据新鲜度")}</div>
-            <div className="space-y-2.5">
-              {fresh.map((f) => {
-                const stale = f.iso ? Date.now() - new Date(f.iso).getTime() > 36 * 3600e3 : true;
-                return (
-                  <div key={f.label} className="flex items-center justify-between text-[12px]">
-                    <span className="flex items-center gap-2 text-muted">
-                      <span className={`h-1.5 w-1.5 rounded-full ${f.iso ? (stale ? "bg-warn" : "animate-pulse bg-ok") : "bg-dead"}`} />
-                      {f.label}
-                    </span>
-                    <span className="font-mono text-muted2">{timeAgo(f.iso, t)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* sector heat */}
-          {sectorTop.length > 0 && (
-            <div className="rounded-2xl border border-line bg-panel2 p-5">
-              <div className="mb-3 text-[13px] font-semibold">{t("Where the Action Is", "热点板块")}</div>
-              <div className="space-y-2">
-                {sectorTop.map(([sec, n]) => (
-                  <div key={sec} className="flex items-center gap-2 text-[12px]">
-                    <span className="w-16 flex-none truncate text-muted">{sectorLabel(sec, lang)}</span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-inset">
-                      <div className="h-full rounded-full bg-signal/70 transition-all duration-700" style={{ width: grown ? `${(n / sectorMax) * 100}%` : "0%" }} />
-                    </div>
-                    <span className="w-6 flex-none text-right font-mono text-muted2">{n}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PickRow({
-  p,
-  rank,
-  onOpen,
-  lang,
-}: {
-  p: FocusItem;
-  rank: number;
-  onOpen: (t: string) => void;
-  lang: "en" | "zh";
-}) {
-  const up = (p.changePct ?? 0) >= 0;
-  return (
-    <button
-      onClick={() => onOpen(p.ticker)}
-      className="group flex items-center gap-3 rounded-xl border border-line bg-panel p-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-signal/40 hover:bg-white/[0.03]"
-    >
-      <span className="w-4 flex-none text-center font-mono text-[11px] text-muted2">{rank + 1}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[14px] font-bold text-signal group-hover:underline">{p.ticker}</span>
-          {p.core && <span className="text-[10px] text-gold">★</span>}
-          <span className="font-mono text-[10px] text-muted2">{p.gates}/4</span>
-        </div>
-        <div className="truncate text-[10.5px] text-muted">
-          {p.company || "—"}
-          {p.sector ? ` · ${sectorLabel(p.sector, lang)}` : ""} · {capLabel(p.cap, lang)}
-        </div>
-      </div>
-      <MiniSpark data={p.spark} up={up} />
-      <div className="flex-none text-right">
-        <div className="font-disp text-[16px] font-semibold" style={{ color: p.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
-          {p.score}
-        </div>
-        {p.changePct != null && (
-          <div className="font-mono text-[10px]" style={{ color: up ? "#48c78e" : "#ff5a78" }}>
-            {up ? "+" : ""}
-            {p.changePct.toFixed(1)}%
           </div>
         )}
       </div>
-    </button>
+    </div>
   );
 }
