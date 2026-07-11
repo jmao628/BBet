@@ -179,8 +179,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap SUPPLIERS (≥$100B, upstream hubs — peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = high Focus score (≥7) on your side. Click any node.",
-                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票**供应商**（≥$1000亿的上游枢纽；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标，摆在它依赖的供应商附近。发光节点 = 你的 Focus 分高（≥7）。点任意节点。",
+                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap SUPPLIERS (≥$100B, upstream hubs — peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票**供应商**（≥$1000亿的上游枢纽；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标，摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -336,8 +336,6 @@ export function ScreenView() {
 type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
 type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; anchors: number; crit: number };
 
-const HOT_SCORE = 7; // Focus score (0-10) at/above which a node lights up
-
 function EcoGraph({
   rows,
   scores,
@@ -415,8 +413,8 @@ function EcoGraph({
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `Top ${targets.length} anchor-linked targets · ${anchors.length} anchors · glowing = high Focus score (≥${HOT_SCORE}) · click any node`,
-          `关联最强的 ${targets.length} 个目标 · ${anchors.length} 个大票锚 · 发光 = 你的 Focus 分高(≥${HOT_SCORE}) · 点任意节点`,
+          `Top ${targets.length} supplier-linked targets · ${anchors.length} suppliers · glowing = on your Focus List · click any node`,
+          `关联最强的 ${targets.length} 个目标 · ${anchors.length} 个供应商 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
@@ -486,8 +484,7 @@ function EcoGraph({
             const lx = cx + (Ro + 20) * Math.cos(ang);
             const ly = cy + (Ro + 20) * Math.sin(ang);
             const anchorRight = Math.cos(ang) >= 0;
-            const score = scores.get(r.ticker) ?? 0;
-            const hot = score >= HOT_SCORE;
+            const hot = scores.has(r.ticker); // in your Focus List → light up
             return (
               <g key={r.ticker} className="eco-node" onClick={() => onOpen(r.ticker)}>
                 <circle
