@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, buildEcoAdjacency, bypassesHeat, capLabel } from "../pipeline";
+import { buildScreen, buildUniverse, buildEcoAdjacency, bypassesHeat, capLabel, sectorLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -30,16 +30,29 @@ export function ScreenView() {
   const data = useStore((s) => s.data);
   const heat = useStore((s) => s.heat);
   const technical = useStore((s) => s.technical);
+  const sectors = useStore((s) => s.sectors);
   const marketCaps = useStore((s) => s.marketCaps);
   const supplychain = useStore((s) => s.supplychain);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
+  const [scSector, setScSector] = useState<string | null>(null);
+  const sectorOf = (tk: string) => sectors?.[tk]?.sector ?? "";
 
   const { candidates, total, passedHeat } = useMemo(
     () => buildScreen(data, heat, marketCaps, technical),
     [data, heat, marketCaps, technical],
   );
+  const scSectorCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const x of candidates) {
+      const s = sectorOf(x.ticker);
+      if (s) c.set(s, (c.get(s) ?? 0) + 1);
+    }
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates, sectors]);
+  const shownCands = scSector ? candidates.filter((x) => sectorOf(x.ticker) === scSector) : candidates;
 
   // Ecosystem network. SELECTION RULE — a ticker earns a row (becomes the
   // "subject") only if it is a *discovery target*: in your universe AND not a
@@ -225,9 +238,29 @@ export function ScreenView() {
 
       <Card
         title={t("Quality Net", "质量网 · Screen")}
-        sub={t(`${candidates.length} names · in-both-nets first, then by cap`, `${candidates.length} 只 · 两网交集在前，再按市值`)}
+        sub={t(`${shownCands.length} names · in-both-nets first, then by cap`, `${shownCands.length} 只 · 两网交集在前，再按市值`)}
         pad0
       >
+        {scSectorCounts.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-[18px] py-2.5">
+            <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+            <button
+              onClick={() => setScSector(null)}
+              className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${scSector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+            >
+              {t("All", "全部")} {candidates.length}
+            </button>
+            {scSectorCounts.map(([sec, n]) => (
+              <button
+                key={sec}
+                onClick={() => setScSector(scSector === sec ? null : sec)}
+                className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${scSector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+              >
+                {sectorLabel(sec, lang)} {n}
+              </button>
+            ))}
+          </div>
+        )}
         {candidates.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-muted">
             {t("No candidates yet — no rated seed has an analyst thesis yet, or the SA scrape hasn't run.", "暂无候选。可能：还没有带评分的种子有分析师论点，或 SA 抓取还没跑。")}
@@ -238,6 +271,7 @@ export function ScreenView() {
               <thead className="sticky top-0 z-[1] bg-panel">
                 <tr className="text-[11px] uppercase tracking-wide text-muted2">
                   <th className="px-3 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
+                  <th className="px-3 py-2 text-left font-medium">{t("Sector", "板块")}</th>
                   <th className="px-3 py-2 text-left font-medium">{t("Cap", "市值")}</th>
                   <th className="px-3 py-2 text-left font-medium">{t("Heat overlap", "热度交集")}</th>
                   <th className="px-3 py-2 text-right font-medium">z</th>
@@ -247,7 +281,7 @@ export function ScreenView() {
                 </tr>
               </thead>
               <tbody>
-                {candidates.map((c) => (
+                {shownCands.map((c) => (
                   <tr
                     key={c.ticker}
                     onClick={() => openDetail(c.ticker)}
@@ -256,6 +290,9 @@ export function ScreenView() {
                     <td className="px-3 py-2.5">
                       <span className="font-mono font-semibold text-signal">{c.ticker}</span>
                       <span className="ml-2 text-[11px] text-muted">{c.company}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted">
+                      {sectorOf(c.ticker) ? sectorLabel(sectorOf(c.ticker), lang) : <span className="text-muted2">—</span>}
                     </td>
                     <td className="px-3 py-2.5 text-[12px] text-muted">{capLabel(c.cap, lang)}</td>
                     <td className="px-3 py-2.5">

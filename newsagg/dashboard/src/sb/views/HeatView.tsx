@@ -256,7 +256,12 @@ export function HeatView() {
 
       {(() => {
         const sbRows = filter ? bundle.strongBuys.filter((s) => s.sector === filter) : bundle.strongBuys;
-        return sbRows.length > 0 ? (
+        const sbSectors = (() => {
+          const c = new Map<string, number>();
+          for (const s of bundle.strongBuys) if (s.sector) c.set(s.sector, (c.get(s.sector) ?? 0) + 1);
+          return [...c.entries()].sort((a, b) => b[1] - a[1]);
+        })();
+        return bundle.strongBuys.length > 0 ? (
           <div className="mt-4">
             <Card
               title={t("Strong Buy · All", "强力买入 · 全部")}
@@ -266,6 +271,26 @@ export function HeatView() {
               )}
               pad0
             >
+              {sbSectors.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-[18px] py-2.5">
+                  <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+                  <button
+                    onClick={() => setFilter(null)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${filter === null ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
+                  >
+                    {t("All", "全部")} {bundle.strongBuys.length}
+                  </button>
+                  {sbSectors.map(([sec, n]) => (
+                    <button
+                      key={sec}
+                      onClick={() => setFilter(filter === sec ? null : sec)}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${filter === sec ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
+                    >
+                      {sectorLabel(sec, lang)} {n}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="max-h-[300px] overflow-y-auto">
                 <table className="w-full text-[13px]">
                   <tbody>

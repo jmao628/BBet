@@ -108,11 +108,18 @@ _SCHEMA = {
 }
 
 
-def _prompt(ticker: str, name: str) -> str:
+def _prompt(ticker: str, name: str, sector: str = "", industry: str = "") -> str:
     who = f"{ticker} ({name})" if name else ticker
+    ctx = ""
+    if sector or industry:
+        ctx = f" It is classified under sector '{sector}', industry '{industry}'."
     return (
-        f"Map the supply chain around the US-listed company {who}.\n\n"
-        "Return three lists:\n"
+        f"Map the supply chain around the US-listed company {who}.{ctx}\n\n"
+        "FIRST, in your reasoning, state precisely what this specific company actually does — its core "
+        "products/services and what it must buy to deliver them — using the sector/industry above to pin down "
+        "the RIGHT company (don't confuse it with a similarly-named or adjacent business). A cloud / AI-"
+        "infrastructure company's key upstream is its GPU/chip and server suppliers; a fabless chip designer's "
+        "is its foundry; a retailer's downstream is its end customers. THEN map:\n"
         "- upstream: its most important suppliers / input providers (who it buys from or depends on)\n"
         "- downstream: its most important customers / distribution channels (who buys from or depends on it)\n"
         "- peers: its most direct competitors\n\n"
@@ -156,7 +163,7 @@ def _clean_edges(raw: list) -> list[dict]:
     return out
 
 
-def _fetch_one(client, ticker: str, name: str, model: str = MODEL) -> dict | None:
+def _fetch_one(client, ticker: str, name: str, model: str = MODEL, sector: str = "", industry: str = "") -> dict | None:
     """One structured call. Returns the cleaned map, or None on failure."""
     try:
         # Adaptive thinking only exists on Claude 4.6+; skip it for other models
@@ -166,7 +173,7 @@ def _fetch_one(client, ticker: str, name: str, model: str = MODEL) -> dict | Non
             model=model,
             max_tokens=1500,
             output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
-            messages=[{"role": "user", "content": _prompt(ticker, name)}],
+            messages=[{"role": "user", "content": _prompt(ticker, name, sector, industry)}],
             **kwargs,
         )
     except Exception as exc:  # noqa: BLE001
@@ -191,7 +198,11 @@ def _fetch_one(client, ticker: str, name: str, model: str = MODEL) -> dict | Non
 
 
 def fetch_missing(
-    tickers: dict[str, str], have: dict[str, dict], workers: int = 4, model: str = MODEL
+    tickers: dict[str, str],
+    have: dict[str, dict],
+    workers: int = 4,
+    model: str = MODEL,
+    sectors: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
     """Look up the supply chain for tickers not already cached."""
     try:
@@ -212,10 +223,18 @@ def fetch_missing(
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    sectors = sectors or {}
     client = anthropic.Anthropic()
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(_fetch_one, client, t, n, model): t for t, n in missing.items()}
+        futures = {
+            ex.submit(
+                _fetch_one, client, t, n, model,
+                (sectors.get(t) or {}).get("sector", ""),
+                (sectors.get(t) or {}).get("industry", ""),
+            ): t
+            for t, n in missing.items()
+        }
         for i, fut in enumerate(as_completed(futures), 1):
             t = futures[fut]
             res = fut.result()
@@ -253,7 +272,10 @@ def main() -> int:
         pending = [t for t in names if t not in have][: args.limit]
         names = {t: names[t] for t in pending}
 
-    fetched = fetch_missing(names, have, model=args.model)
+    # Sector/industry context helps the model pin down the RIGHT company.
+    sectors = _load(settings.output_dir / "sectors.json")
+
+    fetched = fetch_missing(names, have, model=args.model, sectors=sectors)
     merged = {**have, **fetched}
     if not merged:
         logger.warning("no supply-chain data resolved (no key / API error); keeping existing file")
