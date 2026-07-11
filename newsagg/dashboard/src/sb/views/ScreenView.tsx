@@ -474,9 +474,8 @@ function EcoGraph({
                   fontSize="10.5"
                   fontFamily="ui-monospace, monospace"
                   fontWeight="600"
-                  fill="#c7d2dc"
+                  fill={crit ? "#3dd6c4" : "#c7d2dc"}
                 >
-                  {crit ? "!" : ""}
                   {r.ticker}
                 </text>
               </g>
