@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, capLabel, sectorLabel, SUSTAINED_DAYS, type FocusItem } from "../pipeline";
+import {
+  buildFocus,
+  capLabel,
+  sectorLabel,
+  SUSTAINED_DAYS,
+  FOCUS_ATTN_BAR,
+  FOCUS_RVOL_BAR,
+  type FocusItem,
+} from "../pipeline";
 import { ViewHead, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -10,7 +18,7 @@ const GRP_COLOR: Record<string, string> = {
   peers: "#e9c46a",
 };
 
-type FilterKey = "all" | "both" | "strong" | "sustained" | "linked";
+type FilterKey = "all" | "core" | "both" | "strong" | "sustained" | "linked";
 type SortKey = "score" | "attn" | "links" | "rvol" | "streak";
 
 export function FocusView() {
@@ -33,6 +41,7 @@ export function FocusView() {
     [data, heat, technical, marketCaps, sectors, supplychain],
   );
 
+  const coreN = all.filter((i) => i.tier === 1).length;
   const bothN = all.filter((i) => i.strongBuy && i.links > 0).length;
   const strongN = all.filter((i) => i.strongBuy).length;
   const sustainedN = all.filter((i) => i.buyStreak >= SUSTAINED_DAYS).length;
@@ -46,7 +55,8 @@ export function FocusView() {
 
   const shown = useMemo(() => {
     let rows = all;
-    if (filter === "both") rows = rows.filter((i) => i.strongBuy && i.links > 0);
+    if (filter === "core") rows = rows.filter((i) => i.tier === 1);
+    else if (filter === "both") rows = rows.filter((i) => i.strongBuy && i.links > 0);
     else if (filter === "strong") rows = rows.filter((i) => i.strongBuy);
     else if (filter === "sustained") rows = rows.filter((i) => i.buyStreak >= SUSTAINED_DAYS);
     else if (filter === "linked") rows = rows.filter((i) => i.links > 0);
@@ -66,6 +76,7 @@ export function FocusView() {
 
   const FILTERS: { k: FilterKey; label: string; n: number }[] = [
     { k: "all", label: t("All", "全部"), n: all.length },
+    { k: "core", label: t("★ Core", "★ 核心"), n: coreN },
     { k: "both", label: t("Strong × Linked", "强买×关联"), n: bothN },
     { k: "strong", label: t("Strong Buy", "强力买入"), n: strongN },
     { k: "sustained", label: t(`Sustained ${SUSTAINED_DAYS}d`, `持续买入 ${SUSTAINED_DAYS} 天`), n: sustainedN },
@@ -83,18 +94,18 @@ export function FocusView() {
     <div className="view-in">
       <ViewHead
         eyebrow={t("Step 2 · Output", "第 2 步 · 输出")}
-        title={t("Focus List · Strong-Buy × Ecosystem", "重点名单 · 强买 × 生态")}
+        title={t("Focus List · The Strict Shortlist", "重点名单 · 严格短名单")}
         desc={t(
-          "The synthesized output of the discovery step: names that are technically strong (gauge = strong buy) OR wired into the universe's supply chain. Each carries a transparent composite — strong-buy 40, in-both-nets 15, links ×3 (mega-cap anchors ×3 more), attention ×0.25. This shortlist is what feeds the deeper stages.",
-          "发现这一步的综合输出：技术上强(表针=强买) 或 嵌在 universe 供应链里的票。每只带一个透明综合分——强买 40、两网交集 15、每个关联 ×3(大票锚再 ×3)、注意力 ×0.25。这份名单就是喂给后面阶段的短名单。",
+          `Not a union — a strict AND gate. A name makes the list only if it clears all three: BUY (gauge strong-buy or a ${SUSTAINED_DAYS}-day sustained buy) · ATTENTION (price-volume attention ≥${FOCUS_ATTN_BAR} or RVOL ≥${FOCUS_RVOL_BAR}) · BACKED (an analyst thesis + rating, or tied to a mega-cap anchor). ★ Core = everything aligned (strong-buy + sustained + in both nets + anchored). Every new ticker that flows in is judged by the same rule automatically.`,
+          `不是并集,是严格的三闸 AND。一只票必须同时过三关才入选：买入(表针强买 或 连续${SUSTAINED_DAYS}天买入) · 被关注(量价注意力≥${FOCUS_ATTN_BAR} 或 RVOL≥${FOCUS_RVOL_BAR}) · 有依据(有分析师论点+评分 或 挂靠大票锚)。★ 核心 = 全部对齐(强买+持续+两网交集+有锚)。以后任何新流入的票都按同一规则自动判定。`,
         )}
         actions={<MethodInfo />}
       />
 
       <StatStrip
         stats={[
-          { k: t("On the list", "名单内"), v: all.length, d: t("strong / sustained / linked", "强买/持续/关联"), color: "#3dd6c4" },
-          { k: t("Strong × Linked", "强买×关联"), v: bothN, d: t("the tightest overlap", "最紧的交集"), color: "#f2a73c" },
+          { k: t("On the list", "名单内"), v: all.length, d: t("cleared all 3 gates", "三闸全过"), color: "#3dd6c4" },
+          { k: t("★ Core", "★ 核心"), v: coreN, d: t("everything aligned", "全部对齐"), color: "#f2a73c" },
           { k: t("Strong Buy", "强力买入"), v: strongN, d: t("gauge = strong buy", "表针=强买") },
           { k: t(`Sustained ${SUSTAINED_DAYS}d`, `持续买入 ${SUSTAINED_DAYS}天`), v: sustainedN, d: t("buy ≥5 days running", "连续≥5天买入"), color: "#48c78e" },
         ]}
@@ -198,6 +209,11 @@ function FocusCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[16px] font-bold text-signal group-hover:underline">{item.ticker}</span>
+            {item.tier === 1 && (
+              <span className="rounded-full border border-gold/60 bg-gold/15 px-1.5 py-0.5 text-[9.5px] font-semibold text-gold">
+                ★ {t("CORE", "核心")}
+              </span>
+            )}
             {item.strongBuy && (
               <span className="rounded-full border border-gold/45 bg-gold/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-gold">
                 {t("STRONG", "强买")}

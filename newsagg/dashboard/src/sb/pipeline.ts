@@ -632,12 +632,17 @@ export interface FocusItem {
   links: number;
   anchors: number;
   neighbors: FocusNeighbor[];
+  tier: 1 | 2; // 1 = everything aligned (core), 2 = clears the strict gate
   score: number;
 }
 
 // A name is "sustained buy" when its gauge has read Buy/Strong-Buy this many
 // consecutive days — a maintained posture, not a one-day flip.
 export const SUSTAINED_DAYS = 5;
+// The strict Focus-List gate bars (see buildFocus). Kept here so the UI can
+// state the exact rule.
+export const FOCUS_ATTN_BAR = 55; // price-volume attention score
+export const FOCUS_RVOL_BAR = 1.5; // relative volume ×
 
 export function buildFocus(
   data: SAData | null,
@@ -680,13 +685,23 @@ export function buildFocus(
         }
       }
     }
+    const rvol = attn?.rvol ?? null;
     const links = neighbors.length;
-    const sustained = buyStreak >= SUSTAINED_DAYS;
-    // membership: strong-buy OR sustained buy OR ecosystem-connected
-    if (!strongBuy && !sustained && links === 0) continue;
-
     const anchors = neighbors.filter((n) => n.anchor).length;
+    const sustained = buyStreak >= SUSTAINED_DAYS;
     const inBoth = quality.has(t) && advancing.has(t);
+
+    // STRICT gate — a real shortlist, not a union. Must clear ALL THREE:
+    //   1) Buy       — technically bought (strong-buy or a 5-day sustained buy)
+    //   2) Attention — price-volume actually moving (attn ≥ 55 or RVOL ≥ 1.5)
+    //   3) Backed    — an analyst thesis + rating, OR tied to a mega-cap anchor
+    const gBuy = strongBuy || sustained;
+    const gAttn = (attnScore ?? 0) >= FOCUS_ATTN_BAR || (rvol ?? 0) >= FOCUS_RVOL_BAR;
+    const gBack = quality.has(t) || anchors >= 1;
+    if (!(gBuy && gAttn && gBack)) continue;
+
+    // Core (tier 1) = everything aligned; the rest still cleared the gate.
+    const tier: 1 | 2 = strongBuy && sustained && inBoth && anchors >= 1 ? 1 : 2;
     const score =
       (strongBuy ? 40 : 0) +
       (inBoth ? 15 : 0) +
@@ -703,6 +718,7 @@ export function buildFocus(
       strongBuy,
       buyStreak,
       inBoth,
+      tier,
       attnScore,
       rvol: attn?.rvol ?? null,
       z: heat?.tickers?.[t]?.z ?? null,
