@@ -661,6 +661,59 @@ export const FOCUS_ATTN_BAR = 55; // price-volume attention score
 export const FOCUS_RVOL_BAR = 1.5; // relative volume ×
 export const FOCUS_ECO_LINKS = 3; // in-universe links that count as an ecosystem signal
 
+// Symmetrized ecosystem adjacency. The LLM maps each ticker one-directionally
+// (A lists B), so a lot of real links are missing on the other end (B never
+// lists A). We infer the reverse edge: if A says B is its customer (downstream),
+// then A is B's supplier (upstream). Peers are mutual. This roughly doubles
+// coverage with no extra API calls. Returns ticker → deduped neighbors (keeping
+// the higher importance when an edge exists both ways).
+const _REV: Record<string, "upstream" | "downstream" | "peers"> = {
+  upstream: "downstream",
+  downstream: "upstream",
+  peers: "peers",
+};
+
+export function buildEcoAdjacency(
+  supplychain: SupplyChainData | null,
+  marketCaps: MarketCaps | null,
+): Map<string, FocusNeighbor[]> {
+  const adj = new Map<string, Map<string, { kind: "upstream" | "downstream" | "peers"; importance: number }>>();
+  const add = (a: string, b: string, kind: "upstream" | "downstream" | "peers", imp: number) => {
+    if (!a || !b || a === b) return;
+    let m = adj.get(a);
+    if (!m) {
+      m = new Map();
+      adj.set(a, m);
+    }
+    const prev = m.get(b);
+    if (!prev || imp > prev.importance) m.set(b, { kind, importance: imp });
+  };
+  for (const [t, map] of Object.entries(supplychain ?? {})) {
+    for (const kind of ["upstream", "downstream", "peers"] as const) {
+      for (const e of map[kind] ?? []) {
+        const b = (e.ticker || "").trim().toUpperCase();
+        if (!b) continue;
+        const imp = Math.min(3, Math.max(1, e.importance ?? 2));
+        add(t, b, kind, imp);
+        add(b, t, _REV[kind], imp); // inferred reverse edge
+      }
+    }
+  }
+  const out = new Map<string, FocusNeighbor[]>();
+  for (const [t, m] of adj) {
+    out.set(
+      t,
+      [...m.entries()].map(([ticker, v]) => ({
+        ticker,
+        kind: v.kind,
+        importance: v.importance,
+        anchor: bypassesHeat(marketCaps?.[ticker]),
+      })),
+    );
+  }
+  return out;
+}
+
 export function buildFocus(
   data: SAData | null,
   heat: HeatData | null,
@@ -674,6 +727,7 @@ export function buildFocus(
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
   const noData = noDataSet(technical);
+  const eco = buildEcoAdjacency(supplychain, marketCaps);
   const { advancing } = buildRankings(data, heat, technical, marketCaps);
   const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
 
@@ -689,25 +743,8 @@ export function buildFocus(
     const attn = tt?.attention;
     const attnScore = attn?.score ?? null;
 
-    // ecosystem neighbors that are in-universe (deduped), with criticality
-    const seen = new Set<string>();
-    const neighbors: FocusNeighbor[] = [];
-    const sc = supplychain?.[t];
-    if (sc) {
-      for (const kind of ["upstream", "downstream", "peers"] as const) {
-        for (const e of sc[kind] ?? []) {
-          if (e.ticker && e.ticker !== t && inUni.has(e.ticker) && !seen.has(e.ticker)) {
-            seen.add(e.ticker);
-            neighbors.push({
-              ticker: e.ticker,
-              kind,
-              anchor: bypassesHeat(marketCaps?.[e.ticker]),
-              importance: Math.min(3, Math.max(1, e.importance ?? 2)),
-            });
-          }
-        }
-      }
-    }
+    // ecosystem neighbors that are in-universe (symmetrized graph, deduped)
+    const neighbors = (eco.get(t) ?? []).filter((n) => inUni.has(n.ticker) && n.ticker !== t);
     const rvol = attn?.rvol ?? null;
     const links = neighbors.length;
     const anchors = neighbors.filter((n) => n.anchor).length;

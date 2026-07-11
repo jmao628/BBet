@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, bypassesHeat, capLabel } from "../pipeline";
+import { buildScreen, buildUniverse, buildEcoAdjacency, bypassesHeat, capLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -53,32 +53,31 @@ export function ScreenView() {
     const uni = buildUniverse(data);
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
-    type Neighbor = { ticker: string; kind: string; anchor: boolean };
-    const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number }[] = [];
-    for (const [tk, m] of Object.entries(supplychain)) {
-      // Selection: subject must be a non-mega-cap universe name.
+    const eco = buildEcoAdjacency(supplychain, marketCaps); // symmetrized
+    type Neighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
+    const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number; crit: number }[] = [];
+    for (const [tk, ns] of eco) {
+      // Selection: subject must be a non-mega-cap universe name (a discovery target).
       if (!inUni.has(tk) || bypassesHeat(marketCaps?.[tk])) continue;
-      const seen = new Set<string>();
-      const neighbors: Neighbor[] = [];
-      for (const kind of ["upstream", "downstream", "peers"] as const) {
-        for (const e of m[kind] ?? []) {
-          if (e.ticker && e.ticker !== tk && inUni.has(e.ticker) && !seen.has(e.ticker)) {
-            seen.add(e.ticker);
-            neighbors.push({ ticker: e.ticker, kind, anchor: bypassesHeat(marketCaps?.[e.ticker]) });
-          }
-        }
-      }
-      if (neighbors.length)
-        rows.push({
-          ticker: tk,
-          company: companyOf.get(tk) ?? "",
-          neighbors,
-          anchors: neighbors.filter((n) => n.anchor).length,
-        });
+      const neighbors = ns
+        .filter((n) => inUni.has(n.ticker) && n.ticker !== tk)
+        .sort((a, b) => Number(b.anchor) - Number(a.anchor) || b.importance - a.importance);
+      if (!neighbors.length) continue;
+      rows.push({
+        ticker: tk,
+        company: companyOf.get(tk) ?? "",
+        neighbors,
+        anchors: neighbors.filter((n) => n.anchor).length,
+        crit: neighbors.filter((n) => n.importance >= 3).length,
+      });
     }
-    // Rank by total links, then by number of mega-cap anchors, then alpha.
+    // Rank by total links, then mega-cap anchors, then critical ties, then alpha.
     rows.sort(
-      (a, b) => b.neighbors.length - a.neighbors.length || b.anchors - a.anchors || a.ticker.localeCompare(b.ticker),
+      (a, b) =>
+        b.neighbors.length - a.neighbors.length ||
+        b.anchors - a.anchors ||
+        b.crit - a.crit ||
+        a.ticker.localeCompare(b.ticker),
     );
     return rows;
   }, [supplychain, data, marketCaps]);
@@ -127,8 +126,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "Rows = discovery targets: universe names under $100B. Mega-caps are anchors — they only appear as chips, never as a row. Ranked by number of links.",
-                    "左侧成行的 = 发现目标：universe 内 <$100B 的票。大票是锚，只作为标签出现、不单独成行。按关联数排名。",
+                    "Rows = discovery targets: universe names under $100B. Mega-caps are anchors — chips only, never a row. Links are bidirectional (a reverse edge is inferred when only one side names the other), so coverage is fuller. ! = critical / hard-to-replace. Ranked by links.",
+                    "左侧成行的 = 发现目标：universe 内 <$100B 的票。大票是锚，只作标签、不单独成行。关联是双向的（只要一方点名另一方，就补上反向边），覆盖更全。! = 关键/非他不可。按关联数排名。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -149,53 +148,71 @@ export function ScreenView() {
                   </span>
                 </div>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {links.map((r, idx) => {
                   const maxN = links[0].neighbors.length || 1;
                   return (
                     <div
                       key={r.ticker}
                       onClick={() => openDetail(r.ticker)}
-                      className="group flex cursor-pointer items-center gap-3 rounded-lg border border-line bg-panel2 px-3 py-2 transition-colors hover:border-line2 hover:bg-white/[0.05]"
+                      className="group grid cursor-pointer grid-cols-[auto_180px_1fr] items-center gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5 transition-all hover:-translate-y-px hover:border-signal/40 hover:bg-white/[0.04]"
                     >
-                      <span className="w-5 flex-none text-right font-mono text-[11px] text-muted2">{idx + 1}</span>
-                      <div className="flex w-[168px] flex-none items-baseline gap-2">
-                        <span className="font-mono text-[13px] font-semibold text-signal group-hover:underline">{r.ticker}</span>
-                        {r.company && <span className="truncate text-[11px] text-muted">{r.company}</span>}
-                      </div>
-                      {/* strength bar */}
-                      <div className="hidden h-1.5 w-16 flex-none overflow-hidden rounded-full bg-inset sm:block">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${(r.neighbors.length / maxN) * 100}%`, background: "#3dd6c4" }}
-                        />
-                      </div>
-                      <span className="w-14 flex-none font-mono text-[11px] text-muted2">
-                        {t(`${r.neighbors.length} link${r.neighbors.length > 1 ? "s" : ""}`, `${r.neighbors.length} 关联`)}
+                      {/* rank */}
+                      <span className="grid h-6 w-6 flex-none place-items-center rounded-lg bg-inset font-mono text-[11px] text-muted2">
+                        {idx + 1}
                       </span>
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        {r.neighbors.map((n) => (
-                          <button
-                            key={n.ticker}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openDetail(n.ticker);
-                            }}
-                            className="rounded-full border px-2 py-0.5 font-mono text-[11px] font-medium transition-transform hover:scale-105"
-                            style={{ color: GRP_COLOR[n.kind], borderColor: `${GRP_COLOR[n.kind]}66`, background: `${GRP_COLOR[n.kind]}16` }}
-                            title={
-                              n.kind === "upstream"
-                                ? t(`${n.ticker} is ${r.ticker}'s supplier`, `${n.ticker} 是 ${r.ticker} 的供应商`)
-                                : n.kind === "downstream"
-                                  ? t(`${n.ticker} is ${r.ticker}'s customer`, `${n.ticker} 是 ${r.ticker} 的客户`)
-                                  : t(`${n.ticker} competes with ${r.ticker}`, `${n.ticker} 与 ${r.ticker} 同业竞争`)
-                            }
-                          >
-                            {n.anchor ? "⚓ " : ""}
-                            {n.ticker}
-                          </button>
-                        ))}
-                      </span>
+                      {/* subject + strength */}
+                      <div className="min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono text-[14px] font-semibold text-signal group-hover:underline">{r.ticker}</span>
+                          <span className="truncate text-[11px] text-muted">{r.company}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-inset">
+                            <div className="h-full rounded-full bg-gradient-to-r from-signal/40 to-signal" style={{ width: `${(r.neighbors.length / maxN) * 100}%` }} />
+                          </div>
+                          <span className="font-mono text-[10px] text-muted2">
+                            {r.neighbors.length}
+                            {r.anchors > 0 ? ` · ⚓${r.anchors}` : ""}
+                            {r.crit > 0 ? ` · !${r.crit}` : ""}
+                          </span>
+                        </div>
+                      </div>
+                      {/* chips */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {r.neighbors.slice(0, 9).map((n) => {
+                          const crit = n.importance >= 3;
+                          return (
+                            <button
+                              key={n.ticker}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openDetail(n.ticker);
+                              }}
+                              className="rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-medium transition-transform hover:scale-110"
+                              style={{
+                                color: crit ? "#0c141b" : GRP_COLOR[n.kind],
+                                borderColor: `${GRP_COLOR[n.kind]}${crit ? "" : "55"}`,
+                                background: crit ? GRP_COLOR[n.kind] : `${GRP_COLOR[n.kind]}14`,
+                              }}
+                              title={
+                                (n.kind === "upstream"
+                                  ? t(`${n.ticker} supplies ${r.ticker}`, `${n.ticker} 供应 ${r.ticker}`)
+                                  : n.kind === "downstream"
+                                    ? t(`${n.ticker} is ${r.ticker}'s customer`, `${n.ticker} 是 ${r.ticker} 的客户`)
+                                    : t(`${n.ticker} competes with ${r.ticker}`, `${n.ticker} 与 ${r.ticker} 同业`)) +
+                                (crit ? t(" · critical", " · 关键/非他不可") : "")
+                              }
+                            >
+                              {n.anchor ? "⚓" : ""}
+                              {n.ticker}
+                            </button>
+                          );
+                        })}
+                        {r.neighbors.length > 9 && (
+                          <span className="text-[10px] text-muted2">+{r.neighbors.length - 9}</span>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
