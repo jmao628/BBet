@@ -37,6 +37,7 @@ export function ScreenView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
   const [scSector, setScSector] = useState<string | null>(null);
+  const [ecoSector, setEcoSector] = useState<string | null>(null);
   const sectorOf = (tk: string) => sectors?.[tk]?.sector ?? "";
 
   const { candidates, total, passedHeat } = useMemo(
@@ -70,8 +71,11 @@ export function ScreenView() {
     type Neighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
     const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number; crit: number }[] = [];
     for (const [tk, ns] of eco) {
-      // Selection: subject must be a non-mega-cap universe name (a discovery target).
+      // Selection: a discovery target = in-universe, not a mega-cap anchor, and
+      // not a tiny/illiquid micro-cap (skip < $300M when the cap is known).
       if (!inUni.has(tk) || bypassesHeat(marketCaps?.[tk])) continue;
+      const mc = marketCaps?.[tk];
+      if (typeof mc === "number" && mc < 3e8) continue;
       const neighbors = ns
         .filter((n) => inUni.has(n.ticker) && n.ticker !== tk)
         .sort((a, b) => Number(b.anchor) - Number(a.anchor) || b.importance - a.importance);
@@ -94,6 +98,17 @@ export function ScreenView() {
     );
     return rows;
   }, [supplychain, data, marketCaps]);
+
+  const ecoSectorCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const r of links) {
+      const s = sectorOf(r.ticker);
+      if (s) c.set(s, (c.get(s) ?? 0) + 1);
+    }
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [links, sectors]);
+  const ecoRows = ecoSector ? links.filter((r) => sectorOf(r.ticker) === ecoSector) : links;
 
   return (
     <div className="view-in">
@@ -161,75 +176,28 @@ export function ScreenView() {
                   </span>
                 </div>
               </div>
-              <div className="space-y-2">
-                {links.map((r, idx) => {
-                  const maxN = links[0].neighbors.length || 1;
-                  return (
-                    <div
-                      key={r.ticker}
-                      onClick={() => openDetail(r.ticker)}
-                      className="group grid cursor-pointer grid-cols-[auto_180px_1fr] items-center gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5 transition-all hover:-translate-y-px hover:border-signal/40 hover:bg-white/[0.04]"
+              {/* sector filter for the graph */}
+              {ecoSectorCounts.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+                  <button
+                    onClick={() => setEcoSector(null)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${ecoSector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+                  >
+                    {t("All", "全部")} {links.length}
+                  </button>
+                  {ecoSectorCounts.map(([sec, n]) => (
+                    <button
+                      key={sec}
+                      onClick={() => setEcoSector(ecoSector === sec ? null : sec)}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${ecoSector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
                     >
-                      {/* rank */}
-                      <span className="grid h-6 w-6 flex-none place-items-center rounded-lg bg-inset font-mono text-[11px] text-muted2">
-                        {idx + 1}
-                      </span>
-                      {/* subject + strength */}
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-mono text-[14px] font-semibold text-signal group-hover:underline">{r.ticker}</span>
-                          <span className="truncate text-[11px] text-muted">{r.company}</span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2">
-                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-inset">
-                            <div className="h-full rounded-full bg-gradient-to-r from-signal/40 to-signal" style={{ width: `${(r.neighbors.length / maxN) * 100}%` }} />
-                          </div>
-                          <span className="font-mono text-[10px] text-muted2">
-                            {r.neighbors.length}
-                            {r.anchors > 0 ? ` · ⚓${r.anchors}` : ""}
-                            {r.crit > 0 ? ` · !${r.crit}` : ""}
-                          </span>
-                        </div>
-                      </div>
-                      {/* chips */}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {r.neighbors.slice(0, 9).map((n) => {
-                          const crit = n.importance >= 3;
-                          return (
-                            <button
-                              key={n.ticker}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openDetail(n.ticker);
-                              }}
-                              className="rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-medium transition-transform hover:scale-110"
-                              style={{
-                                color: crit ? "#0c141b" : GRP_COLOR[n.kind],
-                                borderColor: `${GRP_COLOR[n.kind]}${crit ? "" : "55"}`,
-                                background: crit ? GRP_COLOR[n.kind] : `${GRP_COLOR[n.kind]}14`,
-                              }}
-                              title={
-                                (n.kind === "upstream"
-                                  ? t(`${n.ticker} supplies ${r.ticker}`, `${n.ticker} 供应 ${r.ticker}`)
-                                  : n.kind === "downstream"
-                                    ? t(`${n.ticker} is ${r.ticker}'s customer`, `${n.ticker} 是 ${r.ticker} 的客户`)
-                                    : t(`${n.ticker} competes with ${r.ticker}`, `${n.ticker} 与 ${r.ticker} 同业`)) +
-                                (crit ? t(" · critical", " · 关键/非他不可") : "")
-                              }
-                            >
-                              {n.anchor ? "⚓" : ""}
-                              {n.ticker}
-                            </button>
-                          );
-                        })}
-                        {r.neighbors.length > 9 && (
-                          <span className="text-[10px] text-muted2">+{r.neighbors.length - 9}</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      {sectorLabel(sec, lang)} {n}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <EcoGraph rows={ecoRows} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -299,15 +267,15 @@ export function ScreenView() {
                       {!c.advanced ? (
                         <span className="text-[11px] text-muted2">{t("· not in heat", "· 未过热度")}</span>
                       ) : c.via === "bypass" ? (
-                        <span className="rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
+                        <span className="inline-block whitespace-nowrap rounded-full border border-signal/40 bg-signal/10 px-2 py-0.5 text-[11px] font-medium text-signal">
                           ✓ {t("Mega bypass", "大票直通")}
                         </span>
                       ) : c.via === "social" ? (
-                        <span className="rounded-full border border-ignite/40 bg-ignite/10 px-2 py-0.5 text-[11px] font-medium text-ignite">
+                        <span className="inline-block whitespace-nowrap rounded-full border border-ignite/40 bg-ignite/10 px-2 py-0.5 text-[11px] font-medium text-ignite">
                           ✓ {c.phase ? (PHASE_L[c.phase]?.[lang] ?? c.phase) : t("Ignite", "点火")}
                         </span>
                       ) : (
-                        <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
+                        <span className="inline-block whitespace-nowrap rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] font-medium text-ok">
                           ✓ {c.attnPhase ? (ATTN_L[c.attnPhase]?.[lang] ?? c.attnPhase) : t("Igniting", "量价点火")}
                         </span>
                       )}
@@ -342,6 +310,180 @@ export function ScreenView() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+// ── Ecosystem graph ────────────────────────────────────────────────────────
+// A radial network: a central hub → the mega-cap anchors (inner ring) → the
+// discovery targets (outer ring), each placed near the anchors it links to.
+// Connections are drawn as animated "flowing light" edges coloured by role.
+type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
+type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; anchors: number; crit: number };
+
+function EcoGraph({
+  rows,
+  onOpen,
+  t,
+}: {
+  rows: EcoRow[];
+  onOpen: (t: string) => void;
+  t: (en: string, zh: string) => string;
+}) {
+  const TOPT = 24;
+  const pool = rows.filter((r) => r.anchors > 0).slice(0, TOPT);
+
+  // pick the anchors that appear most across the pool (cap the ring)
+  const freq = new Map<string, number>();
+  for (const r of pool) for (const n of r.neighbors) if (n.anchor) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
+  const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map((e) => e[0]);
+  const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
+
+  const targets = pool.filter((r) => r.neighbors.some((n) => n.anchor && anchorIdx.has(n.ticker)));
+  if (!targets.length || !anchors.length) {
+    return (
+      <div className="py-10 text-center text-[12.5px] text-muted">
+        {t(
+          "No anchor-linked targets in this view yet — refresh supply-chain, or widen the sector filter.",
+          "此视图暂无挂靠大票锚的目标——刷新供应链数据，或放宽板块筛选。",
+        )}
+      </div>
+    );
+  }
+
+  const W = 960;
+  const cx = W / 2;
+  const cy = 350;
+  const H = 700;
+  const Ri = 132;
+  const Ro = 292;
+  const aAngle = (i: number) => (i / anchors.length) * 2 * Math.PI - Math.PI / 2;
+  const aPos = (i: number) => ({ x: cx + Ri * Math.cos(aAngle(i)), y: cy + Ri * Math.sin(aAngle(i)) });
+
+  // order targets by the circular mean of their anchor angles, then space evenly
+  const withAngle = targets.map((r) => {
+    let sx = 0;
+    let sy = 0;
+    for (const n of r.neighbors) {
+      const i = anchorIdx.get(n.ticker);
+      if (n.anchor && i != null) {
+        sx += Math.cos(aAngle(i));
+        sy += Math.sin(aAngle(i));
+      }
+    }
+    return { r, ang: Math.atan2(sy, sx) };
+  });
+  withAngle.sort((a, b) => a.ang - b.ang);
+  const n = withAngle.length;
+  const tAngle = (i: number) => (i / n) * 2 * Math.PI - Math.PI / 2;
+  const tPos = (i: number) => ({ x: cx + Ro * Math.cos(tAngle(i)), y: cy + Ro * Math.sin(tAngle(i)) });
+
+  const GRP: Record<string, string> = GRP_COLOR;
+
+  return (
+    <div>
+      <div className="mb-2 text-[11px] text-muted2">
+        {t(
+          `Showing top ${targets.length} anchor-linked targets · ${anchors.length} anchors · click any node`,
+          `显示关联最强的 ${targets.length} 个目标 · ${anchors.length} 个大票锚 · 点任意节点`,
+        )}
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 680, display: "block" }}>
+          <defs>
+            <radialGradient id="ecoCoreGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#3dd6c4" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#3dd6c4" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <circle cx={cx} cy={cy} r={210} fill="url(#ecoCoreGlow)" />
+
+          {/* center → anchor spokes */}
+          {anchors.map((_, i) => {
+            const p = aPos(i);
+            return <line key={`ca${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e9c46a55" strokeWidth={1.2} />;
+          })}
+
+          {/* target → anchor edges (animated flowing light) */}
+          {withAngle.map(({ r }, ti) => {
+            const tp = tPos(ti);
+            return r.neighbors
+              .filter((nb) => nb.anchor && anchorIdx.has(nb.ticker))
+              .map((nb) => {
+                const ap = aPos(anchorIdx.get(nb.ticker)!);
+                const c = GRP[nb.kind] ?? "#5fb0e8";
+                return (
+                  <line
+                    key={`e${r.ticker}-${nb.ticker}`}
+                    className="eco-edge"
+                    x1={tp.x}
+                    y1={tp.y}
+                    x2={ap.x}
+                    y2={ap.y}
+                    stroke={c}
+                    strokeWidth={nb.importance >= 3 ? 2 : 1}
+                    strokeOpacity={nb.importance >= 3 ? 0.9 : 0.5}
+                  />
+                );
+              });
+          })}
+
+          {/* center hub */}
+          <circle cx={cx} cy={cy} r={26} fill="#0e2a3a" stroke="#3dd6c4" strokeWidth={2} style={{ filter: "drop-shadow(0 0 10px #3dd6c4aa)" }} />
+          <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#3dd6c4">
+            HUB
+          </text>
+
+          {/* anchor nodes */}
+          {anchors.map((a, i) => {
+            const p = aPos(i);
+            return (
+              <g key={a} className="eco-node" onClick={() => onOpen(a)}>
+                <circle cx={p.x} cy={p.y} r={17} fill="#2a2413" stroke="#e9c46a" strokeWidth={2} style={{ filter: "drop-shadow(0 0 7px #e9c46a99)" }} />
+                <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#f0d78a">
+                  {a}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* target nodes + labels */}
+          {withAngle.map(({ r }, ti) => {
+            const p = tPos(ti);
+            const rad = 5 + Math.min(r.neighbors.length, 8) * 0.9;
+            const ang = tAngle(ti);
+            const lx = cx + (Ro + 15) * Math.cos(ang);
+            const ly = cy + (Ro + 15) * Math.sin(ang);
+            const anchorRight = Math.cos(ang) >= 0;
+            const crit = r.crit > 0;
+            return (
+              <g key={r.ticker} className="eco-node" onClick={() => onOpen(r.ticker)}>
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={rad}
+                  fill={crit ? "#3dd6c4" : "#14313a"}
+                  stroke="#3dd6c4"
+                  strokeWidth={crit ? 2 : 1.4}
+                  style={crit ? { filter: "drop-shadow(0 0 6px #3dd6c4)" } : undefined}
+                />
+                <text
+                  x={lx}
+                  y={ly + 3}
+                  textAnchor={anchorRight ? "start" : "end"}
+                  fontSize="10.5"
+                  fontFamily="ui-monospace, monospace"
+                  fontWeight="600"
+                  fill="#c7d2dc"
+                >
+                  {crit ? "!" : ""}
+                  {r.ticker}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }

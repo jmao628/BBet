@@ -252,6 +252,7 @@ def main() -> int:
     ap.add_argument("--refresh", action="store_true", help="re-map all, ignore cache")
     ap.add_argument("--limit", type=int, default=None, help="cap how many new tickers to map this run")
     ap.add_argument("--model", default=MODEL, help=f"model id (default {MODEL}; e.g. claude-haiku-4-5 to save cost)")
+    ap.add_argument("--min-cap", type=float, default=3e8, help="skip tickers below this market cap (default $300M)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
 
@@ -266,6 +267,16 @@ def main() -> int:
     if not names:
         logger.warning("no rated tickers (run the SA scrape first, or pass --tickers)")
         return 1
+
+    # Skip tiny / illiquid names — not worth an API call, and their supply-chain
+    # position rarely matters. Only skip when the cap is KNOWN and below the bar.
+    caps = _load(settings.output_dir / "marketcaps.json")
+    if args.min_cap and caps:
+        before = len(names)
+        names = {t: n for t, n in names.items() if not (isinstance(caps.get(t), (int, float)) and caps[t] < args.min_cap)}
+        skipped = before - len(names)
+        if skipped:
+            logger.info("skipping %d tickers below $%.0fM market cap", skipped, args.min_cap / 1e6)
 
     if args.limit:
         # Only map the first N *uncached* tickers this run (spread cost over days).

@@ -114,3 +114,26 @@ body {
     animation: none;
   }
 }
+
+/* Ecosystem graph — flowing "light" travelling along each connection. */
+@keyframes eco-flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.eco-edge {
+  stroke-dasharray: 2 6;
+  animation: eco-flow 1.1s linear infinite;
+}
+.eco-node {
+  transition: transform 0.15s ease, filter 0.2s ease;
+  cursor: pointer;
+}
+.eco-node:hover {
+  filter: brightness(1.25);
+}
+@media (prefers-reduced-motion: reduce) {
+  .eco-edge {
+    animation: none;
+  }
+}
