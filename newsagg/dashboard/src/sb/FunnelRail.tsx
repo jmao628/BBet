@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, noDataSet } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -11,8 +11,9 @@ function useCounts(): Record<string, number | null> {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
-  // Exclude OTC/foreign ADRs with no yfinance data (once technical has loaded).
-  const seeds = buildSeeds(data).filter((r) => !technical || technical.tickers?.[r.ticker]);
+  // Exclude only CONFIRMED no-data OTC/foreign ADRs (pending new seeds still count).
+  const noData = noDataSet(technical);
+  const seeds = buildSeeds(data).filter((r) => !noData.has(r.ticker));
 
   // Stage 2 advances the union of every ranking lens's top-N (+ mega caps).
   let heatCount: number | null = null;

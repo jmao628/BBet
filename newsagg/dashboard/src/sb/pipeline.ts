@@ -225,6 +225,13 @@ export function capSizeFromCap(marketCap: number | undefined, labels: string[]):
 // Everything below this still runs the heat/discovery funnel.
 export const BYPASS_MARKET_CAP = 100e9; // ≥ $100B
 
+// Confirmed no-data tickers (technical tried and failed = OTC/foreign). A seed
+// that's merely absent from technical (added since the last run) is NOT here, so
+// it still shows while it waits to be fetched.
+export function noDataSet(technical: TechnicalData | null): Set<string> {
+  return new Set(technical?.no_data ?? []);
+}
+
 export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
@@ -336,11 +343,10 @@ export function buildRankings(
   sectors: SectorData | null = null,
   topN = 10,
 ): RankBundle {
-  // Rated seeds that actually have yfinance data (no-data OTC/foreign ADRs are
-  // excluded so every count on the page matches what's actually ranked).
-  const uni = buildUniverse(data).filter(
-    (u) => u.rated && (!technical || !!technical.tickers?.[u.ticker]),
-  );
+  // Rated seeds, minus confirmed no-data OTC/foreign ADRs (newly-added seeds
+  // pending their first fetch still count — they're not confirmed no-data).
+  const noData = noDataSet(technical);
+  const uni = buildUniverse(data).filter((u) => u.rated && !noData.has(u.ticker));
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
   const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
@@ -507,12 +513,13 @@ export function buildScreen(
   const seeds = buildSeeds(data);
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
   const { advancing, advancingBy } = buildRankings(data, heat, technical, marketCaps);
+  const noData = noDataSet(technical);
   const candidates: ScreenRow[] = [];
   let passedHeat = 0;
 
   for (const s of seeds) {
-    // No yfinance data (OTC / foreign ADR) → excluded from the funnel entirely.
-    if (technical && !technical.tickers?.[s.ticker]) continue;
+    // Confirmed no-data (OTC / foreign ADR) → out. Pending new seeds stay.
+    if (noData.has(s.ticker)) continue;
     // Quality net: must have an SA rating AND an analyst thesis. Independent of Heat.
     if (s.rating == null && s.quant == null) continue;
     if (!s.hasThesis) continue;
@@ -559,8 +566,8 @@ export function buildScreen(
       (b.z ?? -99) - (a.z ?? -99) ||
       (b.attnScore ?? -1) - (a.attnScore ?? -1),
   );
-  // Seed pool = deduped bulls with yfinance data (matches the seed table).
-  const total = technical ? seeds.filter((s) => technical.tickers?.[s.ticker]).length : seeds.length;
+  // Seed pool = deduped bulls minus confirmed no-data (matches the seed table).
+  const total = seeds.filter((s) => !noData.has(s.ticker)).length;
   return { candidates, total, passedHeat };
 }
 
@@ -664,6 +671,7 @@ export function buildFocus(
   const inUni = new Set(uni.map((u) => u.ticker));
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
+  const noData = noDataSet(technical);
   const { advancing } = buildRankings(data, heat, technical, marketCaps);
   const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
 
@@ -671,8 +679,8 @@ export function buildFocus(
   const items: FocusItem[] = [];
   for (const u of rated) {
     const t = u.ticker;
+    if (noData.has(t)) continue; // confirmed no-data → out (pending seeds stay)
     const tt = technical?.tickers?.[t];
-    if (technical && !tt) continue; // no yfinance data → out of the funnel
     const gauge = tt?.gauge?.summary;
     const strongBuy = gauge === "strong_buy";
     const buyStreak = tt?.buy_streak ?? 0;

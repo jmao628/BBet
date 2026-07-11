@@ -112,6 +112,7 @@ export interface TechTicker {
 
 export interface TechnicalData {
   generated_at?: string;
+  no_data?: string[]; // seeds technical tried but couldn't price (OTC / foreign ADR)
   tickers: Record<string, TechTicker>;
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildSeeds, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
+import { buildSeeds, noDataSet, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
@@ -14,20 +14,15 @@ export function SeedsView() {
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
+  const noData = useMemo(() => noDataSet(technical), [technical]);
 
   const [thesisOnly, setThesisOnly] = useState(false);
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
 
-  // OTC / foreign ADRs yfinance can't price are dropped from the universe once
-  // technical data exists — they can't flow through heat/technical anyway.
-  const excluded = useMemo(
-    () => (technical ? allSeeds.filter((r) => !hasData(r.ticker)) : []),
-    [allSeeds, technical],
-  );
-  const seeds = useMemo(
-    () => (technical ? allSeeds.filter((r) => hasData(r.ticker)) : allSeeds),
-    [allSeeds, technical],
-  );
+  // Only CONFIRMED no-data OTC/foreign ADRs are dropped. A newly-added seed that
+  // technical hasn't fetched yet still shows (it's not confirmed no-data).
+  const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
+  const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
   const thesisCount = seeds.filter((r) => r.hasThesis).length;
 

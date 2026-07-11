@@ -435,7 +435,15 @@ def main() -> int:
             )
         return 1
 
-    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "tickers": tech}
+    # Tickers we ACTUALLY tried this run but got nothing for = confirmed no-data
+    # (OTC / foreign ADRs). The dashboard hides only these — a newly-added seed
+    # that simply hasn't been fetched yet is NOT in this list, so it still shows.
+    no_data = sorted(set(tickers) - set(tech.keys()))
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "tickers": tech,
+        "no_data": no_data,
+    }
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload))
     logger.info("wrote technicals for %d/%d tickers", len(tech), len(tickers))
