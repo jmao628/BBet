@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore, useT, type Lang } from "../../store";
 import {
   buildSeeds,
@@ -408,6 +408,40 @@ export function StockDetail() {
   const lang = useStore((s) => s.lang);
   const t = useT();
 
+  // Live per-ticker refresh: the daily launchd job only rewrites the shared
+  // technical file once a day, so opening a ticker hits the server's on-demand
+  // /api/quote endpoint for a fresh yfinance pull, then re-polls every 60s while
+  // the panel is open. Falls back to the cached file if the fetch fails.
+  const [live, setLive] = useState<(TechTicker & { generated_at?: string }) | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [liveErr, setLiveErr] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!ticker) return;
+    setLoading(true);
+    setLiveErr(false);
+    try {
+      const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}&t=${Date.now()}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      if (j && typeof j.price === "number") setLive(j as TechTicker & { generated_at?: string });
+      else throw new Error("no data");
+    } catch {
+      setLiveErr(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [ticker]);
+
+  useEffect(() => {
+    setLive(null);
+    setLiveErr(false);
+    if (!ticker) return;
+    refresh();
+    const id = setInterval(refresh, 60_000);
+    return () => clearInterval(id);
+  }, [ticker, refresh]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
@@ -428,7 +462,10 @@ export function StockDetail() {
   );
 
   if (!ticker) return null;
-  const tech: TechTicker | undefined = technical?.tickers?.[ticker];
+  const tech: TechTicker | undefined = live ?? technical?.tickers?.[ticker];
+  const liveTime = live?.generated_at
+    ? new Date(live.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : null;
   const h = heat?.tickers?.[ticker];
   const mc = marketCaps?.[ticker];
   const cap = capSizeFromCap(mc, caps);
@@ -462,6 +499,26 @@ export function StockDetail() {
                   {tech.change_pct.toFixed(2)}%
                 </span>
               )}
+              <button
+                onClick={refresh}
+                disabled={loading}
+                title={t("Refresh live quote", "刷新实时报价")}
+                className="ml-1 grid h-6 w-6 place-items-center rounded-md border border-line text-[13px] text-muted hover:text-text disabled:opacity-50"
+              >
+                <span className={loading ? "inline-block animate-spin" : ""}>⟳</span>
+              </button>
+              {liveTime ? (
+                <span className="flex items-center gap-1 text-[11px] text-ok">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" />
+                  {t(`Live · ${liveTime}`, `实时 · ${liveTime}`)}
+                </span>
+              ) : liveErr ? (
+                <span className="text-[11px] text-muted2" title={t("Live fetch failed — showing the daily snapshot. Check the VPN proxy.", "实时抓取失败——显示每日快照。检查 VPN 代理。")}>
+                  {t("· daily snapshot", "· 每日快照")}
+                </span>
+              ) : loading ? (
+                <span className="text-[11px] text-muted2">{t("· fetching…", "· 抓取中…")}</span>
+              ) : null}
             </div>
             <div className="mt-1 text-[12px] text-muted">
               {company || "—"} · {capLabel(cap, lang)}
