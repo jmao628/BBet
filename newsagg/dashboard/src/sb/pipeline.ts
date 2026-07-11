@@ -617,6 +617,7 @@ export interface FocusNeighbor {
   ticker: string;
   kind: "upstream" | "downstream" | "peers";
   anchor: boolean;
+  importance: number; // 1 minor · 2 significant · 3 critical
 }
 export interface FocusItem {
   ticker: string;
@@ -631,18 +632,25 @@ export interface FocusItem {
   z: number | null;
   links: number;
   anchors: number;
+  ecoWeight: number; // quantified ecosystem importance (anchors + links + criticality)
   neighbors: FocusNeighbor[];
-  tier: 1 | 2; // 1 = everything aligned (core), 2 = clears the strict gate
+  // Signal gates (graded, not a hard filter): how many independent signals fire.
+  gBuy: boolean;
+  gAttn: boolean;
+  gEco: boolean;
+  gThesis: boolean;
+  gates: number; // count of the four above that pass (0-4)
+  core: boolean; // the three hard signals all fire (buy + attention + ecosystem)
   score: number;
 }
 
 // A name is "sustained buy" when its gauge has read Buy/Strong-Buy this many
 // consecutive days — a maintained posture, not a one-day flip.
 export const SUSTAINED_DAYS = 5;
-// The strict Focus-List gate bars (see buildFocus). Kept here so the UI can
-// state the exact rule.
+// Focus-List signal bars (see buildFocus). Kept here so the UI can state the rule.
 export const FOCUS_ATTN_BAR = 55; // price-volume attention score
 export const FOCUS_RVOL_BAR = 1.5; // relative volume ×
+export const FOCUS_ECO_LINKS = 3; // in-universe links that count as an ecosystem signal
 
 export function buildFocus(
   data: SAData | null,
@@ -671,7 +679,7 @@ export function buildFocus(
     const attn = tt?.attention;
     const attnScore = attn?.score ?? null;
 
-    // ecosystem neighbors that are in-universe (deduped)
+    // ecosystem neighbors that are in-universe (deduped), with criticality
     const seen = new Set<string>();
     const neighbors: FocusNeighbor[] = [];
     const sc = supplychain?.[t];
@@ -680,7 +688,12 @@ export function buildFocus(
         for (const e of sc[kind] ?? []) {
           if (e.ticker && e.ticker !== t && inUni.has(e.ticker) && !seen.has(e.ticker)) {
             seen.add(e.ticker);
-            neighbors.push({ ticker: e.ticker, kind, anchor: bypassesHeat(marketCaps?.[e.ticker]) });
+            neighbors.push({
+              ticker: e.ticker,
+              kind,
+              anchor: bypassesHeat(marketCaps?.[e.ticker]),
+              importance: Math.min(3, Math.max(1, e.importance ?? 2)),
+            });
           }
         }
       }
@@ -691,24 +704,36 @@ export function buildFocus(
     const sustained = buyStreak >= SUSTAINED_DAYS;
     const inBoth = quality.has(t) && advancing.has(t);
 
-    // STRICT gate — a real shortlist, not a union. Must clear ALL THREE:
-    //   1) Buy       — technically bought (strong-buy or a 5-day sustained buy)
-    //   2) Attention — price-volume actually moving (attn ≥ 55 or RVOL ≥ 1.5)
-    //   3) Backed    — an analyst thesis + rating, OR tied to a mega-cap anchor
+    // Quantified ecosystem weight — being tied into the universe is treated as a
+    // first-class signal (the user can't scrape every analyst thesis, but the
+    // supply-chain graph is durable): anchors count for far more than a small-cap
+    // link, and each edge scales by its criticality (importance 1-3, 3 = sole-
+    // source / hard-to-replace). "irreplaceable to someone big" scores highest.
+    const ecoWeight = neighbors.reduce(
+      (s, n) => s + (n.anchor ? 6 : 2) * (n.importance / 2),
+      0,
+    );
+
+    // Graded signal gates (NOT a hard filter — a name only needs one to appear,
+    // and the list is RANKED by how many fire, so nothing is dropped prematurely;
+    // the deeper stages, catalyst + earnings-call, do the fine cut later):
     const gBuy = strongBuy || sustained;
     const gAttn = (attnScore ?? 0) >= FOCUS_ATTN_BAR || (rvol ?? 0) >= FOCUS_RVOL_BAR;
-    const gBack = quality.has(t) || anchors >= 1;
-    if (!(gBuy && gAttn && gBack)) continue;
+    const gEco = anchors >= 1 || links >= FOCUS_ECO_LINKS;
+    const gThesis = quality.has(t); // analyst thesis — a bonus, not required
+    const gates = Number(gBuy) + Number(gAttn) + Number(gEco) + Number(gThesis);
 
-    // Core (tier 1) = everything aligned; the rest still cleared the gate.
-    const tier: 1 | 2 = strongBuy && sustained && inBoth && anchors >= 1 ? 1 : 2;
+    // Inclusive membership: any real signal keeps it (low-signal names just sink).
+    if (gates === 0 && links === 0 && buyStreak < 3) continue;
+
+    const core = gBuy && gAttn && gEco; // the three hard signals all fire
     const score =
-      (strongBuy ? 40 : 0) +
-      (inBoth ? 15 : 0) +
-      Math.min(buyStreak, 5) * 4 +
-      Math.min(links, 8) * 3 +
-      Math.min(anchors, 5) * 3 +
-      Math.round((attnScore ?? 0) * 0.25);
+      gates * 12 + // reward passing more independent gates
+      (strongBuy ? 18 : 0) +
+      Math.min(buyStreak, 5) * 3 +
+      Math.round((attnScore ?? 0) * 0.25) +
+      Math.round(ecoWeight * 4) + // ecosystem heavily weighted
+      (inBoth ? 8 : 0);
 
     items.push({
       ticker: t,
@@ -718,16 +743,25 @@ export function buildFocus(
       strongBuy,
       buyStreak,
       inBoth,
-      tier,
       attnScore,
-      rvol: attn?.rvol ?? null,
+      rvol,
       z: heat?.tickers?.[t]?.z ?? null,
       links,
       anchors,
+      ecoWeight: Math.round(ecoWeight * 10) / 10,
       neighbors,
+      gBuy,
+      gAttn,
+      gEco,
+      gThesis,
+      gates,
+      core,
       score,
     });
   }
-  items.sort((a, b) => b.score - a.score || b.links - a.links || a.ticker.localeCompare(b.ticker));
+  // Graded: most gates first, then composite score (ecosystem-heavy).
+  items.sort(
+    (a, b) => b.gates - a.gates || b.score - a.score || a.ticker.localeCompare(b.ticker),
+  );
   return items;
 }

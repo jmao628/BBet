@@ -86,8 +86,15 @@ _EDGE = {
         "ticker": {"type": "string", "description": "US exchange ticker, e.g. NVDA. Empty string if not publicly traded / unknown."},
         "name": {"type": "string", "description": "Company name."},
         "reason": {"type": "string", "description": "One short clause: why this relationship exists."},
+        "importance": {
+            "type": "integer",
+            "enum": [1, 2, 3],
+            "description": "How critical / hard-to-replace this relationship is: 1 = minor / easily substituted, "
+            "2 = significant, 3 = critical (sole-source, deeply integrated, or the counterparty's fortunes "
+            "materially swing this company).",
+        },
     },
-    "required": ["ticker", "name", "reason"],
+    "required": ["ticker", "name", "reason", "importance"],
 }
 _SCHEMA = {
     "type": "object",
@@ -115,6 +122,9 @@ def _prompt(ticker: str, name: str) -> str:
         "If a relationship is important but the counterparty isn't publicly traded (or you're unsure of the ticker), "
         "leave `ticker` empty but still list it by name.\n"
         "- `reason` is one short clause (e.g. 'fabs its chips', 'largest cloud customer').\n"
+        "- `importance` 1-3: how critical / hard-to-replace the tie is — 3 = sole-source or deeply "
+        "integrated (the counterparty is nearly irreplaceable, or its results materially swing this company), "
+        "2 = significant, 1 = minor / easily substituted.\n"
         "- Do NOT invent tickers or relationships you aren't confident about. Omit rather than guess.\n"
         "- If the company itself is obscure and you have little reliable information, return short or empty lists."
     )
@@ -137,7 +147,12 @@ def _clean_edges(raw: list) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        out.append({"ticker": tk, "name": name, "reason": (e.get("reason") or "").strip()})
+        try:
+            imp = int(e.get("importance", 2))
+        except (TypeError, ValueError):
+            imp = 2
+        imp = min(3, max(1, imp))
+        out.append({"ticker": tk, "name": name, "reason": (e.get("reason") or "").strip(), "importance": imp})
     return out
 
 

@@ -122,6 +122,7 @@ export interface SupplyEdge {
   ticker: string; // US ticker, or "" if not publicly traded / unknown
   name: string;
   reason: string;
+  importance?: number; // 1 minor · 2 significant · 3 critical / hard-to-replace
 }
 export interface SupplyMap {
   upstream: SupplyEdge[];
