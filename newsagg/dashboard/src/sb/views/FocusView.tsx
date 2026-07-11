@@ -36,6 +36,7 @@ export function FocusView() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("score");
   const [sector, setSector] = useState<string | null>(null);
+  const [mode, setMode] = useState<"list" | "cards">("list");
 
   const all = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -144,6 +145,19 @@ export function FocusView() {
             </button>
           ))}
         </div>
+        <div className="ml-auto flex overflow-hidden rounded-lg border border-line">
+          {(["list", "cards"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`px-2.5 py-1 text-[12px] transition-colors ${
+                mode === m ? "bg-signal/15 text-signal" : "text-muted hover:text-text"
+              }`}
+            >
+              {m === "list" ? t("☰ Ranked", "☰ 榜单") : t("▦ Cards", "▦ 卡片")}
+            </button>
+          ))}
+        </div>
       </div>
 
       {sectorCounts.length > 0 && (
@@ -178,14 +192,123 @@ export function FocusView() {
             "暂时为空——需要技术数据(强买表针)和供应链映射。在 Mac 上跑 technical + supplychain。",
           )}
         </div>
-      ) : (
+      ) : mode === "cards" ? (
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
           {shown.map((i, idx) => (
             <FocusCard key={i.ticker} item={i} rank={idx} onOpen={openDetail} lang={lang} t={t} />
           ))}
         </div>
+      ) : (
+        <FocusTable rows={shown} maxScore={shown[0]?.score || 1} onOpen={openDetail} lang={lang} t={t} />
       )}
     </div>
+  );
+}
+
+// Dense ranked leaderboard — the whole list top-to-bottom by score, so the
+// strongest names read first without hunting through sector cards.
+function FocusTable({
+  rows,
+  maxScore,
+  onOpen,
+  lang,
+  t,
+}: {
+  rows: FocusItem[];
+  maxScore: number;
+  onOpen: (t: string) => void;
+  lang: "en" | "zh";
+  t: (en: string, zh: string) => string;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-line bg-panel">
+      <table className="w-full min-w-[820px] text-[13px]">
+        <thead className="sticky top-0 z-[1] bg-panel">
+          <tr className="text-[10.5px] uppercase tracking-wide text-muted2">
+            <th className="px-3 py-2 text-right font-medium">#</th>
+            <th className="px-3 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
+            <th className="px-3 py-2 text-left font-medium">{t("Signals", "信号")}</th>
+            <th className="px-2 py-2 text-right font-medium">{t("Attn", "注意力")}</th>
+            <th className="px-2 py-2 text-right font-medium">{t("Eco", "生态")}</th>
+            <th className="px-3 py-2 text-right font-medium">{t("Score", "综合分")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((i, idx) => {
+            const crit = i.neighbors.some((n) => n.importance >= 3);
+            return (
+              <tr
+                key={i.ticker}
+                onClick={() => onOpen(i.ticker)}
+                className="cursor-pointer border-t border-line transition-colors hover:bg-white/[0.04]"
+              >
+                <td className="px-3 py-2 text-right font-mono text-[11px] text-muted2">{idx + 1}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-semibold text-signal">{i.ticker}</span>
+                    {i.core && <span className="text-[10px] text-gold">★</span>}
+                    <span className="truncate text-[11px] text-muted">{i.company}</span>
+                    {i.sector && <span className="text-[10px] text-muted2">· {sectorLabel(i.sector, lang)}</span>}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1">
+                    <Dot on={i.gBuy} c="#48c78e" title={t("Buy", "买入")} />
+                    <Dot on={i.gAttn} c="#3dd6c4" title={t("Attention", "被关注")} />
+                    <Dot on={i.gEco} c={i.anchors > 0 ? "#e9c46a" : "#5fb0e8"} title={t("Ecosystem", "生态")} />
+                    <Dot on={i.gThesis} c="#8aa" title={t("Thesis", "论点")} />
+                    <span className="ml-1 font-mono text-[11px] text-muted2">{i.gates}/4</span>
+                    {i.buyStreak >= SUSTAINED_DAYS && (
+                      <span className="ml-1 rounded bg-ok/10 px-1 text-[9.5px] font-medium text-ok">
+                        {t(`${i.buyStreak}d`, `${i.buyStreak}天`)}
+                      </span>
+                    )}
+                    {i.strongBuy && <span className="ml-0.5 rounded bg-gold/10 px-1 text-[9.5px] font-medium text-gold">SB</span>}
+                  </div>
+                </td>
+                <td className="px-2 py-2 text-right font-mono tabular-nums text-[12px]">
+                  {i.attnScore ?? "—"}
+                  <span className="text-muted2">{i.rvol != null ? ` ${i.rvol.toFixed(1)}×` : ""}</span>
+                </td>
+                <td className="px-2 py-2 text-right font-mono tabular-nums text-[12px]">
+                  {i.links > 0 ? (
+                    <span style={{ color: crit ? "#e9c46a" : undefined }}>
+                      {crit ? "! " : ""}
+                      {i.links}·{i.ecoWeight}
+                    </span>
+                  ) : (
+                    <span className="text-muted2">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="ml-auto flex w-[92px] items-center gap-2">
+                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-inset">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${(i.score / maxScore) * 100}%`, background: i.gates >= 3 ? "#3dd6c4" : "#5a6a7c" }}
+                      />
+                    </div>
+                    <span className="w-7 text-right font-mono text-[13px] font-semibold" style={{ color: i.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
+                      {i.score}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Dot({ on, c, title }: { on: boolean; c: string; title: string }) {
+  return (
+    <span
+      title={title}
+      className="h-2 w-2 rounded-full"
+      style={{ background: on ? c : "transparent", border: on ? "none" : "1px solid #2a3a49" }}
+    />
   );
 }
 
@@ -253,10 +376,12 @@ function FocusCard({
           </div>
         </div>
         <div className="flex-none text-right">
-          <div className="font-disp text-[20px] font-semibold leading-none" style={{ color: item.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
-            {item.gates}<span className="text-[12px] text-muted2">/4</span>
+          <div className="font-disp text-[22px] font-semibold leading-none" style={{ color: item.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
+            {item.score}
           </div>
-          <div className="text-[9px] uppercase tracking-wide text-muted2">{t("gates", "过闸")}</div>
+          <div className="text-[9px] uppercase tracking-wide text-muted2">
+            {t(`#${rank + 1} · ${item.gates}/4`, `第${rank + 1} · ${item.gates}/4`)}
+          </div>
         </div>
       </div>
 
