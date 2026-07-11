@@ -36,7 +36,7 @@ export function FocusView() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("score");
   const [sector, setSector] = useState<string | null>(null);
-  const [mode, setMode] = useState<"list" | "cards">("list");
+  const [mode, setMode] = useState<"list" | "cards">("cards");
 
   const all = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -312,19 +312,37 @@ function Dot({ on, c, title }: { on: boolean; c: string; title: string }) {
   );
 }
 
-function GatePill({ on, label, strong }: { on: boolean; label: string; strong?: boolean }) {
+function Sparkline({ data, up }: { data: number[]; up: boolean }) {
+  const W = 92;
+  const H = 30;
+  if (!data || data.length < 2) return <div style={{ width: W, height: H }} />;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const rng = max - min || 1;
+  const n = data.length;
+  const x = (i: number) => (i * W) / (n - 1);
+  const y = (v: number) => H - 3 - ((v - min) / rng) * (H - 6);
+  const pts = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const col = up ? "#3dd6c4" : "#ff5a78";
+  const gid = `sg-${up ? "u" : "d"}`;
   return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[9.5px] font-medium ${
-        on
-          ? strong
-            ? "bg-gold/15 text-gold"
-            : "bg-signal/12 text-signal"
-          : "bg-inset text-muted2 line-through opacity-60"
-      }`}
-    >
-      {on ? "✓" : "·"} {label}
-    </span>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={col} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={col} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${H} ${pts.join(" ")} ${W},${H}`} fill={`url(#${gid})`} />
+      <polyline
+        points={pts.join(" ")}
+        fill="none"
+        stroke={col}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -341,17 +359,38 @@ function FocusCard({
   lang: "en" | "zh";
   t: (en: string, zh: string) => string;
 }) {
-  const maxAttn = 100;
+  const up = (item.changePct ?? 0) >= 0;
+  // Tier drives the whole card's tone: core = gold aura, high-conviction = teal.
+  const accent = item.core ? "#e9c46a" : item.gates >= 3 ? "#3dd6c4" : "#3a4a5a";
+  const gateDefs: { on: boolean; c: string; label: string }[] = [
+    { on: item.gBuy, c: "#48c78e", label: t("Buy", "买") },
+    { on: item.gAttn, c: "#3dd6c4", label: t("Attn", "注") },
+    { on: item.gEco, c: item.anchors > 0 ? "#e9c46a" : "#5fb0e8", label: t("Eco", "生") },
+    { on: item.gThesis, c: "#9aa7b3", label: t("Thesis", "论") },
+  ];
   return (
     <div
       onClick={() => onOpen(item.ticker)}
-      className="view-in group cursor-pointer rounded-xl border border-line bg-panel2 p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-signal/40 hover:bg-white/[0.04] hover:shadow-lg hover:shadow-black/30"
-      style={{ animationDelay: `${Math.min(rank, 24) * 18}ms` }}
+      className="view-in group relative cursor-pointer overflow-hidden rounded-2xl border bg-panel2 p-3.5 transition-all duration-200 hover:-translate-y-1"
+      style={{
+        animationDelay: `${Math.min(rank, 24) * 16}ms`,
+        borderColor: item.core ? "#e9c46a55" : item.gates >= 3 ? "#3dd6c433" : "var(--line,#22303c)",
+        boxShadow: item.core ? "0 0 0 1px #e9c46a22, 0 6px 22px -12px #e9c46a55" : undefined,
+      }}
     >
-      <div className="flex items-start justify-between">
+      {/* accent glow that intensifies on hover */}
+      <div
+        className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full opacity-25 blur-2xl transition-opacity duration-300 group-hover:opacity-60"
+        style={{ background: accent }}
+      />
+      {/* left tier rail */}
+      <div className="absolute left-0 top-0 h-full w-[3px]" style={{ background: accent }} />
+
+      <div className="relative flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[16px] font-bold text-signal group-hover:underline">{item.ticker}</span>
+            <span className="font-mono text-[11px] tabular-nums text-muted2">#{rank + 1}</span>
+            <span className="font-mono text-[17px] font-bold text-signal group-hover:underline">{item.ticker}</span>
             {item.core && (
               <span className="rounded-full border border-gold/60 bg-gold/15 px-1.5 py-0.5 text-[9.5px] font-semibold text-gold">
                 ★ {t("CORE", "核心")}
@@ -359,41 +398,59 @@ function FocusCard({
             )}
             {item.buyStreak >= SUSTAINED_DAYS && (
               <span className="rounded-full border border-ok/45 bg-ok/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-ok">
-                {t(`BUY ${item.buyStreak}D`, `买 ${item.buyStreak}天`)}
+                {t(`${item.buyStreak}D`, `${item.buyStreak}天`)}
               </span>
             )}
-          </div>
-          {/* which signals fired — the grade, spelled out */}
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            <GatePill on={item.gBuy} label={t("Buy", "买入")} />
-            <GatePill on={item.gAttn} label={t("Attn", "关注")} />
-            <GatePill on={item.gEco} label={t("Eco", "生态")} strong={item.anchors > 0} />
-            <GatePill on={item.gThesis} label={t("Thesis", "论点")} />
           </div>
           <div className="mt-0.5 truncate text-[11px] text-muted">
             {item.company || "—"} · {capLabel(item.cap, lang)}
             {item.sector ? ` · ${sectorLabel(item.sector, lang)}` : ""}
           </div>
         </div>
-        <div className="flex-none text-right">
-          <div className="font-disp text-[22px] font-semibold leading-none" style={{ color: item.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
-            {item.score}
+        <div className="flex flex-none flex-col items-end">
+          <Sparkline data={item.spark} up={up} />
+          {item.changePct != null && (
+            <span className="mt-0.5 font-mono text-[10px] font-semibold" style={{ color: up ? "#48c78e" : "#ff5a78" }}>
+              {up ? "+" : ""}
+              {item.changePct.toFixed(1)}%
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* score + gate meter */}
+      <div className="relative mt-3 flex items-end justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="leading-none">
+            <span className="font-disp text-[26px] font-semibold" style={{ color: item.gates >= 3 ? "#3dd6c4" : "#c7d2dc" }}>
+              {item.score}
+            </span>
+            <span className="ml-1 text-[10px] uppercase text-muted2">{t("score", "分")}</span>
           </div>
-          <div className="text-[9px] uppercase tracking-wide text-muted2">
-            {t(`#${rank + 1} · ${item.gates}/4`, `第${rank + 1} · ${item.gates}/4`)}
+          {/* segmented gate meter */}
+          <div className="flex items-center gap-1" title={`${item.gates}/4`}>
+            {gateDefs.map((g, i) => (
+              <span
+                key={i}
+                title={g.label}
+                className="h-4 w-1.5 rounded-full transition-all"
+                style={{ background: g.on ? g.c : "#26323d", boxShadow: g.on ? `0 0 6px ${g.c}88` : "none" }}
+              />
+            ))}
+            <span className="ml-0.5 font-mono text-[10px] text-muted2">{item.gates}/4</span>
           </div>
         </div>
       </div>
 
       {/* attention bar */}
-      <div className="mt-3 flex items-center gap-2">
-        <span className="w-10 flex-none text-[9.5px] uppercase text-muted2">{t("attn", "注意")}</span>
+      <div className="relative mt-2.5 flex items-center gap-2">
+        <span className="w-8 flex-none text-[9px] uppercase text-muted2">{t("attn", "注意")}</span>
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-inset">
           <div
-            className="h-full rounded-full transition-all duration-500"
+            className="h-full rounded-full transition-all duration-700"
             style={{
-              width: `${((item.attnScore ?? 0) / maxAttn) * 100}%`,
-              background: (item.attnScore ?? 0) >= 50 ? "#3dd6c4" : "#5a6a7c",
+              width: `${item.attnScore ?? 0}%`,
+              background: (item.attnScore ?? 0) >= FOCUS_ATTN_BAR ? "#3dd6c4" : "#5a6a7c",
             }}
           />
         </div>
@@ -405,14 +462,14 @@ function FocusCard({
 
       {/* ecosystem chips */}
       {item.neighbors.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
+        <div className="relative mt-3 flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
           <span className="text-[9.5px] uppercase text-muted2">
-            {t(`${item.links} links · eco ${item.ecoWeight}`, `${item.links} 关联 · 生态 ${item.ecoWeight}`)}
+            {t(`eco ${item.ecoWeight}`, `生态 ${item.ecoWeight}`)}
           </span>
           {item.neighbors
             .slice()
             .sort((a, b) => Number(b.anchor) - Number(a.anchor) || b.importance - a.importance)
-            .slice(0, 6)
+            .slice(0, 5)
             .map((n) => (
               <button
                 key={n.ticker}
@@ -440,8 +497,8 @@ function FocusCard({
                 {n.ticker}
               </button>
             ))}
-          {item.neighbors.length > 6 && (
-            <span className="text-[10px] text-muted2">+{item.neighbors.length - 6}</span>
+          {item.neighbors.length > 5 && (
+            <span className="text-[10px] text-muted2">+{item.neighbors.length - 5}</span>
           )}
         </div>
       )}

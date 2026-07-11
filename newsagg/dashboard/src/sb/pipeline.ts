@@ -649,6 +649,8 @@ export interface FocusItem {
   gates: number; // count of the four above that pass (0-4)
   core: boolean; // the three hard signals all fire (buy + attention + ecosystem)
   score: number;
+  spark: number[]; // recent close series, for a card sparkline
+  changePct: number | null;
 }
 
 // A name is "sustained buy" when its gauge has read Buy/Strong-Buy this many
@@ -765,6 +767,8 @@ export function buildFocus(
       gates,
       core,
       score,
+      spark: tt?.close_series ?? [],
+      changePct: tt?.change_pct ?? null,
     });
   }
   // Graded: most gates first, then composite score (ecosystem-heavy).
