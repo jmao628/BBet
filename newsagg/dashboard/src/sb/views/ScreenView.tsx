@@ -161,7 +161,7 @@ export function ScreenView() {
           title={t("Ecosystem Links", "生态关联网络")}
           sub={
             links.length
-              ? t(`${links.length} discovery targets · ranked by links`, `${links.length} 个发现目标 · 按关联数排`)
+              ? t(`${links.length} targets across sectors · pick one below`, `${links.length} 个目标(跨板块) · 下方选板块`)
               : t("no cross-universe links mapped yet", "尚未映射到跨 universe 关联")
           }
           right={<MethodInfo />}
@@ -175,16 +175,16 @@ export function ScreenView() {
             </div>
           ) : (
             <>
-              {/* rules: who becomes a row, and what a chip's colour means */}
+              {/* graph legend */}
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "Rows = discovery targets: universe names under $100B. Mega-caps are anchors — chips only, never a row. Links are bidirectional (a reverse edge is inferred when only one side names the other), so coverage is fuller. ! = critical / hard-to-replace. Ranked by links.",
-                    "左侧成行的 = 发现目标：universe 内 <$100B 的票。大票是锚，只作标签、不单独成行。关联是双向的（只要一方点名另一方，就补上反向边），覆盖更全。! = 关键/非他不可。按关联数排名。",
+                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap anchors (≥$100B); outer nodes = discovery targets, placed near the anchors they link to. A glowing node = high Focus score (≥7) on your side. Click any node.",
+                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票锚（≥$1000亿）；外圈 = 发现目标，摆在它关联的锚附近。发光节点 = 你的 Focus 分高（≥7）。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span className="text-muted2">{t("Chip colour = its role vs the row ticker:", "标签颜色 = 它相对左侧票的角色：")}</span>
+                  <span className="text-muted2">{t("Edge colour = target's role to the anchor:", "连线颜色 = 目标对锚的角色：")}</span>
                   {(["upstream", "downstream", "peers"] as const).map((k) => (
                     <span key={k} className="flex items-center gap-1.5" style={{ color: GRP_COLOR[k] }}>
                       <span className="h-2 w-2 rounded-full" style={{ background: GRP_COLOR[k] }} />
@@ -195,10 +195,6 @@ export function ScreenView() {
                           : t("peer", "同业")}
                     </span>
                   ))}
-                  <span className="flex items-center gap-1.5 text-muted2">
-                    <span className="grid h-3 w-3 place-items-center rounded-full border border-muted2 text-[7px]">⚓</span>
-                    {t("= mega-cap anchor", "= 大票锚")}
-                  </span>
                 </div>
               </div>
               {/* sector picker — the graph is always one sector (no "All") */}
@@ -484,8 +480,8 @@ function EcoGraph({
             const p = tPos(ti);
             const rad = 5 + Math.min(r.neighbors.length, 8) * 0.9;
             const ang = tAngle(ti);
-            const lx = cx + (Ro + 15) * Math.cos(ang);
-            const ly = cy + (Ro + 15) * Math.sin(ang);
+            const lx = cx + (Ro + 20) * Math.cos(ang);
+            const ly = cy + (Ro + 20) * Math.sin(ang);
             const anchorRight = Math.cos(ang) >= 0;
             const score = scores.get(r.ticker) ?? 0;
             const hot = score >= HOT_SCORE;
