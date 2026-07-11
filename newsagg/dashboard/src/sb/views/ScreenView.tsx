@@ -108,7 +108,10 @@ export function ScreenView() {
     return [...c.entries()].sort((a, b) => b[1] - a[1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [links, sectors]);
-  const ecoRows = ecoSector ? links.filter((r) => sectorOf(r.ticker) === ecoSector) : links;
+  // The ecosystem graph is always ONE sector (a mixed "All" is an unreadable
+  // hairball). Default to the sector with the most targets.
+  const effEcoSector = ecoSector ?? ecoSectorCounts[0]?.[0] ?? null;
+  const ecoRows = effEcoSector ? links.filter((r) => sectorOf(r.ticker) === effEcoSector) : links;
 
   // Nodes to "light up" = names scoring high on YOUR Focus List (score ≥ 7/10).
   const hotScores = useMemo(() => {
@@ -116,6 +119,21 @@ export function ScreenView() {
     for (const f of buildFocus(data, heat, technical, marketCaps, sectors, supplychain)) m.set(f.ticker, f.score);
     return m;
   }, [data, heat, technical, marketCaps, sectors, supplychain]);
+
+  const HUB_EN: Record<string, string> = {
+    Technology: "Tech",
+    Healthcare: "Health",
+    "Financial Services": "Finance",
+    "Consumer Cyclical": "Cyclical",
+    "Consumer Defensive": "Defensive",
+    "Communication Services": "Comms",
+    "Basic Materials": "Materials",
+    Industrials: "Industry",
+    "Real Estate": "Real Est.",
+    Utilities: "Utilities",
+    Energy: "Energy",
+  };
+  const hubLabel = effEcoSector ? (lang === "zh" ? sectorLabel(effEcoSector, "zh") : HUB_EN[effEcoSector] ?? effEcoSector) : "HUB";
 
   return (
     <div className="view-in">
@@ -183,28 +201,22 @@ export function ScreenView() {
                   </span>
                 </div>
               </div>
-              {/* sector filter for the graph */}
+              {/* sector picker — the graph is always one sector (no "All") */}
               {ecoSectorCounts.length > 0 && (
                 <div className="mb-3 flex flex-wrap items-center gap-1.5">
                   <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
-                  <button
-                    onClick={() => setEcoSector(null)}
-                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${ecoSector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
-                  >
-                    {t("All", "全部")} {links.length}
-                  </button>
                   {ecoSectorCounts.map(([sec, n]) => (
                     <button
                       key={sec}
-                      onClick={() => setEcoSector(ecoSector === sec ? null : sec)}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${ecoSector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+                      onClick={() => setEcoSector(sec)}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${effEcoSector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
                     >
                       {sectorLabel(sec, lang)} {n}
                     </button>
                   ))}
                 </div>
               )}
-              <EcoGraph rows={ecoRows} scores={hotScores} onOpen={openDetail} t={t} />
+              <EcoGraph rows={ecoRows} scores={hotScores} sectorOf={sectorOf} sector={effEcoSector} hub={hubLabel} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -333,20 +345,29 @@ const HOT_SCORE = 7; // Focus score (0-10) at/above which a node lights up
 function EcoGraph({
   rows,
   scores,
+  sectorOf,
+  sector,
+  hub,
   onOpen,
   t,
 }: {
   rows: EcoRow[];
   scores: Map<string, number>;
+  sectorOf: (t: string) => string;
+  sector: string | null;
+  hub: string;
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
   const TOPT = 24;
   const pool = rows.filter((r) => r.anchors > 0).slice(0, TOPT);
 
-  // pick the anchors that appear most across the pool (cap the ring)
+  // Anchors = mega-caps IN THE SAME SECTOR (so e.g. NVDA doesn't show up as a
+  // Healthcare anchor). Pick the most-referenced ones, cap the ring.
   const freq = new Map<string, number>();
-  for (const r of pool) for (const n of r.neighbors) if (n.anchor) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
+  for (const r of pool)
+    for (const n of r.neighbors)
+      if (n.anchor && (!sector || sectorOf(n.ticker) === sector)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
   const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map((e) => e[0]);
   const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
 
@@ -440,9 +461,9 @@ function EcoGraph({
           })}
 
           {/* center hub */}
-          <circle cx={cx} cy={cy} r={26} fill="#0e2a3a" stroke="#3dd6c4" strokeWidth={2} style={{ filter: "drop-shadow(0 0 10px #3dd6c4aa)" }} />
-          <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#3dd6c4">
-            HUB
+          <circle cx={cx} cy={cy} r={30} fill="#0e2a3a" stroke="#3dd6c4" strokeWidth={2} style={{ filter: "drop-shadow(0 0 12px #3dd6c4aa)" }} />
+          <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize={hub.length > 7 ? 9 : 11} fontWeight="700" fill="#3dd6c4">
+            {hub}
           </text>
 
           {/* anchor nodes */}
@@ -489,7 +510,6 @@ function EcoGraph({
                   fill={hot ? "#7ff0e2" : "#8695a3"}
                 >
                   {r.ticker}
-                  {hot ? ` ${score.toFixed(1)}` : ""}
                 </text>
               </g>
             );
