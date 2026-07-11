@@ -132,11 +132,25 @@ export function HeatView() {
         eyebrow={t("Stage 2 · Heat Ignition", "Stage 2 · 热度点火")}
         title={t("Heat Ignition · Multi-Lens Ranking", "热度点火 · 多维排名")}
         desc={t(
-          "The whole seed pool, ranked by several independent lenses — attention, relative volume, 60-day momentum, social heat. Each lens lights up its top-10 that clear the bar (weak days stay dim). Any lens PASS advances. Click a row for detail.",
-          "种子池全部在此,按多个独立维度分别排名——量价注意力、放量 RVOL、60 日动量、社交热度。每个维度取前 10 且达标才点亮入选(弱势那天没票达标就全灰,不硬凑)。任一维度入选即晋级下一轮。点行看详情。",
+          "The whole seed pool, ranked by several independent lenses — attention, relative volume, 60-day momentum, social heat. Each lens lights up its top-10 that clear the bar (weak days stay dim). Any lens PASS advances. Rankings recompute every daily technical run, so they shift with each day's price-volume. Click a row for detail.",
+          "种子池全部在此,按多个独立维度分别排名——量价注意力、放量 RVOL、60 日动量、社交热度。每个维度取前 10 且达标才点亮入选(弱势那天没票达标就全灰,不硬凑)。排名每天随技术数据重算,会跟着当日量价变化。任一维度入选即晋级下一轮。点行看详情。",
         )}
         actions={<MethodInfo />}
       />
+
+      {technical?.generated_at && (
+        <div className="mb-3 flex items-center gap-1.5 text-[11px] text-muted2">
+          <span className="h-1.5 w-1.5 rounded-full bg-signal/70" />
+          {t("Board data as of ", "排名数据更新于 ")}
+          {new Date(technical.generated_at).toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          {t(" · recomputes with each daily technical run", " · 每次每日技术抓取后重算")}
+        </div>
+      )}
 
       <StatStrip
         stats={[

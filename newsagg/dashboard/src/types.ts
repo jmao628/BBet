@@ -105,11 +105,13 @@ export interface TechTicker {
   days: number;
   attention: TechAttention;
   gauge: TechGauge;
+  buy_streak?: number; // consecutive recent days reading Buy/Strong-Buy
   close_series: number[];
   vol_series: number[];
 }
 
 export interface TechnicalData {
+  generated_at?: string;
   tickers: Record<string, TechTicker>;
 }
 

@@ -616,6 +616,7 @@ export interface FocusItem {
   cap: CapSize;
   sector: string;
   strongBuy: boolean;
+  buyStreak: number; // consecutive recent days reading Buy/Strong-Buy
   inBoth: boolean; // in the Heat attention board AND the quality net
   attnScore: number | null;
   rvol: number | null;
@@ -625,6 +626,10 @@ export interface FocusItem {
   neighbors: FocusNeighbor[];
   score: number;
 }
+
+// A name is "sustained buy" when its gauge has read Buy/Strong-Buy this many
+// consecutive days — a maintained posture, not a one-day flip.
+export const SUSTAINED_DAYS = 5;
 
 export function buildFocus(
   data: SAData | null,
@@ -645,9 +650,11 @@ export function buildFocus(
   const items: FocusItem[] = [];
   for (const u of rated) {
     const t = u.ticker;
-    const gauge = technical?.tickers?.[t]?.gauge?.summary;
+    const tt = technical?.tickers?.[t];
+    const gauge = tt?.gauge?.summary;
     const strongBuy = gauge === "strong_buy";
-    const attn = technical?.tickers?.[t]?.attention;
+    const buyStreak = tt?.buy_streak ?? 0;
+    const attn = tt?.attention;
     const attnScore = attn?.score ?? null;
 
     // ecosystem neighbors that are in-universe (deduped)
@@ -665,13 +672,16 @@ export function buildFocus(
       }
     }
     const links = neighbors.length;
-    if (!strongBuy && links === 0) continue; // membership: strong-buy OR connected
+    const sustained = buyStreak >= SUSTAINED_DAYS;
+    // membership: strong-buy OR sustained buy OR ecosystem-connected
+    if (!strongBuy && !sustained && links === 0) continue;
 
     const anchors = neighbors.filter((n) => n.anchor).length;
     const inBoth = quality.has(t) && advancing.has(t);
     const score =
       (strongBuy ? 40 : 0) +
       (inBoth ? 15 : 0) +
+      Math.min(buyStreak, 5) * 4 +
       Math.min(links, 8) * 3 +
       Math.min(anchors, 5) * 3 +
       Math.round((attnScore ?? 0) * 0.25);
@@ -682,6 +692,7 @@ export function buildFocus(
       cap: capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []),
       sector: sectors?.[t]?.sector ?? "",
       strongBuy,
+      buyStreak,
       inBoth,
       attnScore,
       rvol: attn?.rvol ?? null,

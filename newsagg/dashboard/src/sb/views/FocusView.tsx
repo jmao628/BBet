@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, capLabel, sectorLabel, type FocusItem } from "../pipeline";
+import { buildFocus, capLabel, sectorLabel, SUSTAINED_DAYS, type FocusItem } from "../pipeline";
 import { ViewHead, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -10,8 +10,8 @@ const GRP_COLOR: Record<string, string> = {
   peers: "#e9c46a",
 };
 
-type FilterKey = "all" | "both" | "strong" | "linked";
-type SortKey = "score" | "attn" | "links" | "rvol";
+type FilterKey = "all" | "both" | "strong" | "sustained" | "linked";
+type SortKey = "score" | "attn" | "links" | "rvol" | "streak";
 
 export function FocusView() {
   const data = useStore((s) => s.data);
@@ -35,6 +35,7 @@ export function FocusView() {
 
   const bothN = all.filter((i) => i.strongBuy && i.links > 0).length;
   const strongN = all.filter((i) => i.strongBuy).length;
+  const sustainedN = all.filter((i) => i.buyStreak >= SUSTAINED_DAYS).length;
   const linkedN = all.filter((i) => i.links > 0).length;
 
   const sectorCounts = useMemo(() => {
@@ -47,10 +48,19 @@ export function FocusView() {
     let rows = all;
     if (filter === "both") rows = rows.filter((i) => i.strongBuy && i.links > 0);
     else if (filter === "strong") rows = rows.filter((i) => i.strongBuy);
+    else if (filter === "sustained") rows = rows.filter((i) => i.buyStreak >= SUSTAINED_DAYS);
     else if (filter === "linked") rows = rows.filter((i) => i.links > 0);
     if (sector) rows = rows.filter((i) => i.sector === sector);
     const key = (i: FocusItem) =>
-      sort === "attn" ? (i.attnScore ?? -1) : sort === "links" ? i.links : sort === "rvol" ? (i.rvol ?? -1) : i.score;
+      sort === "attn"
+        ? (i.attnScore ?? -1)
+        : sort === "links"
+          ? i.links
+          : sort === "rvol"
+            ? (i.rvol ?? -1)
+            : sort === "streak"
+              ? i.buyStreak
+              : i.score;
     return [...rows].sort((a, b) => key(b) - key(a) || b.score - a.score);
   }, [all, filter, sector, sort]);
 
@@ -58,10 +68,12 @@ export function FocusView() {
     { k: "all", label: t("All", "全部"), n: all.length },
     { k: "both", label: t("Strong × Linked", "强买×关联"), n: bothN },
     { k: "strong", label: t("Strong Buy", "强力买入"), n: strongN },
+    { k: "sustained", label: t(`Sustained ${SUSTAINED_DAYS}d`, `持续买入 ${SUSTAINED_DAYS} 天`), n: sustainedN },
     { k: "linked", label: t("Connected", "有关联"), n: linkedN },
   ];
   const SORTS: { k: SortKey; label: string }[] = [
     { k: "score", label: t("Composite", "综合分") },
+    { k: "streak", label: t("Buy streak", "买入连续") },
     { k: "attn", label: t("Attention", "注意力") },
     { k: "links", label: t("Links", "关联数") },
     { k: "rvol", label: "RVOL" },
@@ -81,10 +93,10 @@ export function FocusView() {
 
       <StatStrip
         stats={[
-          { k: t("On the list", "名单内"), v: all.length, d: t("strong-buy or connected", "强买 或 有关联"), color: "#3dd6c4" },
+          { k: t("On the list", "名单内"), v: all.length, d: t("strong / sustained / linked", "强买/持续/关联"), color: "#3dd6c4" },
           { k: t("Strong × Linked", "强买×关联"), v: bothN, d: t("the tightest overlap", "最紧的交集"), color: "#f2a73c" },
           { k: t("Strong Buy", "强力买入"), v: strongN, d: t("gauge = strong buy", "表针=强买") },
-          { k: t("Connected", "有关联"), v: linkedN, d: t("≥1 in-universe link", "≥1 个 universe 关联") },
+          { k: t(`Sustained ${SUSTAINED_DAYS}d`, `持续买入 ${SUSTAINED_DAYS}天`), v: sustainedN, d: t("buy ≥5 days running", "连续≥5天买入"), color: "#48c78e" },
         ]}
       />
 
@@ -189,6 +201,11 @@ function FocusCard({
             {item.strongBuy && (
               <span className="rounded-full border border-gold/45 bg-gold/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-gold">
                 {t("STRONG", "强买")}
+              </span>
+            )}
+            {item.buyStreak >= SUSTAINED_DAYS && (
+              <span className="rounded-full border border-ok/45 bg-ok/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-ok">
+                {t(`BUY ${item.buyStreak}D`, `买入 ${item.buyStreak} 天`)}
               </span>
             )}
             {item.inBoth && (

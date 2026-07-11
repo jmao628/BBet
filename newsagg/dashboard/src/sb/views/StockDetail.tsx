@@ -628,6 +628,21 @@ export function StockDetail() {
                   <div className="text-[11px] text-muted2">{t("MA + oscillator vote · lags, reference only", "MA + 震荡指标投票 · 滞后，仅参考")}</div>
                 </div>
                 <GaugeMeter summary={tech.gauge.summary} />
+                {tech.buy_streak != null && (
+                  <div className="mt-3 flex items-center justify-center gap-2 text-[12px]">
+                    <span className="text-muted2">{t("Sustained buy", "持续买入迹象")}</span>
+                    <span
+                      className="rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold"
+                      style={
+                        tech.buy_streak >= 5
+                          ? { color: "#48c78e", borderColor: "#48c78e66", background: "#48c78e18" }
+                          : { color: "#8695a3", borderColor: "var(--line, #2a3a49)" }
+                      }
+                    >
+                      {t(`${tech.buy_streak} / 5 days`, `连续 ${tech.buy_streak} / 5 天`)}
+                    </span>
+                  </div>
+                )}
                 <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                   <Stat label={t("MA buy/sell", "均线 买/卖")} value={`${tech.gauge.ma_buy} / ${tech.gauge.ma_sell}`} />
                   <Stat label={t("Osc buy/neu/sell", "震荡 买/中/卖")} value={`${tech.gauge.osc_buy}/${tech.gauge.osc_neutral}/${tech.gauge.osc_sell}`} />

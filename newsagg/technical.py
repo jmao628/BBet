@@ -22,6 +22,7 @@ import argparse
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from newsagg.config import load_settings
@@ -314,6 +315,27 @@ def compute_gauge(highs, lows, closes, p: TechParams) -> dict:
     }
 
 
+def _buy_streak(highs, lows, closes, p: TechParams, max_days: int = 5) -> int:
+    """How many of the most-recent trading days read Buy/Strong-Buy in a row.
+
+    Recomputed retroactively from the daily series (no history file needed): for
+    each of the last ``max_days`` days we re-run the mechanical gauge on the data
+    *as it stood that day* and count consecutive Buy days ending today. A high
+    streak = a sustained buy posture, not a one-day blip.
+    """
+    streak = 0
+    for k in range(max_days):
+        n = len(closes) - k
+        if n < 50:
+            break
+        g = compute_gauge(highs[:n], lows[:n], closes[:n], p)
+        if g["summary"] in ("buy", "strong_buy"):
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def compute_ticker(bars: dict, p: TechParams) -> dict | None:
     highs, lows, closes, volumes = bars["highs"], bars["lows"], bars["closes"], bars["volumes"]
     if len(closes) < 30:
@@ -332,6 +354,7 @@ def compute_ticker(bars: dict, p: TechParams) -> dict | None:
         "days": len(closes),
         "attention": compute_attention(highs, lows, closes, volumes, p),
         "gauge": compute_gauge(highs, lows, closes, p),
+        "buy_streak": _buy_streak(highs, lows, closes, p),
         "close_series": [round(c, 2) for c in closes[-tail:]],
         "vol_series": [int(v) for v in volumes[-tail:]],
     }
@@ -412,7 +435,7 @@ def main() -> int:
             )
         return 1
 
-    payload = {"tickers": tech}
+    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "tickers": tech}
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload))
     logger.info("wrote technicals for %d/%d tickers", len(tech), len(tickers))
