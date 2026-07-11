@@ -718,6 +718,55 @@ def _is_empty(result_dict: dict) -> bool:
     return not (c.get("home_widget_rows") or c.get("analyst_picks") or c.get("top_analysts"))
 
 
+def _payload_tickers(payload: dict) -> set[str]:
+    return {
+        (r.get("ticker") or "").strip().upper()
+        for w in payload.get("home_widgets", [])
+        for g in w.get("groups", [])
+        for r in g.get("rows", [])
+        if r.get("ticker")
+    }
+
+
+def _merge_carryover(payload: dict, output_dir: Path) -> dict:
+    """Keep the seed universe cumulative — never shrink it on a weak scrape.
+
+    A partial scrape (cookie weakened → fewer logged-in widgets, or SA changed a
+    section) would otherwise overwrite latest.json with fewer tickers, dropping
+    names the user expects to persist. So any ticker seen in ANY prior snapshot
+    (latest.json + every dated ``seekingalpha_YYYY-MM-DD.json``) but missing from
+    this run is carried forward in a "Carried Over" widget, with its most-recent
+    prior row data intact. Fresh scrapes still refresh every ticker they DO
+    return; only the gaps are back-filled, so the universe only ever grows.
+    """
+    have = _payload_tickers(payload)
+    carry: list[dict] = []
+    seen: set[str] = set()
+    # Newest first (so the freshest prior row wins): "latest" sorts after dates.
+    for path in sorted(output_dir.glob("seekingalpha_*.json"), reverse=True):
+        try:
+            prev = json.loads(path.read_text())
+        except (ValueError, OSError):
+            continue
+        for w in prev.get("home_widgets", []):
+            for g in w.get("groups", []):
+                for r in g.get("rows", []):
+                    tk = (r.get("ticker") or "").strip().upper()
+                    if tk and tk not in have and tk not in seen:
+                        seen.add(tk)
+                        carry.append(r)
+    if carry:
+        payload.setdefault("home_widgets", []).append(
+            {
+                "title": "Carried Over",
+                "description": "seen in a prior scrape, kept so the seed universe never shrinks",
+                "groups": [{"label": "", "rows": carry}],
+            }
+        )
+        logger.info("carried over %d tickers from prior snapshots (universe kept cumulative)", len(carry))
+    return payload
+
+
 def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     payload = result.to_dict()
@@ -733,6 +782,9 @@ def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
                 return latest
         except (ValueError, OSError):
             pass
+
+    # Keep the universe cumulative so a partial scrape never drops seeds.
+    payload = _merge_carryover(payload, output_dir)
 
     latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     day = result.generated_at.date().isoformat()
