@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { useStore, useT } from "../../store";
 import { buildFocus, companyMap, noDataSet, sectorLabel } from "../pipeline";
 
-// The landing page: a live, interactive "strong-buy universe" globe (every
-// strong-buy name orbits as a glowing node, sized by today's move) sitting on
-// top of a per-sector leaderboard where every name is reachable by scrolling.
+// Landing page: one interactive globe PER sector (drag to spin, hover a node for
+// its label, click to open) sitting above that sector's fully-scrollable
+// leaderboard. All globes share a single animation loop and only render while
+// on-screen, so a wall of them stays smooth.
 
 interface Mover {
   ticker: string;
@@ -28,7 +29,10 @@ const SECTOR_COLOR: Record<string, string> = {
   "Real Estate": "#d4a373",
 };
 const secColor = (s: string) => SECTOR_COLOR[s] ?? "#8aa0b4";
-
+function hexToRgb(h: string): string {
+  const n = parseInt(h.slice(1), 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
 function hash(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -38,34 +42,85 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-// ── The rotating globe ──────────────────────────────────────────────────────
-function StrongBuyGlobe({
-  movers,
+// ── Shared render loop — one rAF drives every on-screen globe ────────────────
+const _globes = new Set<(now: number) => void>();
+let _raf = 0;
+function _loop(now: number) {
+  _globes.forEach((fn) => fn(now));
+  _raf = requestAnimationFrame(_loop);
+}
+function registerGlobe(fn: (now: number) => void) {
+  _globes.add(fn);
+  if (!_raf) _raf = requestAnimationFrame(_loop);
+  return () => {
+    _globes.delete(fn);
+    if (_globes.size === 0) {
+      cancelAnimationFrame(_raf);
+      _raf = 0;
+    }
+  };
+}
+
+// Pre-rendered radial glow sprite per colour — blitted instead of shadowBlur.
+const _sprite = new Map<string, HTMLCanvasElement>();
+function glowSprite(rgb: string): HTMLCanvasElement {
+  const cached = _sprite.get(rgb);
+  if (cached) return cached;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, `rgba(${rgb},1)`);
+  grad.addColorStop(0.18, `rgba(${rgb},0.9)`);
+  grad.addColorStop(0.5, `rgba(${rgb},0.22)`);
+  grad.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  _sprite.set(rgb, c);
+  return c;
+}
+
+interface Proj {
+  x: number;
+  y: number;
+  r: number;
+  i: number;
+  cx: number;
+  cy: number;
+}
+
+const SectorGlobe = memo(function SectorGlobe({
+  rows,
+  color,
   onPick,
 }: {
-  movers: Mover[];
+  rows: Mover[];
+  color: string;
   onPick: (t: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // mutable render/interaction state (kept off React to avoid re-renders)
   const st = useRef({
     yaw: 0,
     dragging: false,
     moved: false,
     lastX: 0,
     hover: -1,
-    projected: [] as { x: number; y: number; r: number; i: number }[],
+    last: 0,
+    active: true,
+    projected: [] as Proj[],
+    grad: null as CanvasGradient | null,
+    gradW: 0,
+    gradH: 0,
   });
 
-  // stable lat/lon per ticker so a name always sits in the same place
   const pts = useMemo(
     () =>
-      movers.slice(0, 150).map((m) => {
+      rows.slice(0, 90).map((m) => {
         const u = (hash(m.ticker) % 997) / 997;
         const v = (hash(m.ticker + "^") % 991) / 991;
         return { ...m, lat: Math.asin(2 * u - 1), lon: v * Math.PI * 2 };
       }),
-    [movers],
+    [rows],
   );
 
   useEffect(() => {
@@ -73,25 +128,27 @@ function StrongBuyGlobe({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const tilt = -0.34; // slight pitch so the poles show
+    const rgb = hexToRgb(color);
+    const sprite = glowSprite(rgb);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const tilt = -0.34;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.max(1, Math.round(rect.width * dpr));
       canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      st.current.grad = null; // invalidate cached atmosphere
     };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
-
-    // the handful of names we ever label (biggest movers), to keep it uncluttered
-    const topSet = new Set(
-      [...pts]
-        .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
-        .slice(0, 6)
-        .map((p) => pts.indexOf(p)),
+    const io = new IntersectionObserver(
+      ([e]) => {
+        st.current.active = e.isIntersecting;
+      },
+      { rootMargin: "150px" },
     );
+    io.observe(canvas);
 
     const rot = (lat: number, lon: number, yaw: number) => {
       const l = lon + yaw;
@@ -105,128 +162,130 @@ function StrongBuyGlobe({
       };
     };
 
-    let raf = 0;
-    let last = performance.now();
-    const frame = (now: number) => {
-      const dt = Math.min(now - last, 50);
-      last = now;
+    const render = (now: number) => {
       const s = st.current;
-      if (!s.dragging) s.yaw += 0.0022 * (dt / 16.7);
+      if (!s.active) {
+        s.last = now;
+        return;
+      }
+      const dt = Math.min(now - s.last, 50);
+      s.last = now;
+      if (!s.dragging) s.yaw += 0.0016 * (dt / 16.7);
 
       const W = canvas.width,
         H = canvas.height;
       const cx = W / 2,
         cy = H / 2;
-      const R = Math.min(W, H) * 0.4;
+      const R = Math.min(W, H) * 0.42;
       ctx.clearRect(0, 0, W, H);
 
-      // atmosphere
-      const glow = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 1.6);
-      glow.addColorStop(0, "rgba(61,214,196,0.12)");
-      glow.addColorStop(0.55, "rgba(61,214,196,0.03)");
-      glow.addColorStop(1, "rgba(61,214,196,0)");
-      ctx.fillStyle = glow;
+      // cached atmosphere
+      if (!s.grad || s.gradW !== W || s.gradH !== H) {
+        const g = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 1.7);
+        g.addColorStop(0, `rgba(${rgb},0.12)`);
+        g.addColorStop(0.55, `rgba(${rgb},0.03)`);
+        g.addColorStop(1, `rgba(${rgb},0)`);
+        s.grad = g;
+        s.gradW = W;
+        s.gradH = H;
+      }
+      ctx.fillStyle = s.grad;
       ctx.fillRect(0, 0, W, H);
 
-      // wireframe — latitudes
+      // wireframe (tinted with the sector colour)
       ctx.lineWidth = dpr;
       for (let li = -2; li <= 2; li++) {
         const lat = (li * Math.PI) / 6;
         ctx.beginPath();
-        for (let a = 0; a <= 72; a++) {
-          const p = rot(lat, (a / 72) * Math.PI * 2, s.yaw);
+        for (let a = 0; a <= 60; a++) {
+          const p = rot(lat, (a / 60) * Math.PI * 2, s.yaw);
           const sx = cx + p.x * R,
             sy = cy - p.y * R;
           a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         }
-        ctx.strokeStyle = "rgba(125,155,180,0.10)";
+        ctx.strokeStyle = `rgba(${rgb},0.09)`;
         ctx.stroke();
       }
-      // wireframe — meridians
       for (let mi = 0; mi < 12; mi++) {
         const lon = (mi * Math.PI) / 6;
         ctx.beginPath();
-        for (let a = 0; a <= 72; a++) {
-          const p = rot(-Math.PI / 2 + (a / 72) * Math.PI, lon, s.yaw);
+        for (let a = 0; a <= 60; a++) {
+          const p = rot(-Math.PI / 2 + (a / 60) * Math.PI, lon, s.yaw);
           const sx = cx + p.x * R,
             sy = cy - p.y * R;
           a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         }
-        ctx.strokeStyle = "rgba(125,155,180,0.07)";
+        ctx.strokeStyle = `rgba(${rgb},0.055)`;
         ctx.stroke();
       }
-      // rim
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(125,155,180,0.20)";
+      ctx.strokeStyle = `rgba(${rgb},0.18)`;
       ctx.lineWidth = dpr * 1.1;
       ctx.stroke();
 
-      // nodes — draw back-to-front for correct occlusion
+      // nodes, back-to-front, additive glow via sprite
       const proj = pts
         .map((p, i) => ({ i, ...rot(p.lat, p.lon, s.yaw) }))
         .sort((a, b) => a.z - b.z);
       s.projected = [];
-      const labels: { x: number; y: number; text: string; up: boolean }[] = [];
+      ctx.globalCompositeOperation = "lighter";
       for (const q of proj) {
         const p = pts[q.i];
         const sx = cx + q.x * R,
           sy = cy - q.y * R;
         const persp = 0.55 + ((q.z + 1) / 2) * 0.7;
         const mag = Math.min(Math.abs(p.changePct) / 8, 1);
-        const rad = (2.2 + mag * 4.6) * persp * dpr;
-        const up = p.changePct >= 0;
+        const rad = (3 + mag * 7) * persp * dpr * (s.hover === q.i ? 1.3 : 1);
         const front = q.z > 0;
-        const a = front ? 1 : 0.25;
-        const col = up ? "61,214,196" : "232,120,120";
-        const hovered = s.hover === q.i;
-        ctx.beginPath();
-        ctx.arc(sx, sy, hovered ? rad * 1.5 : rad, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${col},${(hovered ? 1 : 0.9) * a})`;
-        ctx.shadowBlur = (8 + mag * 16) * persp;
-        ctx.shadowColor = `rgba(${col},${a})`;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        if (hovered) {
-          ctx.beginPath();
-          ctx.arc(sx, sy, rad * 1.5 + 3 * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${col},0.9)`;
-          ctx.lineWidth = dpr;
-          ctx.stroke();
-        }
-        if (front) {
-          s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 7), i: q.i });
-          if (hovered || (topSet.has(q.i) && q.z > 0.2))
-            labels.push({ x: sx, y: sy - rad - 4 * dpr, text: p.ticker, up });
-        }
+        ctx.globalAlpha = Math.min((front ? 1 : 0.28) * (0.5 + mag * 0.5), 1);
+        ctx.drawImage(sprite, sx - rad, sy - rad, rad * 2, rad * 2);
+        if (front)
+          s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 8), i: q.i, cx: sx, cy: sy });
       }
-      // labels last so they sit above nodes
-      ctx.font = `600 ${11 * dpr}px ui-monospace, SFMono-Regular, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      for (const l of labels) {
-        ctx.fillStyle = "rgba(6,10,16,0.7)";
-        const w = ctx.measureText(l.text).width + 8 * dpr;
-        ctx.fillRect(l.x - w / 2, l.y - 13 * dpr, w, 14 * dpr);
-        ctx.fillStyle = l.up ? "rgba(120,235,215,1)" : "rgba(240,150,150,1)";
-        ctx.fillText(l.text, l.x, l.y);
-      }
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-  }, [pts]);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
 
-  // ── pointer interaction ──
+      // hover-only ring + label
+      if (s.hover >= 0) {
+        const hp = s.projected.find((p) => p.i === s.hover);
+        if (hp) {
+          ctx.beginPath();
+          ctx.arc(hp.cx, hp.cy, hp.r * dpr + 3 * dpr, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${rgb},0.9)`;
+          ctx.lineWidth = 1.4 * dpr;
+          ctx.stroke();
+          const p = pts[s.hover];
+          const up = p.changePct >= 0;
+          const txt = `${p.ticker}  ${up ? "+" : ""}${p.changePct.toFixed(2)}%`;
+          ctx.font = `600 ${11 * dpr}px ui-monospace, SFMono-Regular, monospace`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const w = ctx.measureText(txt).width + 14 * dpr;
+          const h = 17 * dpr;
+          const ly = hp.cy - hp.r * dpr - 12 * dpr;
+          ctx.fillStyle = "rgba(8,12,18,0.85)";
+          ctx.fillRect(hp.cx - w / 2, ly - h / 2, w, h);
+          ctx.fillStyle = up ? "#7fe9d6" : "#f2a0a0";
+          ctx.fillText(txt, hp.cx, ly);
+        }
+      }
+    };
+
+    const unregister = registerGlobe(render);
+    return () => {
+      unregister();
+      ro.disconnect();
+      io.disconnect();
+    };
+  }, [pts, color]);
+
   const hitTest = (x: number, y: number) => {
     let best = -1,
       bd = Infinity;
     for (const p of st.current.projected) {
       const d = Math.hypot(p.x - x, p.y - y);
-      if (d < p.r + 6 && d < bd) {
+      if (d < p.r + 5 && d < bd) {
         bd = d;
         best = p.i;
       }
@@ -242,7 +301,7 @@ function StrongBuyGlobe({
   };
   const onMove = (e: React.PointerEvent) => {
     const s = st.current;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (s.dragging) {
       const dx = e.clientX - s.lastX;
       if (Math.abs(dx) > 2) s.moved = true;
@@ -250,12 +309,12 @@ function StrongBuyGlobe({
       s.lastX = e.clientX;
     } else {
       s.hover = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-      (e.target as HTMLElement).style.cursor = s.hover >= 0 ? "pointer" : "grab";
+      (e.currentTarget as HTMLElement).style.cursor = s.hover >= 0 ? "pointer" : "grab";
     }
   };
   const onUp = (e: React.PointerEvent) => {
     const s = st.current;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (s.dragging && !s.moved) {
       const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
       if (hit >= 0) onPick(pts[hit].ticker);
@@ -278,7 +337,7 @@ function StrongBuyGlobe({
       style={{ cursor: "grab" }}
     />
   );
-}
+});
 
 function MoverRow({
   rank,
@@ -301,23 +360,24 @@ function MoverRow({
     <button
       onClick={onClick}
       className={`group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04] ${
-        top ? "bg-white/[0.03] ring-1 ring-inset" : ""
+        top ? "bg-white/[0.03]" : ""
       }`}
       style={top ? { boxShadow: `inset 0 0 0 1px ${color}44` } : undefined}
     >
       <span
         className="grid h-5 w-5 flex-none place-items-center rounded font-mono text-[10px] font-semibold"
-        style={{
-          background: top ? color : "transparent",
-          color: top ? "#08131a" : "#7b8da0",
-        }}
+        style={{ background: top ? color : "transparent", color: top ? "#08131a" : "#7b8da0" }}
       >
         {rank}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="font-mono text-[13px] font-semibold text-text">{m.ticker}</span>
-          {m.onFocus && <span className="text-[10px] text-gold" title={lang === "zh" ? "在重点名单" : "on Focus List"}>★</span>}
+          {m.onFocus && (
+            <span className="text-[10px] text-gold" title={lang === "zh" ? "在重点名单" : "on Focus List"}>
+              ★
+            </span>
+          )}
         </span>
         <span className="block truncate text-[11px] text-muted2">{m.company}</span>
       </span>
@@ -388,79 +448,84 @@ export function OverviewView() {
 
   return (
     <div className="view-in space-y-5">
-      {/* header */}
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="flex items-center gap-2.5 font-disp text-[22px] font-semibold tracking-tight">
-          {t("Strong-Buy Leaderboard", "强力买入榜")}
-          <span className="rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 font-mono text-[12px] font-semibold text-gold">
-            {movers.length}
+      {/* HEADER — refined title + live caption + legend */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="flex items-center gap-3 font-disp text-[23px] font-semibold tracking-tight">
+            {t("Strong-Buy Leaderboard", "强力买入榜")}
+            <span className="inline-flex items-center rounded-full border border-gold/30 bg-gold/[0.07] px-2.5 py-0.5">
+              <span className="pill-sheen font-mono text-[13px] font-bold">{movers.length}</span>
+            </span>
+          </h1>
+          <p className="caption-scan relative mt-1.5 flex w-fit items-center gap-2 text-[11.5px] text-muted2">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
+            </span>
+            {t("live · ranked by today's move · one globe per sector", "实时 · 按当日涨跌排名 · 每个板块一颗星球")}
+          </p>
+        </div>
+
+        {/* dynamic legend */}
+        <div className="flex items-center gap-3.5 rounded-xl border border-line bg-panel2/70 px-3.5 py-2 text-[11px]">
+          <span className="flex items-center gap-2 text-muted2">
+            <span className="flex items-end gap-1">
+              {[3, 5, 8].map((d, i) => (
+                <span
+                  key={d}
+                  className="ramp-dot rounded-full bg-signal"
+                  style={{ width: d, height: d, animationDelay: `${i * 0.3}s` }}
+                />
+              ))}
+            </span>
+            {t("size = today's move", "大小 = 当日涨跌")}
           </span>
-        </h1>
-        <span className="font-mono text-[11px] text-muted2">
-          {t("ranked by today's move · grouped by sector · click to open", "按当日涨跌排名 · 按板块分组 · 点击查看")}
-        </span>
-      </div>
-
-      {/* GLOBE HERO */}
-      <div className="relative overflow-hidden rounded-2xl border border-line bg-panel2">
-        <div className="pointer-events-none absolute left-5 top-4 z-[1]">
-          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-signal">
-            {t("Strong-Buy Universe", "强力买入星图")}
-          </div>
-          <div className="mt-1 text-[12px] text-muted2">
-            {t(
-              `${movers.length} names in orbit · drag to spin · click a node`,
-              `${movers.length} 只在轨 · 拖动旋转 · 点击节点`,
-            )}
-          </div>
-        </div>
-        <div className="pointer-events-none absolute right-5 top-4 z-[1] flex items-center gap-3 font-mono text-[10.5px] text-muted2">
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#3dd6c4", boxShadow: "0 0 8px #3dd6c4" }} /> {t("up", "涨")}</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#e88", boxShadow: "0 0 8px #e88" }} /> {t("down", "跌")}</span>
-          <span>{t("size = today's move", "大小 = 当日幅度")}</span>
-        </div>
-        <div className="h-[380px] w-full">
-          {movers.length > 0 ? (
-            <StrongBuyGlobe movers={movers} onPick={openDetail} />
-          ) : (
-            <div className="grid h-full place-items-center text-[13px] text-muted">
-              {t("No strong-buy names yet — run the technical job.", "暂无强力买入标的 — 先跑技术数据。")}
-            </div>
-          )}
+          <span className="h-3.5 w-px bg-line" />
+          <span className="text-muted2">{t("drag to spin · click a node", "拖动旋转 · 点击节点")}</span>
         </div>
       </div>
 
-      {/* SECTOR LEADERBOARD GRID — every name reachable by scrolling inside a card */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {bySector.map(([sec, rows]) => {
-          const color = secColor(sec);
-          const max = Math.max(...rows.map((r) => Math.abs(r.changePct)), 0.01);
-          return (
-            <div key={sec} className="flex flex-col overflow-hidden rounded-2xl border border-line bg-panel2">
-              <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
-                <span className="flex items-center gap-2 text-[13px] font-semibold">
-                  <span className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-                  {sectorLabel(sec === "Other" ? undefined : sec, lang)}
-                </span>
-                <span className="font-mono text-[11px] text-muted2">{rows.length}</span>
-              </header>
-              <div className="max-h-[340px] overflow-y-auto p-1.5">
-                {rows.map((m, i) => (
-                  <MoverRow
-                    key={m.ticker}
-                    rank={i + 1}
-                    m={m}
-                    max={max}
-                    color={color}
-                    lang={lang}
-                    onClick={() => openDetail(m.ticker)}
-                  />
-                ))}
+      {movers.length === 0 ? (
+        <div className="grid h-64 place-items-center rounded-2xl border border-line bg-panel2 text-[13px] text-muted">
+          {t("No strong-buy names yet — run the technical job.", "暂无强力买入标的 — 先跑技术数据。")}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {bySector.map(([sec, rows]) => {
+            const color = secColor(sec);
+            const max = Math.max(...rows.map((r) => Math.abs(r.changePct)), 0.01);
+            return (
+              <div key={sec} className="flex flex-col overflow-hidden rounded-2xl border border-line bg-panel2">
+                <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
+                  <span className="flex items-center gap-2 text-[13px] font-semibold">
+                    <span className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                    {sectorLabel(sec === "Other" ? undefined : sec, lang)}
+                  </span>
+                  <span className="font-mono text-[11px] text-muted2">{rows.length}</span>
+                </header>
+                {/* per-sector globe */}
+                <div className="relative h-[172px] w-full border-b border-line/60">
+                  <SectorGlobe rows={rows} color={color} onPick={openDetail} />
+                </div>
+                {/* fully-scrollable ranked list */}
+                <div className="max-h-[300px] overflow-y-auto p-1.5">
+                  {rows.map((m, i) => (
+                    <MoverRow
+                      key={m.ticker}
+                      rank={i + 1}
+                      m={m}
+                      max={max}
+                      color={color}
+                      lang={lang}
+                      onClick={() => openDetail(m.ticker)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -138,6 +138,38 @@ body {
   }
 }
 
+/* Count pill — a bright sheen sweeping across the number. */
+@keyframes pill-sheen { to { background-position: -200% center; } }
+.pill-sheen {
+  background-image: linear-gradient(100deg, #e9c46a 0%, #e9c46a 42%, #fff4d8 50%, #e9c46a 58%, #e9c46a 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: pill-sheen 4.5s linear infinite;
+}
+
+/* Legend size-ramp dots — a gentle staggered pulse. */
+@keyframes ramp-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.ramp-dot { animation: ramp-pulse 2.6s ease-in-out infinite; }
+
+/* A thin scanning line under the section caption. */
+@keyframes caption-scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+.caption-scan::after {
+  content: "";
+  position: absolute;
+  left: 0; bottom: -3px;
+  height: 1px; width: 34%;
+  background: linear-gradient(90deg, transparent, var(--color-signal), transparent);
+  animation: caption-scan 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-sheen, .ramp-dot { animation: none; }
+  .caption-scan::after { animation: none; display: none; }
+}
+
 /* Overview hero — slow-drifting ambient glow. */
 @keyframes hero-drift {
   0%, 100% { transform: translate(0, 0); }
