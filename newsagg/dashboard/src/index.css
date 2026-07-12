@@ -137,3 +137,29 @@ body {
     animation: none;
   }
 }
+
+/* Overview hero — slow-drifting ambient glow. */
+@keyframes hero-drift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(22px, -18px); }
+}
+.hero-glow { animation: hero-drift 10s ease-in-out infinite; }
+
+/* A light sweep travelling across funnel bars. */
+@keyframes bar-sheen {
+  0% { transform: translateX(-130%); }
+  60%, 100% { transform: translateX(340%); }
+}
+.bar-sheen { position: relative; overflow: hidden; }
+.bar-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  transform: translateX(-130%);
+  animation: bar-sheen 2.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow { animation: none; }
+  .bar-sheen::after { animation: none; display: none; }
+}

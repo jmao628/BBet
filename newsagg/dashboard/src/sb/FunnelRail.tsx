@@ -85,7 +85,8 @@ function NavRow({
         <span className="block text-[10px] text-muted2">{hint}</span>
       </span>
       <span className="font-mono text-[13px] font-semibold text-text">
-        {count == null ? <span className="text-muted2">—</span> : count}
+        {/* overview is a landing page, not a counted stage → no "—" */}
+        {stage.key === "overview" ? null : count == null ? <span className="text-muted2">—</span> : count}
       </span>
     </button>
   );

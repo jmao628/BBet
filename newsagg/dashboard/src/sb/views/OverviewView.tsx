@@ -85,8 +85,8 @@ export function OverviewView() {
     <div className="view-in space-y-5">
       {/* HERO */}
       <div className="relative overflow-hidden rounded-2xl border border-line bg-panel2 p-6">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: "radial-gradient(circle,#3dd6c4,transparent 70%)" }} />
-        <div className="pointer-events-none absolute -left-10 bottom-0 h-40 w-40 rounded-full opacity-20 blur-3xl" style={{ background: "radial-gradient(circle,#e9c46a,transparent 70%)" }} />
+        <div className="hero-glow pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: "radial-gradient(circle,#3dd6c4,transparent 70%)" }} />
+        <div className="hero-glow pointer-events-none absolute -left-10 bottom-0 h-40 w-40 rounded-full opacity-20 blur-3xl" style={{ background: "radial-gradient(circle,#e9c46a,transparent 70%)", animationDelay: "3s" }} />
         <div className="relative">
           <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-signal">
             {t("Discovery Run", "发现总览")}
@@ -120,14 +120,15 @@ export function OverviewView() {
               onClick={() => setView(s.key)}
               className="group flex w-full items-center gap-3 text-left"
             >
-              <span className="w-16 flex-none text-[12px] text-muted group-hover:text-text">{s.label}</span>
-              <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-inset">
+              <span className="w-16 flex-none text-[12px] text-muted transition-colors group-hover:text-text">{s.label}</span>
+              <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-inset ring-1 ring-inset ring-transparent transition-all group-hover:ring-white/10">
                 <div
-                  className="flex h-full items-center justify-end rounded-lg px-3 transition-[width] duration-[900ms] ease-out"
+                  className="bar-sheen flex h-full items-center justify-end rounded-lg px-3 transition-[width,filter] duration-[900ms] ease-out group-hover:brightness-125"
                   style={{
                     width: grown ? `${Math.max(6, (s.n / maxN) * 100)}%` : "0%",
                     background: `linear-gradient(90deg, ${s.color}22, ${s.color})`,
                     transitionDelay: `${i * 110}ms`,
+                    boxShadow: `0 0 18px -6px ${s.color}`,
                   }}
                 >
                   <span className="font-mono text-[13px] font-semibold text-ink/90">{s.n}</span>
@@ -163,15 +164,22 @@ export function OverviewView() {
         {sectorTop.length > 0 && (
           <div className="rounded-2xl border border-line bg-panel2 p-5">
             <div className="mb-3 text-[13px] font-semibold">{t("Where the Action Is", "热点板块")}</div>
-            <div className="space-y-2">
-              {sectorTop.map(([sec, n]) => (
-                <div key={sec} className="flex items-center gap-2 text-[12px]">
-                  <span className="w-16 flex-none truncate text-muted">{sectorLabel(sec, lang)}</span>
+            <div className="space-y-1.5">
+              {sectorTop.map(([sec, n], i) => (
+                <button
+                  key={sec}
+                  onClick={() => setView("focus")}
+                  className="group flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-white/[0.04]"
+                >
+                  <span className="w-28 flex-none truncate text-muted group-hover:text-text">{sectorLabel(sec, lang)}</span>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-inset">
-                    <div className="h-full rounded-full bg-signal/70 transition-all duration-700" style={{ width: grown ? `${(n / sectorMax) * 100}%` : "0%" }} />
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-signal/50 to-signal transition-all duration-700 ease-out group-hover:from-signal group-hover:to-signal"
+                      style={{ width: grown ? `${(n / sectorMax) * 100}%` : "0%", transitionDelay: `${i * 70}ms` }}
+                    />
                   </div>
-                  <span className="w-6 flex-none text-right font-mono text-muted2">{n}</span>
-                </div>
+                  <span className="w-6 flex-none text-right font-mono text-muted2 group-hover:text-signal">{n}</span>
+                </button>
               ))}
             </div>
           </div>
