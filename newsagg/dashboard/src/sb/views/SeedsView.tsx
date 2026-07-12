@@ -17,6 +17,7 @@ export function SeedsView() {
   const noData = useMemo(() => noDataSet(technical), [technical]);
 
   const [thesisOnly, setThesisOnly] = useState(false);
+  const [source, setSource] = useState<"all" | "fresh" | "carried">("all");
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
 
   // Only CONFIRMED no-data OTC/foreign ADRs are dropped. A newly-added seed that
@@ -25,6 +26,11 @@ export function SeedsView() {
   const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
   const thesisCount = seeds.filter((r) => r.hasThesis).length;
+  // Carried-over = kept from a prior scrape (not in today's fresh pull); fresh
+  // = seen in today's scrape / a watchlist.
+  const isCarried = (r: { tags: string[] }) => r.tags.some((x) => /carried/i.test(x));
+  const carriedCount = seeds.filter(isCarried).length;
+  const freshCount = seeds.length - carriedCount;
 
   const sectorCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -37,6 +43,8 @@ export function SeedsView() {
 
   let rows = seeds;
   if (thesisOnly) rows = rows.filter((r) => r.hasThesis);
+  if (source === "fresh") rows = rows.filter((r) => !isCarried(r));
+  else if (source === "carried") rows = rows.filter((r) => isCarried(r));
   if (sectorFilter) rows = rows.filter((r) => sectorOf(r.ticker) === sectorFilter);
 
   return (
@@ -66,6 +74,26 @@ export function SeedsView() {
             {t("★ Analyst thesis", "★ 有分析师论点")} {thesisCount}
           </button>
         </div>
+        {/* fresh vs carried-over classification */}
+        {carriedCount > 0 && (
+          <div className="flex overflow-hidden rounded-lg border border-line">
+            {(
+              [
+                ["all", t("All", "全部"), seeds.length],
+                ["fresh", t("Fresh", "本次新抓"), freshCount],
+                ["carried", t("Carried over", "沿用"), carriedCount],
+              ] as const
+            ).map(([k, label, n]) => (
+              <button
+                key={k}
+                onClick={() => setSource(k)}
+                className={`px-3 py-1.5 text-[12px] ${source === k ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
+              >
+                {label} {n}
+              </button>
+            ))}
+          </div>
+        )}
         <span className="ml-auto font-mono text-[12px] text-muted2">{t(`${rows.length} rows · deduped`, `${rows.length} 条 · 已去重`)}</span>
       </div>
 

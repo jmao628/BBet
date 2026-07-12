@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -728,20 +729,48 @@ def _payload_tickers(payload: dict) -> set[str]:
     }
 
 
-def _merge_carryover(payload: dict, output_dir: Path) -> dict:
-    """Keep the seed universe cumulative — never shrink it on a weak scrape.
+def _merge_carryover(payload: dict, output_dir: Path, run_date: date) -> dict:
+    """Keep the seed universe cumulative, but bounded by a recency window.
 
-    A partial scrape (cookie weakened → fewer logged-in widgets, or SA changed a
-    section) would otherwise overwrite latest.json with fewer tickers, dropping
-    names the user expects to persist. So any ticker seen in ANY prior snapshot
-    (latest.json + every dated ``seekingalpha_YYYY-MM-DD.json``) but missing from
-    this run is carried forward in a "Carried Over" widget, with its most-recent
-    prior row data intact. Fresh scrapes still refresh every ticker they DO
-    return; only the gaps are back-filled, so the universe only ever grows.
+    A partial scrape (weakened cookie, SA layout change) would otherwise shrink
+    latest.json, dropping names the user expects to persist. So tickers missing
+    from this run are carried forward from prior snapshots. To stop the universe
+    growing without limit, a ticker is only carried while it has been SEEN FRESH
+    (in a real scrape or a manual watchlist) within the last ``CARRY_DAYS`` days
+    (env, default 30). Names that stop appearing for that long age out.
+
+    ``seed_seen.json`` = {ticker: last-fresh date} tracks this. On the very first
+    run with this window, everything already known is grandfathered to today so
+    nothing drops abruptly — the clock starts now.
     """
+    carry_days = int(os.environ.get("CARRY_DAYS", "30"))
+    seen_path = output_dir / "seed_seen.json"
+    try:
+        seen: dict[str, str] = json.loads(seen_path.read_text()) if seen_path.exists() else {}
+    except (ValueError, OSError):
+        seen = {}
+    first_time = not seen
+    today = run_date.isoformat()
+    cutoff = run_date - timedelta(days=carry_days) if carry_days > 0 else None
+
+    # Everything in THIS payload (fresh scrape + manual watchlists) = seen today.
     have = _payload_tickers(payload)
+    for tk in have:
+        seen[tk] = today
+
+    def recent(tk: str) -> bool:
+        if cutoff is None or first_time:
+            return True
+        d = seen.get(tk)
+        if not d:
+            return False
+        try:
+            return date.fromisoformat(d) >= cutoff
+        except ValueError:
+            return True
+
     carry: list[dict] = []
-    seen: set[str] = set()
+    done: set[str] = set()
     # Newest first (so the freshest prior row wins): "latest" sorts after dates.
     for path in sorted(output_dir.glob("seekingalpha_*.json"), reverse=True):
         try:
@@ -752,18 +781,29 @@ def _merge_carryover(payload: dict, output_dir: Path) -> dict:
             for g in w.get("groups", []):
                 for r in g.get("rows", []):
                     tk = (r.get("ticker") or "").strip().upper()
-                    if tk and tk not in have and tk not in seen:
-                        seen.add(tk)
+                    if tk and tk not in have and tk not in done and recent(tk):
+                        done.add(tk)
                         carry.append(r)
+                        if first_time:
+                            seen.setdefault(tk, today)  # grandfather in
+
     if carry:
         payload.setdefault("home_widgets", []).append(
             {
                 "title": "Carried Over",
-                "description": "seen in a prior scrape, kept so the seed universe never shrinks",
+                "description": "seen in a recent scrape, kept so the universe never shrinks on a weak run",
                 "groups": [{"label": "", "rows": carry}],
             }
         )
-        logger.info("carried over %d tickers from prior snapshots (universe kept cumulative)", len(carry))
+        logger.info("carried over %d tickers (within %d-day window)", len(carry), carry_days)
+
+    # Prune aged-out names from the tracker so it stays bounded too.
+    if cutoff and not first_time:
+        seen = {tk: d for tk, d in seen.items() if tk in have or recent(tk)}
+    try:
+        seen_path.write_text(json.dumps(seen))
+    except OSError:
+        pass
     return payload
 
 
@@ -783,8 +823,9 @@ def write_result(result: SAScrapeResult, output_dir: Path) -> Path:
         except (ValueError, OSError):
             pass
 
-    # Keep the universe cumulative so a partial scrape never drops seeds.
-    payload = _merge_carryover(payload, output_dir)
+    # Keep the universe cumulative (bounded to a recency window) so a partial
+    # scrape never drops seeds, but stale names age out.
+    payload = _merge_carryover(payload, output_dir, result.generated_at.date())
 
     latest.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     day = result.generated_at.date().isoformat()
