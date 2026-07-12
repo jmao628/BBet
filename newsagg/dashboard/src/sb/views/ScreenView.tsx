@@ -99,12 +99,16 @@ export function ScreenView() {
     return rows;
   }, [supplychain, data, marketCaps]);
 
+  // A target only shows in the graph if it links to a same-sector mega-cap
+  // SUPPLIER (that's what the graph draws). Count those, so the chip number
+  // matches what actually appears.
+  const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string }[] }) => {
+    const sec = sectorOf(r.ticker);
+    return !!sec && r.neighbors.some((n) => n.anchor && n.kind === "upstream" && sectorOf(n.ticker) === sec);
+  };
   const ecoSectorCounts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const r of links) {
-      const s = sectorOf(r.ticker);
-      if (s) c.set(s, (c.get(s) ?? 0) + 1);
-    }
+    for (const r of links) if (graphEligible(r)) c.set(sectorOf(r.ticker), (c.get(sectorOf(r.ticker)) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [links, sectors]);
@@ -354,21 +358,18 @@ function EcoGraph({
   t: (en: string, zh: string) => string;
 }) {
   const TOPT = 24;
-  const pool = rows.filter((r) => r.anchors > 0).slice(0, TOPT);
+  const isSupplier = (n: EcoNeighbor) => n.anchor && n.kind === "upstream" && (!sector || sectorOf(n.ticker) === sector);
+  // A target qualifies if it links to a same-sector mega-cap SUPPLIER (the count
+  // shown in the sector chip). Peers/customers-only mega-caps (UBER) don't count.
+  const eligible = rows.filter((r) => r.neighbors.some(isSupplier));
+  const total = eligible.length;
+  const targets = eligible.slice(0, TOPT);
 
-  // Anchors = mega-caps in the SAME SECTOR that act as an UPSTREAM SUPPLIER to
-  // the targets (kind === "upstream"). Peers / customers-only mega-caps (e.g.
-  // UBER) are NOT supply-chain hubs, so they're excluded. Pick the most-cited
-  // suppliers, cap the ring.
+  // The supplier anchors, most-cited first (cap the ring).
   const freq = new Map<string, number>();
-  for (const r of pool)
-    for (const n of r.neighbors)
-      if (n.anchor && n.kind === "upstream" && (!sector || sectorOf(n.ticker) === sector))
-        freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
-  const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map((e) => e[0]);
+  for (const r of eligible) for (const n of r.neighbors) if (isSupplier(n)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
+  const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).map((e) => e[0]);
   const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
-
-  const targets = pool.filter((r) => r.neighbors.some((n) => n.anchor && anchorIdx.has(n.ticker)));
   if (!targets.length || !anchors.length) {
     return (
       <div className="py-10 text-center text-[12.5px] text-muted">
@@ -413,8 +414,8 @@ function EcoGraph({
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `Top ${targets.length} supplier-linked targets · ${anchors.length} suppliers · glowing = on your Focus List · click any node`,
-          `关联最强的 ${targets.length} 个目标 · ${anchors.length} 个供应商 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
+          `${total > TOPT ? `Top ${targets.length} of ${total}` : `${total}`} supplier-linked targets · ${anchors.length} suppliers · glowing = on your Focus List · click any node`,
+          `${total > TOPT ? `前 ${targets.length} / 共 ${total}` : `${total}`} 个供应商关联目标 · ${anchors.length} 个供应商 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
