@@ -1,26 +1,343 @@
-import { useEffect, useMemo, useState } from "react";
-import { useStore, useT, type ViewKey } from "../../store";
-import {
-  buildSeeds,
-  buildRankings,
-  buildScreen,
-  buildFocus,
-  noDataSet,
-  sectorLabel,
-} from "../pipeline";
+import { useEffect, useMemo, useRef } from "react";
+import { useStore, useT } from "../../store";
+import { buildFocus, companyMap, noDataSet, sectorLabel } from "../pipeline";
 
-// A dynamic "today's run" landing page: a synthesized snapshot + the actionable
-// top picks + data freshness — deliberately NOT a repeat of the funnel nav.
+// The landing page: a live, interactive "strong-buy universe" globe (every
+// strong-buy name orbits as a glowing node, sized by today's move) sitting on
+// top of a per-sector leaderboard where every name is reachable by scrolling.
 
-function timeAgo(iso: string | null | undefined, t: (en: string, zh: string) => string): string {
-  if (!iso) return t("never", "从未");
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.round(ms / 60000);
-  if (m < 1) return t("just now", "刚刚");
-  if (m < 60) return t(`${m}m ago`, `${m} 分钟前`);
-  const h = Math.round(m / 60);
-  if (h < 24) return t(`${h}h ago`, `${h} 小时前`);
-  return t(`${Math.round(h / 24)}d ago`, `${Math.round(h / 24)} 天前`);
+interface Mover {
+  ticker: string;
+  company: string;
+  sector: string;
+  changePct: number;
+  onFocus: boolean;
+}
+
+const SECTOR_COLOR: Record<string, string> = {
+  Technology: "#5fb0e8",
+  "Financial Services": "#e9c46a",
+  "Consumer Cyclical": "#e879a6",
+  Healthcare: "#48c78e",
+  Energy: "#f4a261",
+  "Consumer Defensive": "#3dd6c4",
+  Industrials: "#9b8cf0",
+  "Basic Materials": "#c98a5e",
+  "Communication Services": "#6ee7d6",
+  Utilities: "#7fa8c9",
+  "Real Estate": "#d4a373",
+};
+const secColor = (s: string) => SECTOR_COLOR[s] ?? "#8aa0b4";
+
+function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// ── The rotating globe ──────────────────────────────────────────────────────
+function StrongBuyGlobe({
+  movers,
+  onPick,
+}: {
+  movers: Mover[];
+  onPick: (t: string) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // mutable render/interaction state (kept off React to avoid re-renders)
+  const st = useRef({
+    yaw: 0,
+    dragging: false,
+    moved: false,
+    lastX: 0,
+    hover: -1,
+    projected: [] as { x: number; y: number; r: number; i: number }[],
+  });
+
+  // stable lat/lon per ticker so a name always sits in the same place
+  const pts = useMemo(
+    () =>
+      movers.slice(0, 150).map((m) => {
+        const u = (hash(m.ticker) % 997) / 997;
+        const v = (hash(m.ticker + "^") % 991) / 991;
+        return { ...m, lat: Math.asin(2 * u - 1), lon: v * Math.PI * 2 };
+      }),
+    [movers],
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const tilt = -0.34; // slight pitch so the poles show
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    // the handful of names we ever label (biggest movers), to keep it uncluttered
+    const topSet = new Set(
+      [...pts]
+        .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
+        .slice(0, 6)
+        .map((p) => pts.indexOf(p)),
+    );
+
+    const rot = (lat: number, lon: number, yaw: number) => {
+      const l = lon + yaw;
+      const x = Math.cos(lat) * Math.sin(l);
+      const y0 = Math.sin(lat);
+      const z0 = Math.cos(lat) * Math.cos(l);
+      return {
+        x,
+        y: y0 * Math.cos(tilt) - z0 * Math.sin(tilt),
+        z: y0 * Math.sin(tilt) + z0 * Math.cos(tilt),
+      };
+    };
+
+    let raf = 0;
+    let last = performance.now();
+    const frame = (now: number) => {
+      const dt = Math.min(now - last, 50);
+      last = now;
+      const s = st.current;
+      if (!s.dragging) s.yaw += 0.0022 * (dt / 16.7);
+
+      const W = canvas.width,
+        H = canvas.height;
+      const cx = W / 2,
+        cy = H / 2;
+      const R = Math.min(W, H) * 0.4;
+      ctx.clearRect(0, 0, W, H);
+
+      // atmosphere
+      const glow = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 1.6);
+      glow.addColorStop(0, "rgba(61,214,196,0.12)");
+      glow.addColorStop(0.55, "rgba(61,214,196,0.03)");
+      glow.addColorStop(1, "rgba(61,214,196,0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
+
+      // wireframe — latitudes
+      ctx.lineWidth = dpr;
+      for (let li = -2; li <= 2; li++) {
+        const lat = (li * Math.PI) / 6;
+        ctx.beginPath();
+        for (let a = 0; a <= 72; a++) {
+          const p = rot(lat, (a / 72) * Math.PI * 2, s.yaw);
+          const sx = cx + p.x * R,
+            sy = cy - p.y * R;
+          a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
+        }
+        ctx.strokeStyle = "rgba(125,155,180,0.10)";
+        ctx.stroke();
+      }
+      // wireframe — meridians
+      for (let mi = 0; mi < 12; mi++) {
+        const lon = (mi * Math.PI) / 6;
+        ctx.beginPath();
+        for (let a = 0; a <= 72; a++) {
+          const p = rot(-Math.PI / 2 + (a / 72) * Math.PI, lon, s.yaw);
+          const sx = cx + p.x * R,
+            sy = cy - p.y * R;
+          a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
+        }
+        ctx.strokeStyle = "rgba(125,155,180,0.07)";
+        ctx.stroke();
+      }
+      // rim
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(125,155,180,0.20)";
+      ctx.lineWidth = dpr * 1.1;
+      ctx.stroke();
+
+      // nodes — draw back-to-front for correct occlusion
+      const proj = pts
+        .map((p, i) => ({ i, ...rot(p.lat, p.lon, s.yaw) }))
+        .sort((a, b) => a.z - b.z);
+      s.projected = [];
+      const labels: { x: number; y: number; text: string; up: boolean }[] = [];
+      for (const q of proj) {
+        const p = pts[q.i];
+        const sx = cx + q.x * R,
+          sy = cy - q.y * R;
+        const persp = 0.55 + ((q.z + 1) / 2) * 0.7;
+        const mag = Math.min(Math.abs(p.changePct) / 8, 1);
+        const rad = (2.2 + mag * 4.6) * persp * dpr;
+        const up = p.changePct >= 0;
+        const front = q.z > 0;
+        const a = front ? 1 : 0.25;
+        const col = up ? "61,214,196" : "232,120,120";
+        const hovered = s.hover === q.i;
+        ctx.beginPath();
+        ctx.arc(sx, sy, hovered ? rad * 1.5 : rad, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${col},${(hovered ? 1 : 0.9) * a})`;
+        ctx.shadowBlur = (8 + mag * 16) * persp;
+        ctx.shadowColor = `rgba(${col},${a})`;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        if (hovered) {
+          ctx.beginPath();
+          ctx.arc(sx, sy, rad * 1.5 + 3 * dpr, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${col},0.9)`;
+          ctx.lineWidth = dpr;
+          ctx.stroke();
+        }
+        if (front) {
+          s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 7), i: q.i });
+          if (hovered || (topSet.has(q.i) && q.z > 0.2))
+            labels.push({ x: sx, y: sy - rad - 4 * dpr, text: p.ticker, up });
+        }
+      }
+      // labels last so they sit above nodes
+      ctx.font = `600 ${11 * dpr}px ui-monospace, SFMono-Regular, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      for (const l of labels) {
+        ctx.fillStyle = "rgba(6,10,16,0.7)";
+        const w = ctx.measureText(l.text).width + 8 * dpr;
+        ctx.fillRect(l.x - w / 2, l.y - 13 * dpr, w, 14 * dpr);
+        ctx.fillStyle = l.up ? "rgba(120,235,215,1)" : "rgba(240,150,150,1)";
+        ctx.fillText(l.text, l.x, l.y);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [pts]);
+
+  // ── pointer interaction ──
+  const hitTest = (x: number, y: number) => {
+    let best = -1,
+      bd = Infinity;
+    for (const p of st.current.projected) {
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < p.r + 6 && d < bd) {
+        bd = d;
+        best = p.i;
+      }
+    }
+    return best;
+  };
+  const onDown = (e: React.PointerEvent) => {
+    const s = st.current;
+    s.dragging = true;
+    s.moved = false;
+    s.lastX = e.clientX;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const s = st.current;
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    if (s.dragging) {
+      const dx = e.clientX - s.lastX;
+      if (Math.abs(dx) > 2) s.moved = true;
+      s.yaw += dx * 0.008;
+      s.lastX = e.clientX;
+    } else {
+      s.hover = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+      (e.target as HTMLElement).style.cursor = s.hover >= 0 ? "pointer" : "grab";
+    }
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const s = st.current;
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    if (s.dragging && !s.moved) {
+      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+      if (hit >= 0) onPick(pts[hit].ticker);
+    }
+    s.dragging = false;
+  };
+  const onLeave = () => {
+    st.current.hover = -1;
+    st.current.dragging = false;
+  };
+
+  return (
+    <canvas
+      ref={canvasRef}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerLeave={onLeave}
+      className="h-full w-full touch-none select-none"
+      style={{ cursor: "grab" }}
+    />
+  );
+}
+
+function MoverRow({
+  rank,
+  m,
+  max,
+  color,
+  onClick,
+  lang,
+}: {
+  rank: number;
+  m: Mover;
+  max: number;
+  color: string;
+  onClick: () => void;
+  lang: "en" | "zh";
+}) {
+  const up = m.changePct >= 0;
+  const top = rank === 1;
+  return (
+    <button
+      onClick={onClick}
+      className={`group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04] ${
+        top ? "bg-white/[0.03] ring-1 ring-inset" : ""
+      }`}
+      style={top ? { boxShadow: `inset 0 0 0 1px ${color}44` } : undefined}
+    >
+      <span
+        className="grid h-5 w-5 flex-none place-items-center rounded font-mono text-[10px] font-semibold"
+        style={{
+          background: top ? color : "transparent",
+          color: top ? "#08131a" : "#7b8da0",
+        }}
+      >
+        {rank}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-[13px] font-semibold text-text">{m.ticker}</span>
+          {m.onFocus && <span className="text-[10px] text-gold" title={lang === "zh" ? "在重点名单" : "on Focus List"}>★</span>}
+        </span>
+        <span className="block truncate text-[11px] text-muted2">{m.company}</span>
+      </span>
+      <span className="flex flex-none items-center gap-2">
+        <span className="h-1.5 w-14 overflow-hidden rounded-full bg-inset">
+          <span
+            className="block h-full rounded-full"
+            style={{
+              width: `${Math.max(6, (Math.abs(m.changePct) / max) * 100)}%`,
+              background: up ? "linear-gradient(90deg,#2fae9e,#3dd6c4)" : "linear-gradient(90deg,#c96,#e88)",
+            }}
+          />
+        </span>
+        <span className={`w-16 text-right font-mono text-[12.5px] font-semibold ${up ? "text-ok" : "text-bad"}`}>
+          {up ? "+" : ""}
+          {m.changePct.toFixed(2)}%
+        </span>
+      </span>
+    </button>
+  );
 }
 
 export function OverviewView() {
@@ -30,160 +347,119 @@ export function OverviewView() {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
-  const setView = useStore((s) => s.setView);
+  const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
 
-  const noData = useMemo(() => noDataSet(technical), [technical]);
-  const seeds = useMemo(() => buildSeeds(data).filter((r) => !noData.has(r.ticker)), [data, noData]);
-  const advancing = useMemo(
-    () => (heat || technical ? buildRankings(data, heat, technical, marketCaps).advancing.size : 0),
-    [data, heat, technical, marketCaps],
-  );
-  const screenN = useMemo(
-    () => (heat || technical ? buildScreen(data, heat, marketCaps, technical).candidates.length : 0),
-    [data, heat, technical, marketCaps],
-  );
-  const focus = useMemo(
-    () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
-    [data, heat, technical, marketCaps, sectors, supplychain],
-  );
-  const coreN = focus.filter((f) => f.core).length;
+  const focusSet = useMemo(() => {
+    const f = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
+    return new Set(f.map((x) => x.ticker));
+  }, [data, heat, technical, marketCaps, sectors, supplychain]);
 
-  // top sectors among the graded focus list
-  const sectorTop = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const f of focus) if (f.sector) m.set(f.sector, (m.get(f.sector) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, [focus]);
-  const sectorMax = sectorTop[0]?.[1] ?? 1;
+  const movers = useMemo<Mover[]>(() => {
+    const noData = noDataSet(technical);
+    const cmap = companyMap(data);
+    const out: Mover[] = [];
+    for (const [ticker, tt] of Object.entries(technical?.tickers ?? {})) {
+      if (noData.has(ticker)) continue;
+      if (tt.gauge?.summary !== "strong_buy") continue;
+      out.push({
+        ticker,
+        company: cmap.get(ticker) ?? "",
+        sector: sectors?.[ticker]?.sector ?? "",
+        changePct: tt.change_pct ?? 0,
+        onFocus: focusSet.has(ticker),
+      });
+    }
+    return out.sort((a, b) => b.changePct - a.changePct);
+  }, [technical, data, sectors, focusSet]);
 
-  // animate the funnel bars in on mount
-  const [grown, setGrown] = useState(false);
-  useEffect(() => {
-    const id = setTimeout(() => setGrown(true), 60);
-    return () => clearTimeout(id);
-  }, []);
-
-  const stages: { key: ViewKey; label: string; n: number; color: string }[] = [
-    { key: "seeds", label: t("Seeds", "种子"), n: seeds.length, color: "#5a6a7c" },
-    { key: "heat", label: t("Attention", "被关注"), n: advancing, color: "#5fb0e8" },
-    { key: "screen", label: t("Quality", "质量"), n: screenN, color: "#3dd6c4" },
-    { key: "focus", label: t("Focus", "重点"), n: focus.length, color: "#48c78e" },
-    { key: "focus", label: t("★ Core", "★ 核心"), n: coreN, color: "#e9c46a" },
-  ];
-  const maxN = Math.max(1, ...stages.map((s) => s.n));
-
-  const fresh = [
-    { label: t("Seed scrape", "种子抓取"), iso: data?.generated_at },
-    { label: t("Technical", "技术数据"), iso: technical?.generated_at },
-    { label: t("Social heat", "社交热度"), iso: heat?.generated_at },
-    { label: t("Ecosystem", "生态图"), iso: supplychain ? data?.generated_at : null },
-  ];
+  const bySector = useMemo(() => {
+    const m = new Map<string, Mover[]>();
+    for (const mv of movers) {
+      const key = mv.sector || "Other";
+      const arr = m.get(key);
+      if (arr) arr.push(mv);
+      else m.set(key, [mv]);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => b.changePct - a.changePct);
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [movers]);
 
   return (
     <div className="view-in space-y-5">
-      {/* HERO */}
-      <div className="relative overflow-hidden rounded-2xl border border-line bg-panel2 p-6">
-        <div className="hero-glow pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full opacity-30 blur-3xl" style={{ background: "radial-gradient(circle,#3dd6c4,transparent 70%)" }} />
-        <div className="hero-glow pointer-events-none absolute -left-10 bottom-0 h-40 w-40 rounded-full opacity-20 blur-3xl" style={{ background: "radial-gradient(circle,#e9c46a,transparent 70%)", animationDelay: "3s" }} />
-        <div className="relative">
-          <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-signal">
-            {t("Discovery Run", "发现总览")}
-            <span className="text-muted2">· {data?.generated_at?.slice(0, 10) ?? "—"}</span>
-            <span className="flex items-center gap-1 text-ok">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ok" /> {t("LIVE", "实时")}
-            </span>
-          </div>
-          <h1 className="font-disp text-[30px] font-semibold tracking-tight">
-            {t("Today's Run", "当日运行")}
-          </h1>
-          <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-muted">
-            {t("From ", "从 ")}
-            <b className="text-text">{seeds.length}</b>
-            {t(" bullish seeds, the machine graded ", " 只看多种子出发，机器筛出 ")}
-            <b className="text-signal">{focus.length}</b>
-            {t(" onto the Focus List and converged on ", " 只进入重点名单，并收敛出 ")}
-            <b className="text-gold">{coreN}</b>
-            {t(" ★ Core picks — buy + attention + ecosystem all aligned.", " 只 ★ 核心票（买入 + 被关注 + 生态 全部对齐）。")}
-          </p>
-        </div>
+      {/* header */}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="flex items-center gap-2.5 font-disp text-[22px] font-semibold tracking-tight">
+          {t("Strong-Buy Leaderboard", "强力买入榜")}
+          <span className="rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 font-mono text-[12px] font-semibold text-gold">
+            {movers.length}
+          </span>
+        </h1>
+        <span className="font-mono text-[11px] text-muted2">
+          {t("ranked by today's move · grouped by sector · click to open", "按当日涨跌排名 · 按板块分组 · 点击查看")}
+        </span>
       </div>
 
-      {/* ANIMATED FUNNEL FLOW */}
-      <div className="rounded-2xl border border-line bg-panel2 p-5">
-        <div className="mb-4 text-[13px] font-semibold text-muted">{t("The Funnel · today", "漏斗 · 当日收敛")}</div>
-        <div className="space-y-2.5">
-          {stages.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => setView(s.key)}
-              className="group flex w-full items-center gap-3 text-left"
-            >
-              <span className="w-16 flex-none text-[12px] text-muted transition-colors group-hover:text-text">{s.label}</span>
-              <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-inset ring-1 ring-inset ring-transparent transition-all group-hover:ring-white/10">
-                <div
-                  className="bar-sheen flex h-full items-center justify-end rounded-lg px-3 transition-[width,filter] duration-[900ms] ease-out group-hover:brightness-125"
-                  style={{
-                    width: grown ? `${Math.max(6, (s.n / maxN) * 100)}%` : "0%",
-                    background: `linear-gradient(90deg, ${s.color}22, ${s.color})`,
-                    transitionDelay: `${i * 110}ms`,
-                    boxShadow: `0 0 18px -6px ${s.color}`,
-                  }}
-                >
-                  <span className="font-mono text-[13px] font-semibold text-ink/90">{s.n}</span>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* FRESHNESS + SECTOR HEAT */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* freshness */}
-        <div className="rounded-2xl border border-line bg-panel2 p-5">
-          <div className="mb-3 text-[13px] font-semibold">{t("Data Freshness", "数据新鲜度")}</div>
-          <div className="space-y-2.5">
-            {fresh.map((f) => {
-              const stale = f.iso ? Date.now() - new Date(f.iso).getTime() > 36 * 3600e3 : true;
-              return (
-                <div key={f.label} className="flex items-center justify-between text-[12px]">
-                  <span className="flex items-center gap-2 text-muted">
-                    <span className={`h-1.5 w-1.5 rounded-full ${f.iso ? (stale ? "bg-warn" : "animate-pulse bg-ok") : "bg-dead"}`} />
-                    {f.label}
-                  </span>
-                  <span className="font-mono text-muted2">{timeAgo(f.iso, t)}</span>
-                </div>
-              );
-            })}
+      {/* GLOBE HERO */}
+      <div className="relative overflow-hidden rounded-2xl border border-line bg-panel2">
+        <div className="pointer-events-none absolute left-5 top-4 z-[1]">
+          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-signal">
+            {t("Strong-Buy Universe", "强力买入星图")}
+          </div>
+          <div className="mt-1 text-[12px] text-muted2">
+            {t(
+              `${movers.length} names in orbit · drag to spin · click a node`,
+              `${movers.length} 只在轨 · 拖动旋转 · 点击节点`,
+            )}
           </div>
         </div>
-
-        {/* sector heat */}
-        {sectorTop.length > 0 && (
-          <div className="rounded-2xl border border-line bg-panel2 p-5">
-            <div className="mb-3 text-[13px] font-semibold">{t("Where the Action Is", "热点板块")}</div>
-            <div className="space-y-1.5">
-              {sectorTop.map(([sec, n], i) => (
-                <button
-                  key={sec}
-                  onClick={() => setView("focus")}
-                  className="group flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-white/[0.04]"
-                >
-                  <span className="w-28 flex-none truncate text-muted group-hover:text-text">{sectorLabel(sec, lang)}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-inset">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-signal/50 to-signal transition-all duration-700 ease-out group-hover:from-signal group-hover:to-signal"
-                      style={{ width: grown ? `${(n / sectorMax) * 100}%` : "0%", transitionDelay: `${i * 70}ms` }}
-                    />
-                  </div>
-                  <span className="w-6 flex-none text-right font-mono text-muted2 group-hover:text-signal">{n}</span>
-                </button>
-              ))}
+        <div className="pointer-events-none absolute right-5 top-4 z-[1] flex items-center gap-3 font-mono text-[10.5px] text-muted2">
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#3dd6c4", boxShadow: "0 0 8px #3dd6c4" }} /> {t("up", "涨")}</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "#e88", boxShadow: "0 0 8px #e88" }} /> {t("down", "跌")}</span>
+          <span>{t("size = today's move", "大小 = 当日幅度")}</span>
+        </div>
+        <div className="h-[380px] w-full">
+          {movers.length > 0 ? (
+            <StrongBuyGlobe movers={movers} onPick={openDetail} />
+          ) : (
+            <div className="grid h-full place-items-center text-[13px] text-muted">
+              {t("No strong-buy names yet — run the technical job.", "暂无强力买入标的 — 先跑技术数据。")}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
+
+      {/* SECTOR LEADERBOARD GRID — every name reachable by scrolling inside a card */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {bySector.map(([sec, rows]) => {
+          const color = secColor(sec);
+          const max = Math.max(...rows.map((r) => Math.abs(r.changePct)), 0.01);
+          return (
+            <div key={sec} className="flex flex-col overflow-hidden rounded-2xl border border-line bg-panel2">
+              <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
+                <span className="flex items-center gap-2 text-[13px] font-semibold">
+                  <span className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                  {sectorLabel(sec === "Other" ? undefined : sec, lang)}
+                </span>
+                <span className="font-mono text-[11px] text-muted2">{rows.length}</span>
+              </header>
+              <div className="max-h-[340px] overflow-y-auto p-1.5">
+                {rows.map((m, i) => (
+                  <MoverRow
+                    key={m.ticker}
+                    rank={i + 1}
+                    m={m}
+                    max={max}
+                    color={color}
+                    lang={lang}
+                    onClick={() => openDetail(m.ticker)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
