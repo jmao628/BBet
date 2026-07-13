@@ -5,8 +5,6 @@ import {
   capLabel,
   sectorLabel,
   SUSTAINED_DAYS,
-  FOCUS_ATTN_BAR,
-  FOCUS_RVOL_BAR,
   FOCUS_ECO_LINKS,
   type FocusItem,
 } from "../pipeline";
@@ -20,7 +18,7 @@ const GRP_COLOR: Record<string, string> = {
 };
 
 type FilterKey = "all" | "core" | "both" | "strong" | "sustained" | "linked";
-type SortKey = "gates" | "score" | "attn" | "links" | "rvol" | "streak";
+type SortKey = "gates" | "score" | "links" | "rvol" | "streak";
 
 export function FocusView() {
   const data = useStore((s) => s.data);
@@ -64,23 +62,21 @@ export function FocusView() {
     else if (filter === "linked") rows = rows.filter((i) => i.links > 0);
     if (sector) rows = rows.filter((i) => i.sector === sector);
     const key = (i: FocusItem) =>
-      sort === "attn"
-        ? (i.attnScore ?? -1)
-        : sort === "links"
-          ? i.ecoWeight
-          : sort === "rvol"
-            ? (i.rvol ?? -1)
-            : sort === "streak"
-              ? i.buyStreak
-              : sort === "gates"
-                ? i.gates
-                : i.score;
+      sort === "links"
+        ? i.ecoWeight
+        : sort === "rvol"
+          ? (i.rvol ?? -1)
+          : sort === "streak"
+            ? i.buyStreak
+            : sort === "gates"
+              ? i.gates
+              : i.score;
     return [...rows].sort((a, b) => key(b) - key(a) || b.score - a.score);
   }, [all, filter, sector, sort]);
 
   const FILTERS: { k: FilterKey; label: string; n: number }[] = [
     { k: "all", label: t("All", "全部"), n: all.length },
-    { k: "core", label: t("★ Core (3 hard)", "★ 核心(三硬)"), n: coreN },
+    { k: "core", label: t("★ Core (2 hard)", "★ 核心(两硬)"), n: coreN },
     { k: "both", label: t("3+ gates", "≥3 闸"), n: g3N },
     { k: "strong", label: t("Strong Buy", "强力买入"), n: strongN },
     { k: "sustained", label: t(`Sustained ${SUSTAINED_DAYS}d`, `持续买入 ${SUSTAINED_DAYS} 天`), n: sustainedN },
@@ -90,7 +86,6 @@ export function FocusView() {
     { k: "gates", label: t("Gates", "过闸数") },
     { k: "score", label: t("Composite", "综合分") },
     { k: "streak", label: t("Buy streak", "买入连续") },
-    { k: "attn", label: t("Attention", "注意力") },
     { k: "links", label: t("Ecosystem", "生态权重") },
     { k: "rvol", label: "RVOL" },
   ];
@@ -101,8 +96,8 @@ export function FocusView() {
         eyebrow={t("Step 2 · Output", "第 2 步 · 输出")}
         title={t("Focus List · Graded, Not Cut", "重点名单 · 分级不砍")}
         desc={t(
-          `Inclusive on purpose — nothing is dropped prematurely; the deeper stages (catalyst + earnings-call) do the fine cut. Each name is GRADED by how many of four independent signals fire: BUY (strong-buy or ${SUSTAINED_DAYS}-day sustained) · ATTENTION (attn ≥${FOCUS_ATTN_BAR} or RVOL ≥${FOCUS_RVOL_BAR}) · ECOSYSTEM (tied to a mega-cap anchor, or ≥${FOCUS_ECO_LINKS} in-universe links) · THESIS (analyst write-up — a bonus, since it can't be scraped in full). Ecosystem is weighted heavily and by CRITICALITY: an edge that's sole-source / hard-to-replace (importance 3) counts most. Sorted by gates, then an ecosystem-heavy composite. ★ Core = the three hard signals (buy + attention + ecosystem) all fire.`,
-          `刻意做成包容——不提前砍票,精挑留给后面的催化剂+财报电话。每只票按"过了几个信号闸"分级,共四闸:买入(强买 或 连续${SUSTAINED_DAYS}天) · 被关注(注意力≥${FOCUS_ATTN_BAR} 或 RVOL≥${FOCUS_RVOL_BAR}) · 生态(挂靠大票锚,或 ≥${FOCUS_ECO_LINKS} 个 universe 内关联) · 论点(分析师发文——加分项,因为抓不全)。生态权重很高且按"关键度"算:某条关系越是独家/非他不可(importance 3)分越高。先按过闸数排,再按生态加权综合分。★ 核心 = 三个硬信号(买入+被关注+生态)全中。`,
+          `Inclusive on purpose — nothing is dropped prematurely; the deeper stages (catalyst + earnings-call) do the fine cut. Each name is GRADED by how many of three independent signals fire: BUY (strong-buy or ${SUSTAINED_DAYS}-day sustained) · ECOSYSTEM (tied to a mega-cap anchor, or ≥${FOCUS_ECO_LINKS} in-universe links) · THESIS (analyst write-up — a bonus, since it can't be scraped in full). Ecosystem is weighted heavily and by CRITICALITY: an edge that's sole-source / hard-to-replace (importance 3) counts most. Sorted by gates, then an ecosystem-heavy composite. ★ Core = both hard signals (buy + ecosystem) fire.`,
+          `刻意做成包容——不提前砍票,精挑留给后面的催化剂+财报电话。每只票按"过了几个信号闸"分级,共三闸:买入(强买 或 连续${SUSTAINED_DAYS}天) · 生态(挂靠大票锚,或 ≥${FOCUS_ECO_LINKS} 个 universe 内关联) · 论点(分析师发文——加分项,因为抓不全)。生态权重很高且按"关键度"算:某条关系越是独家/非他不可(importance 3)分越高。先按过闸数排,再按生态加权综合分。★ 核心 = 两个硬信号(买入+生态)全中。`,
         )}
         actions={<MethodInfo />}
       />
@@ -110,7 +105,7 @@ export function FocusView() {
       <StatStrip
         stats={[
           { k: t("On the list", "名单内"), v: all.length, d: t("any signal, graded", "任一信号,分级"), color: "#3dd6c4" },
-          { k: t("★ Core", "★ 核心"), v: coreN, d: t("3 hard signals", "三硬信号全中"), color: "#f2a73c" },
+          { k: t("★ Core", "★ 核心"), v: coreN, d: t("2 hard signals", "两硬信号全中"), color: "#f2a73c" },
           { k: t("3+ gates", "≥3 闸"), v: g3N, d: t("high conviction", "高信度"), color: "#48c78e" },
           { k: t("Strong Buy", "强力买入"), v: strongN, d: t("gauge = strong buy", "表针=强买") },
         ]}
@@ -228,7 +223,6 @@ function FocusTable({
             <th className="px-3 py-2 text-right font-medium">#</th>
             <th className="px-3 py-2 text-left font-medium">{t("Ticker", "标的")}</th>
             <th className="px-3 py-2 text-left font-medium">{t("Signals", "信号")}</th>
-            <th className="px-2 py-2 text-right font-medium">{t("Attn", "注意力")}</th>
             <th className="px-2 py-2 text-right font-medium">{t("Eco", "生态")}</th>
             <th className="px-3 py-2 text-right font-medium">{t("Score", "综合分")}</th>
           </tr>
@@ -254,10 +248,9 @@ function FocusTable({
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
                     <Dot on={i.gBuy} c="#48c78e" title={t("Buy", "买入")} />
-                    <Dot on={i.gAttn} c="#3dd6c4" title={t("Attention", "被关注")} />
                     <Dot on={i.gEco} c={i.anchors > 0 ? "#e9c46a" : "#5fb0e8"} title={t("Ecosystem", "生态")} />
                     <Dot on={i.gThesis} c="#8aa" title={t("Thesis", "论点")} />
-                    <span className="ml-1 font-mono text-[11px] text-muted2">{i.gates}/4</span>
+                    <span className="ml-1 font-mono text-[11px] text-muted2">{i.gates}/3</span>
                     {i.buyStreak >= SUSTAINED_DAYS && (
                       <span className="ml-1 rounded bg-ok/10 px-1 text-[9.5px] font-medium text-ok">
                         {t(`${i.buyStreak}d`, `${i.buyStreak}天`)}
@@ -265,10 +258,6 @@ function FocusTable({
                     )}
                     {i.strongBuy && <span className="ml-0.5 rounded bg-gold/10 px-1 text-[9.5px] font-medium text-gold">SB</span>}
                   </div>
-                </td>
-                <td className="px-2 py-2 text-right font-mono tabular-nums text-[12px]">
-                  {i.attnScore ?? "—"}
-                  <span className="text-muted2">{i.rvol != null ? ` ${i.rvol.toFixed(1)}×` : ""}</span>
                 </td>
                 <td className="px-2 py-2 text-right font-mono tabular-nums text-[12px]">
                   {i.links > 0 ? (
@@ -364,7 +353,6 @@ function FocusCard({
   const accent = item.core ? "#e9c46a" : item.gates >= 3 ? "#3dd6c4" : "#3a4a5a";
   const gateDefs: { on: boolean; c: string; label: string }[] = [
     { on: item.gBuy, c: "#48c78e", label: t("Buy", "买") },
-    { on: item.gAttn, c: "#3dd6c4", label: t("Attn", "注") },
     { on: item.gEco, c: item.anchors > 0 ? "#e9c46a" : "#5fb0e8", label: t("Eco", "生") },
     { on: item.gThesis, c: "#9aa7b3", label: t("Thesis", "论") },
   ];
@@ -428,7 +416,7 @@ function FocusCard({
             <span className="ml-0.5 text-[11px] text-muted2">/10</span>
           </div>
           {/* segmented gate meter */}
-          <div className="flex items-center gap-1" title={`${item.gates}/4`}>
+          <div className="flex items-center gap-1" title={`${item.gates}/3`}>
             {gateDefs.map((g, i) => (
               <span
                 key={i}
@@ -437,27 +425,9 @@ function FocusCard({
                 style={{ background: g.on ? g.c : "#26323d", boxShadow: g.on ? `0 0 6px ${g.c}88` : "none" }}
               />
             ))}
-            <span className="ml-0.5 font-mono text-[10px] text-muted2">{item.gates}/4</span>
+            <span className="ml-0.5 font-mono text-[10px] text-muted2">{item.gates}/3</span>
           </div>
         </div>
-      </div>
-
-      {/* attention bar */}
-      <div className="relative mt-2.5 flex items-center gap-2">
-        <span className="w-8 flex-none text-[9px] uppercase text-muted2">{t("attn", "注意")}</span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-inset">
-          <div
-            className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: `${item.attnScore ?? 0}%`,
-              background: (item.attnScore ?? 0) >= FOCUS_ATTN_BAR ? "#3dd6c4" : "#5a6a7c",
-            }}
-          />
-        </div>
-        <span className="w-16 flex-none text-right font-mono text-[11px] tabular-nums text-muted">
-          {item.attnScore ?? "—"}
-          {item.rvol != null ? ` · ${item.rvol.toFixed(1)}×` : ""}
-        </span>
       </div>
 
       {/* ecosystem chips */}

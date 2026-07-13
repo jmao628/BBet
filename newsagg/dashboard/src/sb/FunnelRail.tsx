@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, noDataSet, unratedForRank } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, noDataSet, belowMinCap } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -12,10 +12,10 @@ function useCounts(): Record<string, number | null> {
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   // Exclude CONFIRMED no-data OTC/foreign ADRs (pending new seeds still count)
-  // and unrated small-caps (text-only rating, < $2B).
+  // and micro-caps below the market-cap floor (e.g. PERF).
   const noData = noDataSet(technical);
-  const unrated = unratedForRank(data);
-  const seeds = buildSeeds(data).filter((r) => !noData.has(r.ticker) && !unrated.has(r.ticker));
+  const tiny = belowMinCap(data, marketCaps);
+  const seeds = buildSeeds(data).filter((r) => !noData.has(r.ticker) && !tiny.has(r.ticker));
 
   // Stage 2 advances the union of every ranking lens's top-N (+ mega caps).
   let heatCount: number | null = null;

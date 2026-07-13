@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildSeeds, noDataSet, unratedForRank, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
+import { buildSeeds, noDataSet, belowMinCap, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
@@ -11,7 +11,8 @@ export function SeedsView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
   const allSeeds = useMemo(() => buildSeeds(data), [data]);
-  const unrated = useMemo(() => unratedForRank(data), [data]);
+  const marketCaps = useStore((s) => s.marketCaps);
+  const tiny = useMemo(() => belowMinCap(data, marketCaps), [data, marketCaps]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
@@ -26,12 +27,12 @@ export function SeedsView() {
   const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
   const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
-  // "All" = names with a numeric SA quant score. Names with only a text rating
-  // (an analyst "BUY" or a "Top X" list "BUY", quant "—") are dropped from All;
-  // the analyst-written ones surface under ★ Analyst thesis.
+  // Everything stays (incl. thesis-only names with no SA rating). The only cut is
+  // micro-caps below the market-cap floor — penny names like PERF. ★ Analyst
+  // thesis remains a filter view over the analyst-written seeds.
   const thesisPool = useMemo(() => seeds.filter((r) => r.hasThesis), [seeds]);
-  const mainSeeds = useMemo(() => seeds.filter((r) => !unrated.has(r.ticker)), [seeds, unrated]);
-  const unratedCount = seeds.length - mainSeeds.length;
+  const mainSeeds = useMemo(() => seeds.filter((r) => !tiny.has(r.ticker)), [seeds, tiny]);
+  const tinyCount = seeds.length - mainSeeds.length;
 
   const thesisCount = thesisPool.length;
   // Carried-over = kept from a prior scrape (not in today's fresh pull); fresh
@@ -130,12 +131,12 @@ export function SeedsView() {
         </div>
       )}
 
-      {/* names with no numeric quant score — held out of "All" */}
-      {unratedCount > 0 && !thesisOnly && (
+      {/* micro-caps below the market-cap floor — dropped */}
+      {tinyCount > 0 && (
         <div className="mb-2 text-[11px] text-muted2">
           {t(
-            `${unratedCount} names with no numeric SA quant score (only a text "BUY") were held out of All — analyst-written ones are under ★ Analyst thesis.`,
-            `${unratedCount} 只「无数字 quant 评分、只有文字 BUY」的票未计入 All —— 其中有分析师论点的可在 ★ 有分析师论点 里查看。`,
+            `${tinyCount} micro-caps below $300M (e.g. penny stocks like PERF) were dropped from the universe.`,
+            `${tinyCount} 只市值低于 $3 亿的微型/仙股(如 PERF)已从种子池剔除。`,
           )}
         </div>
       )}

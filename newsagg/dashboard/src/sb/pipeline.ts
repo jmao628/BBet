@@ -237,16 +237,21 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
 }
 
 // Seeds held out of the ranked universe: any name with NO numeric SA quant
-// score. A numeric quant score is the single source of truth for "SA-rated".
-// Whatever else a row carries — a text "BUY" / "STRONG BUY" from a curated
-// "Top X" list, or an analyst's own article rating — is not an SA quant rating
-// (e.g. the $1.92 penny stock PERF: "Top Technology · BUY", no quant; or a
-// thesis name like GOOGL that we only scraped via its write-up, quant "—").
-// These are kept out of the funnel ("All", Heat, Screen, Focus, the leaderboard)
-// and surface only in the Seeds "★ Analyst thesis" list.
-export function unratedForRank(data: SAData | null): Set<string> {
+// Micro-caps too small to be worth ranking — e.g. PERF, a $1.92 / ~$195M penny
+// stock. This is the ONLY inclusion filter on the seed universe: everything else
+// stays (including thesis-only names with no SA rating). Only names with a KNOWN
+// market cap below the floor are cut, so a name still pending its market-cap
+// fetch isn't dropped by mistake.
+export const MIN_MARKET_CAP = 3e8; // $300M
+export function belowMinCap(
+  data: SAData | null,
+  marketCaps: MarketCaps | null,
+): Set<string> {
   const out = new Set<string>();
-  for (const s of buildSeeds(data)) if (s.quant == null) out.add(s.ticker);
+  for (const s of buildSeeds(data)) {
+    const mc = marketCaps?.[s.ticker];
+    if (mc != null && mc < MIN_MARKET_CAP) out.add(s.ticker);
+  }
   return out;
 }
 
@@ -360,9 +365,9 @@ export function buildRankings(
   // Rated seeds, minus confirmed no-data OTC/foreign ADRs (newly-added seeds
   // pending their first fetch still count — they're not confirmed no-data).
   const noData = noDataSet(technical);
-  const unrated = unratedForRank(data);
+  const tiny = belowMinCap(data, marketCaps);
   const uni = buildUniverse(data).filter(
-    (u) => u.rated && !noData.has(u.ticker) && !unrated.has(u.ticker),
+    (u) => u.rated && !noData.has(u.ticker) && !tiny.has(u.ticker),
   );
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
@@ -531,7 +536,7 @@ export function buildScreen(
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
   const { advancing, advancingBy } = buildRankings(data, heat, technical, marketCaps);
   const noData = noDataSet(technical);
-  const unrated = unratedForRank(data);
+  const tiny = belowMinCap(data, marketCaps);
   const candidates: ScreenRow[] = [];
   let passedHeat = 0;
 
@@ -539,7 +544,7 @@ export function buildScreen(
     // Confirmed no-data (OTC / foreign ADR) → out. Pending new seeds stay.
     if (noData.has(s.ticker)) continue;
     // Unrated small-cap (text-only rating, < $2B) → out.
-    if (unrated.has(s.ticker)) continue;
+    if (tiny.has(s.ticker)) continue;
     // Quality net: must have an SA rating AND an analyst thesis. Independent of Heat.
     if (s.rating == null && s.quant == null) continue;
     if (!s.hasThesis) continue;
@@ -588,7 +593,7 @@ export function buildScreen(
   );
   // Seed pool = deduped bulls minus confirmed no-data and report-only (matches
   // the seed table's "All").
-  const total = seeds.filter((s) => !noData.has(s.ticker) && !unrated.has(s.ticker)).length;
+  const total = seeds.filter((s) => !noData.has(s.ticker) && !tiny.has(s.ticker)).length;
   return { candidates, total, passedHeat };
 }
 
@@ -664,11 +669,10 @@ export interface FocusItem {
   neighbors: FocusNeighbor[];
   // Signal gates (graded, not a hard filter): how many independent signals fire.
   gBuy: boolean;
-  gAttn: boolean;
   gEco: boolean;
   gThesis: boolean;
-  gates: number; // count of the four above that pass (0-4)
-  core: boolean; // the three hard signals all fire (buy + attention + ecosystem)
+  gates: number; // count of the three above that pass (0-3)
+  core: boolean; // both hard signals fire (buy + ecosystem)
   score: number;
   spark: number[]; // recent close series, for a card sparkline
   changePct: number | null;
@@ -751,9 +755,9 @@ export function buildFocus(
   const eco = buildEcoAdjacency(supplychain, marketCaps);
   const { advancing } = buildRankings(data, heat, technical, marketCaps);
   const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
-  const unrated = unratedForRank(data);
+  const tiny = belowMinCap(data, marketCaps);
 
-  const rated = uni.filter((u) => u.rated && !unrated.has(u.ticker));
+  const rated = uni.filter((u) => u.rated && !tiny.has(u.ticker));
   const items: FocusItem[] = [];
   for (const u of rated) {
     const t = u.ticker;
@@ -787,24 +791,22 @@ export function buildFocus(
     // and the list is RANKED by how many fire, so nothing is dropped prematurely;
     // the deeper stages, catalyst + earnings-call, do the fine cut later):
     const gBuy = strongBuy || sustained;
-    const gAttn = (attnScore ?? 0) >= FOCUS_ATTN_BAR || (rvol ?? 0) >= FOCUS_RVOL_BAR;
     const gEco = anchors >= 1 || links >= FOCUS_ECO_LINKS;
     const gThesis = quality.has(t); // analyst thesis — a bonus, not required
-    const gates = Number(gBuy) + Number(gAttn) + Number(gEco) + Number(gThesis);
+    const gates = Number(gBuy) + Number(gEco) + Number(gThesis);
 
     // Inclusive membership: any real signal keeps it (low-signal names just sink).
     if (gates === 0 && links === 0 && buyStreak < 3) continue;
 
-    const core = gBuy && gAttn && gEco; // the three hard signals all fire
+    const core = gBuy && gEco; // both hard signals fire (buy + ecosystem)
     // 0-10 score, each dimension CAPPED so no single one (e.g. a mega-cap's huge
-    // ecosystem) can dominate: Buy 0-3 · Attention 0-2.5 · Ecosystem 0-3 (capped)
-    // · Thesis 0-1 · both-nets bonus 0-0.5.
-    const buyPart = (strongBuy ? 2 : gBuy ? 1 : 0) + Math.min(buyStreak, 5) / 5;
-    const attnPart = Math.min((attnScore ?? 0) / 100, 1) * 2.5;
-    const ecoPart = Math.min(ecoWeight / 16, 1) * 3;
+    // ecosystem) can dominate: Buy 0-4 · Ecosystem 0-4.5 (capped) · Thesis 0-1 ·
+    // both-nets bonus 0-0.5. (Attention was dropped from the score.)
+    const buyPart = (strongBuy ? 2.5 : gBuy ? 1.3 : 0) + (Math.min(buyStreak, 5) / 5) * 1.5;
+    const ecoPart = Math.min(ecoWeight / 16, 1) * 4.5;
     const thesisPart = gThesis ? 1 : 0;
     const bonus = inBoth ? 0.5 : 0;
-    const score = Math.round((buyPart + attnPart + ecoPart + thesisPart + bonus) * 10) / 10;
+    const score = Math.round((buyPart + ecoPart + thesisPart + bonus) * 10) / 10;
 
     items.push({
       ticker: t,
@@ -822,7 +824,6 @@ export function buildFocus(
       ecoWeight: Math.round(ecoWeight * 10) / 10,
       neighbors,
       gBuy,
-      gAttn,
       gEco,
       gThesis,
       gates,

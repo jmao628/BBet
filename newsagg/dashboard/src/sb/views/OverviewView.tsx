@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, companyMap, noDataSet, unratedForRank, sectorLabel } from "../pipeline";
+import { buildFocus, companyMap, noDataSet, belowMinCap, sectorLabel } from "../pipeline";
 
 // Landing page: one interactive globe PER sector. Each node is a strong-buy name;
 // size encodes a switchable signal (move / attention / rvol), rings flag Focus-
@@ -398,7 +398,6 @@ const SectorGlobe = memo(function SectorGlobe({
             </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[10.5px] text-muted2">
-            <span>{t2(lang, "Attn", "注意")} {Math.round(hv.attnScore)}</span>
             <span>RVOL {hv.rvol != null ? `${hv.rvol.toFixed(1)}×` : "—"}</span>
             <span>{hv.buyStreak}{t2(lang, "d streak", "天连买")}</span>
             {hv.onFocus && <span className="text-gold">★ {t2(lang, "Focus", "重点")}</span>}
@@ -500,7 +499,7 @@ export function OverviewView() {
   // Unrated small-caps (< $2B with only a text list "BUY", no quant, no analyst
   // — e.g. the $195M penny stock PERF) are kept off the leaderboard, matching
   // the rest of the funnel.
-  const unrated = useMemo(() => unratedForRank(data), [data]);
+  const tiny = useMemo(() => belowMinCap(data, marketCaps), [data, marketCaps]);
 
   const movers = useMemo<Mover[]>(() => {
     const noData = noDataSet(technical);
@@ -509,7 +508,7 @@ export function OverviewView() {
     for (const [ticker, tt] of Object.entries(technical?.tickers ?? {})) {
       if (noData.has(ticker)) continue;
       if (tt.gauge?.summary !== "strong_buy") continue;
-      if (unrated.has(ticker)) continue;
+      if (tiny.has(ticker)) continue;
       const at = tt.attention;
       out.push({
         ticker,
@@ -526,7 +525,7 @@ export function OverviewView() {
       });
     }
     return out.sort((a, b) => b.changePct - a.changePct);
-  }, [technical, data, sectors, focusSet, unrated]);
+  }, [technical, data, sectors, focusSet, tiny]);
 
   const bySector = useMemo(() => {
     const m = new Map<string, Mover[]>();
@@ -544,7 +543,6 @@ export function OverviewView() {
 
   const SIZE_OPTS: { k: SizeKey; label: string }[] = [
     { k: "move", label: t("Move", "涨跌") },
-    { k: "attn", label: t("Attention", "注意力") },
     { k: "rvol", label: t("RVOL", "放量") },
   ];
 
