@@ -272,7 +272,7 @@ export function OverviewView() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
             </span>
-            {t("live · one ignition strip per sector · ranked by today's move", "实时 · 每板块一条点火轴 · 按当日涨跌排名")}
+            {t("live · what's firing per sector · ranked by today's move", "实时 · 每板块今日在点火的票 · 按当日涨跌排名")}
           </p>
         </div>
 

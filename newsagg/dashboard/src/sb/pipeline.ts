@@ -823,11 +823,23 @@ export function buildFocus(
 // Focus name ADVANCES if its strongest catalyst clears the bar; names with a
 // catalyst below the bar are "watch", names fetched with none are "none", and
 // names not yet fetched are "pending" (inclusive — nothing is cut here either).
-// TPMN is graded on T(0-25)+P(0-3)+M(0-3)+N(0-2), max 33 — normalize to 0-10
-// for display so the whole app speaks one 10-point scale.
+// TPMN → 0-10, MULTIPLICATIVE so scores actually spread. Magnitude leads (it's
+// the sector-neutral differentiator and a hard ceiling — a low-M catalyst can't
+// score high however soon it is); probability and narrative are gentle floors;
+// timing is the peak curve (T/25). The old additive sum let the near-universal
+// earnings catalyst saturate every name to ~9.8. Floors are the tunable knobs.
+const _P_FLOOR = 0.4; // P=0 → 0.40, P=3 → 1.0
+const _T_FLOOR = 0.2; // timing=0 → 0.20, timing peak → 1.0
+const _N_FLOOR = 0.7; // N=0 → 0.70, N=2 → 1.0
+function _tpmnStrength(T: number, P: number, M: number, N: number): number {
+  const mag = M / 3;
+  const prob = _P_FLOOR + (1 - _P_FLOOR) * (P / 3);
+  const tfac = _T_FLOOR + (1 - _T_FLOOR) * (T / 25);
+  const narr = _N_FLOOR + (1 - _N_FLOOR) * (N / 2);
+  return mag * prob * tfac * narr; // 0..1
+}
 export function catScore10(tpmn: CatalystTPMN): number {
-  const total = tpmn.T + tpmn.P + tpmn.M + tpmn.N;
-  return Math.round((total / 33) * 100) / 10;
+  return Math.round(_tpmnStrength(tpmn.T, tpmn.P, tpmn.M, tpmn.N) * 100) / 10;
 }
 
 // LIVE timing — recomputed against TODAY on every render so dated catalysts age
@@ -847,8 +859,7 @@ function _timingCurve(days: number | null): number {
 }
 // A catalyst's live 0-10 (T recomputed for today; P/M/N unchanged).
 export function catLiveScore10(c: Catalyst): number {
-  const total = _timingCurve(catLiveDays(c)) + c.tpmn.P + c.tpmn.M + c.tpmn.N;
-  return Math.round((total / 33) * 100) / 10;
+  return Math.round(_tpmnStrength(_timingCurve(catLiveDays(c)), c.tpmn.P, c.tpmn.M, c.tpmn.N) * 100) / 10;
 }
 
 // A ticker's catalyst score: the STRONGEST catalyst is the base, and additional

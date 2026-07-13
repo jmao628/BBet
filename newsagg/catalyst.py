@@ -274,16 +274,29 @@ def _lvl(x, hi: int) -> int:
         return 0
 
 
+# Score floors — the tunable knobs of the multiplicative model (keep in sync
+# with pipeline.ts _tpmnStrength).
+_P_FLOOR = 0.4  # P=0 → 0.40, P=3 → 1.0
+_T_FLOOR = 0.2  # timing=0 → 0.20, timing peak → 1.0
+_N_FLOOR = 0.7  # N=0 → 0.70, N=2 → 1.0
+
+
 def _tpmn(cat: dict, today: date) -> dict:
-    """Per-catalyst score: total = T(0-25) + P(0-3) + M(0-3) + N(0-2)."""
+    """Per-catalyst 0-10 score, MULTIPLICATIVE so scores spread. Magnitude leads
+    (sector-neutral, a hard ceiling), probability & narrative are gentle floors,
+    and timing is the peak curve (T/25). Replaces the additive sum, which let the
+    near-universal earnings catalyst saturate every name to ~9.8."""
     ctype = cat.get("type") if cat.get("type") in CATALYST_TYPES else "other"
     days = _days_to(cat, today)
     T = round(_timing(days), 1)
     P = _lvl(cat.get("P"), 3)
     M = _lvl(cat.get("M"), 3)
     N = _lvl(cat.get("N"), 2)
-    # Normalize T(0-25)+P(0-3)+M(0-3)+N(0-2) (max 33) to a 0-10 score.
-    score = round((T + P + M + N) / 33 * 10, 1)
+    mag = M / 3
+    prob = _P_FLOOR + (1 - _P_FLOOR) * (P / 3)
+    tfac = _T_FLOOR + (1 - _T_FLOOR) * (T / 25)
+    narr = _N_FLOOR + (1 - _N_FLOOR) * (N / 2)
+    score = round(mag * prob * tfac * narr * 10, 1)
     cls = "A" if cat.get("event_date") else ("B" if cat.get("window_days") is not None else (cat.get("cls") or "B"))
     return {"T": T, "P": P, "M": M, "N": N, "days": days, "cls": cls, "score": score, "type": ctype}
 
