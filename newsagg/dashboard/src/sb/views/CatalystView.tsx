@@ -68,13 +68,19 @@ function _hex(color: string, alpha: number): string {
   return color + Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, "0");
 }
 
+interface CellItem {
+  ticker: string;
+  company: string;
+  score: number;
+  days: number;
+}
 interface Cell {
   key: number;
   midDays: number;
   count: number;
   color: string;
-  best: string; // strongest ticker in the bucket
-  names: string; // tooltip list
+  names: string; // tooltip preview
+  items: CellItem[]; // every catalyst in the bucket, strongest first
 }
 
 function Runway({
@@ -90,6 +96,7 @@ function Runway({
 }) {
   const MAXD = 90;
   const [zoom, setZoom] = useState(1);
+  const [pop, setPop] = useState<{ x: number; y: number; type: string; days: number; items: CellItem[] } | null>(null);
   const { bucket, ppd } = ZOOM_CFG[zoom];
 
   // Live days so the runway shifts left each day and drops events once they pass.
@@ -123,14 +130,14 @@ function Runway({
     return [...buckets.entries()].map(([b, items]) => {
       const sorted = [...items].sort((a, z) => z.r.catScore - a.r.catScore);
       const advancing = items.some((i) => i.r.status === "advance");
-      const names = sorted.slice(0, 8).map((i) => i.r.ticker).join(", ") + (sorted.length > 8 ? "…" : "");
+      const names = sorted.slice(0, 6).map((i) => i.r.ticker).join(", ") + (sorted.length > 6 ? "…" : "");
       return {
         key: b,
         midDays: Math.min((b + 0.5) * bucket, MAXD),
         count: items.length,
         color: advancing ? "#48c78e" : "#e9c46a",
-        best: sorted[0].r.ticker,
         names,
+        items: sorted.map((i) => ({ ticker: i.r.ticker, company: i.r.company, score: i.r.catScore, days: i.days })),
       };
     });
   };
@@ -138,8 +145,13 @@ function Runway({
 
   return (
     <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 py-3">
-      <div className="mb-2.5 flex items-center justify-between gap-3 text-[11px]">
-        <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
+      <div className="mb-2.5 flex items-start justify-between gap-3 text-[11px]">
+        <div className="flex flex-col">
+          <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
+          <span className="text-[10px] text-muted2">
+            {t("number = catalysts in that window · click a cell to list them", "数字 = 该时段内催化剂数 · 点击查看名单")}
+          </span>
+        </div>
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-3 font-mono text-[10px] text-muted2">
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ok" />{t("advancing", "过闸")}</span>
@@ -181,9 +193,23 @@ function Runway({
                     return (
                       <button
                         key={c.key}
-                        onClick={() => onOpen(c.best)}
+                        onClick={(e) => {
+                          if (c.count === 1) {
+                            onOpen(c.items[0].ticker);
+                            return;
+                          }
+                          const PW = 236;
+                          const PH = 320;
+                          setPop({
+                            x: Math.min(e.clientX + 6, window.innerWidth - PW - 12),
+                            y: Math.min(e.clientY + 6, window.innerHeight - PH - 12),
+                            type,
+                            days: Math.round(c.midDays),
+                            items: c.items,
+                          });
+                        }}
                         title={`${catalystTypeLabel(type, lang)} · ${Math.round(c.midDays)}d · ${c.count} · ${c.names}`}
-                        className="cat-cell absolute grid place-items-center rounded-full font-mono font-semibold transition-[filter] hover:z-10 hover:brightness-125"
+                        className="cat-cell absolute grid cursor-pointer place-items-center rounded-full font-mono font-semibold transition-[filter] hover:z-10 hover:brightness-125"
                         style={{
                           left: c.midDays * ppd,
                           top: "50%",
@@ -223,6 +249,45 @@ function Runway({
           </div>
         </div>
       </div>
+
+      {/* bucket picker — every name in the clicked cell, strongest first */}
+      {pop && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPop(null)} />
+          <div
+            className="fixed z-50 flex max-h-[320px] w-[236px] flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
+            style={{ left: pop.x, top: pop.y }}
+          >
+            <div className="flex items-center justify-between border-b border-line px-3 py-2">
+              <span className="text-[11px] font-semibold text-text">
+                {catalystTypeLabel(pop.type, lang)} · {t(`in ${pop.days}d`, `${pop.days} 天后`)}
+              </span>
+              <span className="font-mono text-[10px] text-muted2">{pop.items.length}</span>
+            </div>
+            <div className="overflow-y-auto p-1">
+              {pop.items.map((it) => (
+                <button
+                  key={it.ticker}
+                  onClick={() => {
+                    onOpen(it.ticker);
+                    setPop(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+                >
+                  <span className="font-mono text-[12px] font-bold text-text">{it.ticker}</span>
+                  <span className="min-w-0 flex-1 truncate text-[10px] text-muted2">{it.company || "—"}</span>
+                  <span
+                    className="flex-none font-mono text-[11px] font-semibold"
+                    style={{ color: it.score >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}
+                  >
+                    {it.score.toFixed(1)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
