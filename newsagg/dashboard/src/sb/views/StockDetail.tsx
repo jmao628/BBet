@@ -3,13 +3,106 @@ import { useStore, useT, type Lang } from "../../store";
 import {
   buildSeeds,
   buildUniverse,
+  buildFocus,
+  buildRankings,
   capSizeFromCap,
   bypassesHeat,
   passesHeatGate,
   sectorLabel,
   capLabel,
+  type FocusItem,
 } from "../pipeline";
 import type { SupplyEdge, SupplyMap, TechTicker } from "../../types";
+
+// Human labels for the ranking lenses a name advanced in (Heat Ignition).
+const LENS_LABEL: Record<string, { en: string; zh: string }> = {
+  rvol: { en: "Rel. Volume", zh: "放量" },
+  momentum: { en: "Momentum 60d", zh: "动量 60 日" },
+  strongbuy: { en: "Strong Buy", zh: "强力买入" },
+  bypass: { en: "Mega-cap", zh: "大票直通" },
+};
+
+// Transparent Focus-score breakdown for one ticker: every component of the 0-10
+// composite, shown with its formula so you can see exactly how the score is built.
+function ScoreBreakdown({
+  item,
+  advBy,
+  lang,
+  t,
+}: {
+  item: FocusItem;
+  advBy: string[];
+  lang: Lang;
+  t: (en: string, zh: string) => string;
+}) {
+  const buyBase = item.strongBuy ? 2.5 : item.gBuy ? 1.3 : 0;
+  const streakAdd = (Math.min(item.buyStreak, 5) / 5) * 1.5;
+  const rows: { label: string; note: string; val: number; max: number; color: string }[] = [
+    {
+      label: t("Buy", "买入"),
+      note: `${item.strongBuy ? t("strong-buy 2.5", "强买 2.5") : item.gBuy ? t("buy 1.3", "买入 1.3") : "0"} + ${t(`${item.buyStreak}d streak`, `连买 ${item.buyStreak} 天`)} ${streakAdd.toFixed(1)}`,
+      val: buyBase + streakAdd,
+      max: 4,
+      color: "#48c78e",
+    },
+    {
+      label: t("Ecosystem", "生态"),
+      note: t(`eco-weight ${item.ecoWeight} ÷ 16 ×4.5 (capped)`, `生态权重 ${item.ecoWeight} ÷ 16 ×4.5（封顶）`),
+      val: Math.min(item.ecoWeight / 16, 1) * 4.5,
+      max: 4.5,
+      color: "#5fb0e8",
+    },
+    {
+      label: t("Thesis", "论点"),
+      note: item.gThesis ? t("analyst thesis +1", "有分析师论点 +1") : t("none", "无"),
+      val: item.gThesis ? 1 : 0,
+      max: 1,
+      color: "#9aa7b3",
+    },
+    {
+      label: t("Both-nets", "双网"),
+      note: item.inBoth ? t("in quality ∩ advancing +0.5", "质量∩被关注 +0.5") : t("no", "否"),
+      val: item.inBoth ? 0.5 : 0,
+      max: 0.5,
+      color: "#e9c46a",
+    },
+  ];
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Focus score — how it's built", "重点名单打分 · 拆解")}</div>
+        <div className="flex items-center gap-2 text-[12px]">
+          <span className="font-mono text-muted2">{t(`gates ${item.gates}/3`, `过闸 ${item.gates}/3`)}</span>
+          {item.core && (
+            <span className="rounded-full border border-gold/50 bg-gold/10 px-1.5 py-0.5 text-[10px] text-gold">★ {t("Core", "核心")}</span>
+          )}
+          <span className="font-mono text-[15px] font-semibold text-signal">
+            {item.score.toFixed(1)}
+            <span className="text-[10px] text-muted2">/10</span>
+          </span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center gap-3 text-[12px]">
+            <span className="w-16 flex-none text-muted">{r.label}</span>
+            <span className="h-1.5 w-24 flex-none overflow-hidden rounded-full bg-inset">
+              <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (r.val / r.max) * 100)}%`, background: r.color }} />
+            </span>
+            <span className="flex-1 truncate text-[11px] text-muted2">{r.note}</span>
+            <span className="w-10 flex-none text-right font-mono text-text">{r.val.toFixed(1)}</span>
+          </div>
+        ))}
+      </div>
+      {advBy.length > 0 && (
+        <div className="mt-3 border-t border-line pt-2 text-[11px] text-muted2">
+          {t("Advancing via: ", "被关注来自: ")}
+          {advBy.map((k) => (LENS_LABEL[k] ? (lang === "zh" ? LENS_LABEL[k].zh : LENS_LABEL[k].en) : k)).join(" · ")}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type L = { en: string; zh: string; color: string };
 const lbl = (m: L, lang: Lang) => (lang === "zh" ? m.zh : m.en);
@@ -460,6 +553,17 @@ export function StockDetail() {
     () => new Set(buildUniverse(data).map((u) => u.ticker)),
     [data],
   );
+  const focusItem = useMemo(
+    () =>
+      ticker
+        ? buildFocus(data, heat, technical, marketCaps, sectors, supplychain).find((f) => f.ticker === ticker)
+        : undefined,
+    [data, heat, technical, marketCaps, sectors, supplychain, ticker],
+  );
+  const advBy = useMemo(
+    () => (ticker ? buildRankings(data, heat, technical, marketCaps).advancingBy.get(ticker) ?? [] : []),
+    [data, heat, technical, marketCaps, ticker],
+  );
 
   if (!ticker) return null;
   const tech: TechTicker | undefined = live ?? technical?.tickers?.[ticker];
@@ -577,6 +681,8 @@ export function StockDetail() {
               </span>
             )}
           </div>
+
+          {focusItem && <ScoreBreakdown item={focusItem} advBy={advBy} lang={lang} t={t} />}
 
           {!tech && (
             <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-5 text-center text-[13px] text-muted">

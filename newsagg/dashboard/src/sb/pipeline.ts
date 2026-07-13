@@ -386,20 +386,6 @@ export function buildRankings(
   // it clears the bar — so on a weak day nothing lights up rather than forcing it.
   const lenses: Lens[] = [
     {
-      key: "attention",
-      label: { en: "Price-Volume Attention", zh: "量价注意力" },
-      desc: {
-        en: "RVOL + breakout + OBV + trend composite · bar 50",
-        zh: "RVOL + 突破 + OBV + 趋势 综合分,达标线 50",
-      },
-      min: 50,
-      get: (t) => attn(t)?.score ?? null,
-      fmt: (v) => `${Math.round(v)}`,
-      // The score is coarse (many tie at 60) — break ties by RVOL then momentum
-      // so who lands in the top-10 is meaningful, not arbitrary.
-      tie: (t) => (attn(t)?.rvol ?? 0) + (momentum(t) ?? 0) / 1000,
-    },
-    {
       key: "rvol",
       label: { en: "Relative Volume", zh: "放量 RVOL" },
       desc: { en: "5-day / 20-day avg volume · bar 1.5×", zh: "近 5 日 / 20 日均量,达标线 1.5×" },
