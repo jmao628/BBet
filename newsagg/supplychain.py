@@ -42,8 +42,9 @@ SUPPLYCHAIN_FILE = "supplychain.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
 # Keep each relationship list short so the graph stays readable and the model
-# stays on the *major* names instead of padding with speculative small fry.
-MAX_PER_LIST = 6
+# stays on the *major* names instead of padding with speculative small fry —
+# but roomy enough not to truncate a genuinely deep upstream (e.g. semis).
+MAX_PER_LIST = 8
 
 
 def _load(path: Path) -> dict[str, dict]:
@@ -126,9 +127,17 @@ def _prompt(ticker: str, name: str, sector: str = "", industry: str = "") -> str
         "- upstream: its most important suppliers / input providers (who it buys from or depends on)\n"
         "- downstream: its most important customers / distribution channels (who buys from or depends on it)\n"
         "- peers: its most direct competitors\n\n"
+        "Be THOROUGH on upstream — walk each layer of inputs the company actually consumes and name the "
+        "dominant supplier in each, e.g. for a chipmaker: wafer-fab EQUIPMENT (Applied Materials AMAT, Lam "
+        "Research LRCX, KLA KLAC, ASML), the FOUNDRY (TSMC TSM, GlobalFoundries GFS), EDA/IP (Synopsys SNPS, "
+        "Cadence CDNS, Arm ARM), substrates/memory/components, and assembly/test. Do NOT skip an obvious, "
+        "critical supplier just because it is a very large or a foreign-domiciled company — include it with its "
+        "US ticker or US-listed ADR (e.g. ASML, TSM). It's fine to list a supplier that is not itself in any "
+        "watchlist; completeness of the real supply chain matters more.\n\n"
         f"Rules:\n"
-        f"- Only MAJOR, well-established relationships. At most {MAX_PER_LIST} per list; fewer is fine.\n"
-        "- Prefer publicly-traded companies and give their US ticker in `ticker`. "
+        f"- MAJOR, well-established relationships only. At most {MAX_PER_LIST} per list; fewer is fine — but do "
+        "not drop a genuinely critical supplier to stay under the cap.\n"
+        "- Prefer publicly-traded companies and give their US ticker (or US-listed ADR) in `ticker`. "
         "If a relationship is important but the counterparty isn't publicly traded (or you're unsure of the ticker), "
         "leave `ticker` empty but still list it by name.\n"
         "- `reason` is one short clause (e.g. 'fabs its chips', 'largest cloud customer').\n"

@@ -68,7 +68,7 @@ export function ScreenView() {
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
     const eco = buildEcoAdjacency(supplychain, marketCaps); // symmetrized
-    type Neighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
+    type Neighbor = { ticker: string; kind: string; anchor: boolean; importance: number; external: boolean };
     const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number; crit: number }[] = [];
     for (const [tk, ns] of eco) {
       // Selection: a discovery target = in-universe, not a mega-cap anchor, and
@@ -76,8 +76,12 @@ export function ScreenView() {
       if (!inUni.has(tk) || bypassesHeat(marketCaps?.[tk])) continue;
       const mc = marketCaps?.[tk];
       if (typeof mc === "number" && mc < 3e8) continue;
+      // Keep in-universe neighbors AND out-of-universe UPSTREAM suppliers — a
+      // key supplier like AMAT/ASML is ecosystem context even if it isn't itself
+      // a rated seed. (Out-of-universe customers/peers are dropped to limit noise.)
       const neighbors = ns
-        .filter((n) => inUni.has(n.ticker) && n.ticker !== tk)
+        .filter((n) => n.ticker !== tk && (inUni.has(n.ticker) || n.kind === "upstream"))
+        .map((n) => ({ ...n, external: !inUni.has(n.ticker) }))
         .sort((a, b) => Number(b.anchor) - Number(a.anchor) || b.importance - a.importance);
       if (!neighbors.length) continue;
       rows.push({
@@ -102,9 +106,9 @@ export function ScreenView() {
   // A target only shows in the graph if it links to a same-sector mega-cap
   // SUPPLIER (that's what the graph draws). Count those, so the chip number
   // matches what actually appears.
-  const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string }[] }) => {
+  const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string; external: boolean }[] }) => {
     const sec = sectorOf(r.ticker);
-    return !!sec && r.neighbors.some((n) => n.anchor && n.kind === "upstream" && sectorOf(n.ticker) === sec);
+    return !!sec && r.neighbors.some((n) => n.kind === "upstream" && (n.anchor || n.external));
   };
   const ecoSectorCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -183,8 +187,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time. Centre = the sector; inner gold ring = that sector's mega-cap SUPPLIERS (≥$100B, upstream hubs — peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的大票**供应商**（≥$1000亿的上游枢纽；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标，摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time. Centre = the sector; inner gold ring = that sector's key SUPPLIERS (upstream hubs — mega-caps AND critical outside-universe suppliers like AMAT/ASML; peers/customers-only names are excluded); outer nodes = discovery targets in your universe, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块。中心 = 该板块；内圈金色 = 该板块的关键**供应商**（上游枢纽——既有大票，也有 universe 之外的关键供应商如 AMAT/ASML；只是同业/客户的名字会被排除）；外圈 = 你 universe 内的发现目标，摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -216,7 +220,7 @@ export function ScreenView() {
                   ))}
                 </div>
               )}
-              <EcoGraph rows={ecoRows} scores={hotScores} sectorOf={sectorOf} sector={effEcoSector} hub={hubLabel} onOpen={openDetail} t={t} />
+              <EcoGraph rows={ecoRows} scores={hotScores} hub={hubLabel} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -337,30 +341,28 @@ export function ScreenView() {
 // A radial network: a central hub → the mega-cap anchors (inner ring) → the
 // discovery targets (outer ring), each placed near the anchors it links to.
 // Connections are drawn as animated "flowing light" edges coloured by role.
-type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
+type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number; external: boolean };
 type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; anchors: number; crit: number };
 
 function EcoGraph({
   rows,
   scores,
-  sectorOf,
-  sector,
   hub,
   onOpen,
   t,
 }: {
   rows: EcoRow[];
   scores: Map<string, number>;
-  sectorOf: (t: string) => string;
-  sector: string | null;
   hub: string;
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
   const TOPT = 24;
-  const isSupplier = (n: EcoNeighbor) => n.anchor && n.kind === "upstream" && (!sector || sectorOf(n.ticker) === sector);
-  // A target qualifies if it links to a same-sector mega-cap SUPPLIER (the count
-  // shown in the sector chip). Peers/customers-only mega-caps (UBER) don't count.
+  // A supplier anchor = an UPSTREAM neighbor that is either a mega-cap hub or a
+  // name outside your universe (e.g. AMAT, ASML) — both are ecosystem context.
+  // The sector is scoped by the TARGET (rows are already this sector), so an
+  // out-of-universe supplier with no sector of its own still shows.
+  const isSupplier = (n: EcoNeighbor) => n.kind === "upstream" && (n.anchor || n.external);
   const eligible = rows.filter((r) => r.neighbors.some(isSupplier));
   const total = eligible.length;
   const targets = eligible.slice(0, TOPT);
@@ -396,7 +398,7 @@ function EcoGraph({
     let sy = 0;
     for (const n of r.neighbors) {
       const i = anchorIdx.get(n.ticker);
-      if (n.anchor && i != null) {
+      if (i != null) {
         sx += Math.cos(aAngle(i));
         sy += Math.sin(aAngle(i));
       }
@@ -438,7 +440,7 @@ function EcoGraph({
           {withAngle.map(({ r }, ti) => {
             const tp = tPos(ti);
             return r.neighbors
-              .filter((nb) => nb.anchor && anchorIdx.has(nb.ticker))
+              .filter((nb) => anchorIdx.has(nb.ticker))
               .map((nb) => {
                 const ap = aPos(anchorIdx.get(nb.ticker)!);
                 const c = GRP[nb.kind] ?? "#5fb0e8";
