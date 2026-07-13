@@ -122,6 +122,11 @@ const SectorGlobe = memo(function SectorGlobe({
       }),
     [rows],
   );
+  // Keep the latest points in a ref so LIVE data updates feed the running
+  // animation without tearing down / re-registering the render loop (that
+  // teardown across all globes at once is what caused the periodic stutter).
+  const ptsRef = useRef(pts);
+  ptsRef.current = pts;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -192,13 +197,13 @@ const SectorGlobe = memo(function SectorGlobe({
       ctx.fillStyle = s.grad;
       ctx.fillRect(0, 0, W, H);
 
-      // wireframe (tinted with the sector colour)
+      // wireframe (tinted with the sector colour) — kept light for perf
       ctx.lineWidth = dpr;
       for (let li = -2; li <= 2; li++) {
         const lat = (li * Math.PI) / 6;
         ctx.beginPath();
-        for (let a = 0; a <= 60; a++) {
-          const p = rot(lat, (a / 60) * Math.PI * 2, s.yaw);
+        for (let a = 0; a <= 48; a++) {
+          const p = rot(lat, (a / 48) * Math.PI * 2, s.yaw);
           const sx = cx + p.x * R,
             sy = cy - p.y * R;
           a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
@@ -206,11 +211,11 @@ const SectorGlobe = memo(function SectorGlobe({
         ctx.strokeStyle = `rgba(${rgb},0.09)`;
         ctx.stroke();
       }
-      for (let mi = 0; mi < 12; mi++) {
-        const lon = (mi * Math.PI) / 6;
+      for (let mi = 0; mi < 9; mi++) {
+        const lon = (mi * Math.PI) / 9;
         ctx.beginPath();
-        for (let a = 0; a <= 60; a++) {
-          const p = rot(-Math.PI / 2 + (a / 60) * Math.PI, lon, s.yaw);
+        for (let a = 0; a <= 48; a++) {
+          const p = rot(-Math.PI / 2 + (a / 48) * Math.PI, lon, s.yaw);
           const sx = cx + p.x * R,
             sy = cy - p.y * R;
           a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
@@ -225,23 +230,24 @@ const SectorGlobe = memo(function SectorGlobe({
       ctx.stroke();
 
       // nodes, back-to-front, additive glow via sprite
-      const proj = pts
+      const nodes = ptsRef.current;
+      const proj = nodes
         .map((p, i) => ({ i, ...rot(p.lat, p.lon, s.yaw) }))
         .sort((a, b) => a.z - b.z);
       s.projected = [];
       ctx.globalCompositeOperation = "lighter";
       for (const q of proj) {
-        const p = pts[q.i];
+        const p = nodes[q.i];
         const sx = cx + q.x * R,
           sy = cy - q.y * R;
         const persp = 0.55 + ((q.z + 1) / 2) * 0.7;
         const mag = Math.min(Math.abs(p.changePct) / 8, 1);
-        const rad = (3 + mag * 7) * persp * dpr * (s.hover === q.i ? 1.3 : 1);
+        const rad = (5.5 + mag * 10) * persp * dpr * (s.hover === q.i ? 1.35 : 1);
         const front = q.z > 0;
-        ctx.globalAlpha = Math.min((front ? 1 : 0.28) * (0.5 + mag * 0.5), 1);
+        ctx.globalAlpha = Math.min((front ? 1 : 0.3) * (0.62 + mag * 0.38), 1);
         ctx.drawImage(sprite, sx - rad, sy - rad, rad * 2, rad * 2);
         if (front)
-          s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 8), i: q.i, cx: sx, cy: sy });
+          s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 9), i: q.i, cx: sx, cy: sy });
       }
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
@@ -255,7 +261,7 @@ const SectorGlobe = memo(function SectorGlobe({
           ctx.strokeStyle = `rgba(${rgb},0.9)`;
           ctx.lineWidth = 1.4 * dpr;
           ctx.stroke();
-          const p = pts[s.hover];
+          const p = ptsRef.current[s.hover];
           const up = p.changePct >= 0;
           const txt = `${p.ticker}  ${up ? "+" : ""}${p.changePct.toFixed(2)}%`;
           ctx.font = `600 ${11 * dpr}px ui-monospace, SFMono-Regular, monospace`;
@@ -278,7 +284,7 @@ const SectorGlobe = memo(function SectorGlobe({
       ro.disconnect();
       io.disconnect();
     };
-  }, [pts, color]);
+  }, [color]);
 
   const hitTest = (x: number, y: number) => {
     let best = -1,
