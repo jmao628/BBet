@@ -59,24 +59,19 @@ function CatalystLine({ c, lang, t }: { c: Catalyst; lang: "en" | "zh"; t: (en: 
   const cd = timing(c, t);
   return (
     <div className="rounded-lg border border-line bg-inset/40 p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2">
-          <span className="rounded-full border border-signal/40 bg-signal/10 px-1.5 py-0.5 text-[10px] font-medium text-signal">
-            {catalystTypeLabel(c.type, lang)}
-          </span>
-          <span className="text-[12.5px] text-text">{c.title}</span>
+      <div className="flex items-center gap-2">
+        <span className="rounded-full border border-signal/40 bg-signal/10 px-1.5 py-0.5 text-[10px] font-medium text-signal">
+          {catalystTypeLabel(c.type, lang)}
         </span>
-        <span className="flex flex-none items-center gap-2">
-          <span className={`font-mono text-[11px] ${cd.near ? "text-ok" : "text-muted2"}`}>⏳ {cd.label}</span>
-          <span className="font-mono text-[13px] font-semibold" style={{ color: c.tpmn.score >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
-            {c.tpmn.score.toFixed(1)}
-          </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-text">{c.title}</span>
+        <span className={`flex-none font-mono text-[11px] ${cd.near ? "text-ok" : "text-muted2"}`}>⏳ {cd.label}</span>
+        <span className="flex-none font-mono text-[13px] font-semibold" style={{ color: c.tpmn.score >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
+          {c.tpmn.score.toFixed(1)}
         </span>
       </div>
       {(c.summary || c.thesis) && (
-        <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted">{c.summary || c.thesis}</div>
+        <div className="mt-1.5 line-clamp-2 text-[11.5px] leading-snug text-muted">{c.summary || c.thesis}</div>
       )}
-      {c.evidence && <div className="mt-1 text-[10.5px] italic text-muted2">P/M/N · {c.evidence}</div>}
       <div className="mt-2 flex items-center justify-between gap-2">
         <Tpmn tpmn={c.tpmn} />
         <a
@@ -84,7 +79,7 @@ function CatalystLine({ c, lang, t }: { c: Catalyst; lang: "en" | "zh"; t: (en: 
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="font-mono text-[10.5px] text-signal hover:underline"
+          className="flex-none font-mono text-[10.5px] text-signal hover:underline"
         >
           {t("source", "来源")} ↗
         </a>
@@ -223,10 +218,6 @@ export function CatalystView() {
       <ViewHead
         eyebrow={t("Stage 3 · Catalyst", "Stage 3 · 催化剂")}
         title={t("Catalyst · TPMN", "催化剂 · TPMN")}
-        desc={t(
-          `Every catalyst is web-searched and must carry a real source URL — no citation, no catalyst. Each is scored total = T + P + M + N (≈0-33): T timing 0-25, a peak curve on days-to-event that tops out at ~2 weeks (A = a real calendar date; B = an estimated window midpoint) · P probability/evidence 0-3 · M magnitude/impact 0-3 · N narrative fit 0-2. A name takes its STRONGEST catalyst (not the sum) and ADVANCES at ≥${CATALYST_BAR}; the rest stay on the list (graded, not cut).`,
-          `每条催化剂都是联网搜出来的,且必须带真实来源链接——没链接就不算。每条总分 = T + P + M + N(约 0-33):T 时机 0-25,是"距事件天数"的峰形曲线,约两周最高(A 类=真实日历日;B 类=预计窗口中点) · P 概率/证据强度 0-3 · M 幅度/影响 0-3 · N 叙事契合 0-2。每票取最强那条(不相加),≥${CATALYST_BAR} 分过闸;其余保留(分级不砍)。`,
-        )}
       />
 
       {catalyst == null ? (
