@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
+import type { Catalyst, CatalystData, CatalystTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
 
 // yfinance GICS sectors → short Chinese labels.
 export const SECTOR_CN: Record<string, string> = {
@@ -838,4 +838,87 @@ export function buildFocus(
     (a, b) => b.gates - a.gates || b.score - a.score || a.ticker.localeCompare(b.ticker),
   );
   return items;
+}
+
+// ── Stage 3 — Catalyst (TPMN) ────────────────────────────────────────────────
+// Joins the Focus List to the catalyst.json produced by newsagg.catalyst. A
+// Focus name ADVANCES if its strongest catalyst clears the bar; names with a
+// catalyst below the bar are "watch", names fetched with none are "none", and
+// names not yet fetched are "pending" (inclusive — nothing is cut here either).
+export const CATALYST_BAR = 5; // TPMN score (0-10) to advance
+
+export type CatalystStatus = "advance" | "watch" | "none" | "pending";
+
+export interface CatalystRow {
+  ticker: string;
+  company: string;
+  cap: CapSize;
+  sector: string;
+  focusScore: number; // the Focus List composite
+  gates: number;
+  core: boolean;
+  cat: CatalystTicker | null; // full catalyst record (null = not fetched yet)
+  catScore: number; // best catalyst TPMN score, or -1 if pending
+  best: Catalyst | null; // strongest catalyst
+  status: CatalystStatus;
+}
+
+export function buildCatalystRows(
+  focus: FocusItem[],
+  catalyst: CatalystData | null,
+): CatalystRow[] {
+  const rows: CatalystRow[] = focus.map((f) => {
+    const cat = catalyst?.[f.ticker] ?? null;
+    const best = cat?.catalysts?.[0] ?? null;
+    const catScore = cat ? cat.score : -1;
+    const status: CatalystStatus = !cat
+      ? "pending"
+      : !best
+        ? "none"
+        : catScore >= CATALYST_BAR
+          ? "advance"
+          : "watch";
+    return {
+      ticker: f.ticker,
+      company: f.company,
+      cap: f.cap,
+      sector: f.sector,
+      focusScore: f.score,
+      gates: f.gates,
+      core: f.core,
+      cat,
+      catScore,
+      best,
+      status,
+    };
+  });
+  // Advancing (highest catalyst) first, then by catalyst score, then Focus score.
+  const rank: Record<CatalystStatus, number> = { advance: 0, watch: 1, none: 2, pending: 3 };
+  rows.sort(
+    (a, b) =>
+      rank[a.status] - rank[b.status] ||
+      b.catScore - a.catScore ||
+      b.focusScore - a.focusScore,
+  );
+  return rows;
+}
+
+export const CATALYST_TYPE_LABEL: Record<string, { en: string; zh: string }> = {
+  earnings: { en: "Earnings", zh: "财报" },
+  guidance: { en: "Guidance", zh: "指引" },
+  approval: { en: "Approval", zh: "获批" },
+  order: { en: "Order / Contract", zh: "订单/合同" },
+  m_and_a: { en: "M&A", zh: "并购" },
+  capital_return: { en: "Capital Return", zh: "资本回报" },
+  policy: { en: "Policy", zh: "政策" },
+  index: { en: "Index Add", zh: "指数纳入" },
+  mgmt: { en: "Management", zh: "管理层" },
+  revision: { en: "Est. Revision", zh: "预期修正" },
+  other: { en: "Other", zh: "其他" },
+};
+
+export function catalystTypeLabel(type: string | null | undefined, lang: "en" | "zh"): string {
+  if (!type) return lang === "zh" ? "其他" : "Other";
+  const l = CATALYST_TYPE_LABEL[type];
+  return l ? (lang === "zh" ? l.zh : l.en) : type;
 }

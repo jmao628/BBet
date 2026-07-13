@@ -150,3 +150,33 @@ export interface RankRow {
   tags: string[]; // which widgets it appears in
   caps: string[]; // cap-size buckets (Large/Mid/Small Cap, ...)
 }
+
+// Stage 3 — catalyst discovery (TPMN). Written by newsagg.catalyst.
+export interface CatalystTPMN {
+  T: number; // trigger (type weight)
+  P: number; // probability (de-rated by priced_in)
+  M: number; // magnitude (est. % upside, capped)
+  N: number; // nearness (days to a dated event)
+  score: number; // 0-10
+  type: string;
+}
+export interface Catalyst {
+  type: string;
+  title: string;
+  event_date: string | null;
+  probability: number;
+  magnitude_pct: number;
+  priced_in: number;
+  source_url: string;
+  thesis: string;
+  tpmn: CatalystTPMN;
+}
+export interface CatalystTicker {
+  catalysts: Catalyst[];
+  score: number;
+  best_type: string | null;
+  model: string;
+  ok: boolean;
+  generated_at: string;
+}
+export type CatalystData = Record<string, CatalystTicker>;

@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, noDataSet, belowMinCap } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, noDataSet, belowMinCap } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -10,6 +10,7 @@ function useCounts(): Record<string, number | null> {
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
+  const catalyst = useStore((s) => s.catalyst);
   const marketCaps = useStore((s) => s.marketCaps);
   // Exclude CONFIRMED no-data OTC/foreign ADRs (pending new seeds still count)
   // and micro-caps below the market-cap floor (e.g. PERF).
@@ -26,17 +27,23 @@ function useCounts(): Record<string, number | null> {
   const screenCount =
     heat || technical ? buildScreen(data, heat, marketCaps, technical).candidates.length : null;
 
-  const focusCount =
+  const focus =
     technical || supplychain
-      ? buildFocus(data, heat, technical, marketCaps, sectors, supplychain).length
-      : null;
+      ? buildFocus(data, heat, technical, marketCaps, sectors, supplychain)
+      : [];
+  const focusCount = technical || supplychain ? focus.length : null;
+
+  // Catalyst = Focus names whose strongest catalyst clears the bar (advancing).
+  const catalystCount = catalyst
+    ? buildCatalystRows(focus, catalyst).filter((r) => r.status === "advance").length
+    : null;
 
   return {
     seeds: seeds.length,
     heat: heatCount,
     screen: screenCount,
     focus: focusCount,
-    catalyst: null,
+    catalyst: catalystCount,
     conviction: null,
     technical: null,
     candidates: null,

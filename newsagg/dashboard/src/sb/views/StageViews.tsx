@@ -23,36 +23,6 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function CatalystView() {
-  const t = useT();
-  return (
-    <div className="view-in">
-      <ViewHead
-        eyebrow={t("Stage 3 · Catalyst", "Stage 3 · 催化剂")}
-        title={t("Catalyst Score · T × P × M × N", "催化剂评分 · T × P × M × N")}
-        desc={t(
-          "Pull every candidate catalyst on the ticker (seed table + earnings calendar), score each on TPMN, take the strongest as the primary (not summed); the rest are secondary catalysts.",
-          "抽出这只票身上所有候选催化剂（种子表 + 财报日历），每个各算 TPMN 分，取最强的当主分（不相加），其余列为次要催化剂。",
-        )}
-      />
-      <div className="grid gap-4">
-        <Pending
-          title={t("Pending: catalyst list + TPMN scoring", "待接入：催化剂清单 + TPMN 打分")}
-          needs={t(
-            "Collect: seed catalyst_type (earnings/guidance/new_order/policy/m&a) + earnings calendar|A/B class: A timed (has date) / B untimed (window midpoint)|T = 25·exp(−((days−14)²)/(2·21²)), days<0→0; peak at 14d|P probability 0-3 · M magnitude 0-3 · N narrative 0-2; each ticker takes its strongest catalyst",
-            "收集：种子表 catalyst_type（earnings/guidance/new_order/policy/m&a）+ 财报日历自动加 earnings|A/B 分类：A 定时(有日历) / B 不定时(窗口中点)|T=25×exp(−((天数−14)²)/(2×21²))，天数<0→0；峰在 14 天|P 概率0-3 · M 幅度0-3 · N 叙事0-2；每票取最强催化剂当主分",
-          ).split("|")}
-        />
-        <Ref>
-          <Row k={t("A (timed)", "A 类(定时)")} v={t("earnings, dated policy, lockup expiry → days = calendar date − today", "earnings、有裁定日 policy、锁定期到期 → 天数=日历日−今天")} />
-          <Row k={t("B (untimed)", "B 类(不定时)")} v={t("new_order, m&a, ad-hoc guidance, supply-chain read → days = expected window midpoint", "new_order、m&a、非定期 guidance、供应链读通 → 天数=预计窗口中点")} />
-          <Row k={t("Primary rule", "主分规则")} v={t("with multiple catalysts, the highest TPMN is the ticker's score; others are notes", "多个催化剂取 TPMN 最高那一个当票的催化剂分，其余记为次要备注")} />
-        </Ref>
-      </div>
-    </div>
-  );
-}
-
 export function ConvictionView() {
   const t = useT();
   return (

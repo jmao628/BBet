@@ -8,9 +8,9 @@ import { SeedsView } from "./sb/views/SeedsView";
 import { HeatView } from "./sb/views/HeatView";
 import { ScreenView } from "./sb/views/ScreenView";
 import { FocusView } from "./sb/views/FocusView";
+import { CatalystView } from "./sb/views/CatalystView";
 import { StockDetail } from "./sb/views/StockDetail";
 import {
-  CatalystView,
   ConvictionView,
   TechnicalView,
   CandidatesView,
