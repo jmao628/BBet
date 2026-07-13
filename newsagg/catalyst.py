@@ -365,6 +365,7 @@ def fetch_missing(
     workers: int = 3,
     model: str = MODEL,
     sectors: dict[str, dict] | None = None,
+    out_path: Path | None = None,
 ) -> dict[str, dict]:
     try:
         from openai import OpenAI
@@ -396,8 +397,14 @@ def fetch_missing(
             res = fut.result()
             if res:
                 out[t] = res
+                # Checkpoint after every ticker so a long background run persists
+                # progress (survives Ctrl-C / a dropped connection) and the
+                # dashboard fills in live.
+                if out_path is not None:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_text(json.dumps({**have, **out}))
             if i % 5 == 0 or i == len(missing):
-                logger.info("  %d/%d…", i, len(missing))
+                logger.info("  %d/%d… (%d with catalysts so far)", i, len(missing), sum(1 for v in out.values() if v.get("catalysts")))
     return out
 
 
@@ -406,7 +413,7 @@ def main() -> int:
     ap.add_argument("--config", default=None)
     ap.add_argument("--tickers", default=None, help="comma-separated override (e.g. the Focus List)")
     ap.add_argument("--refresh", action="store_true", help="re-fetch all, ignore cache")
-    ap.add_argument("--limit", type=int, default=25, help="cap how many new tickers to fetch this run (default 25; web search is slow)")
+    ap.add_argument("--limit", type=int, default=25, help="cap how many new tickers to fetch this run (default 25; --limit 0 = all uncached; web search is slow)")
     ap.add_argument("--model", default=MODEL, help=f"OpenAI model id (default {MODEL})")
     ap.add_argument("--min-cap", type=float, default=3e8, help="skip tickers below this market cap (default $300M)")
     ap.add_argument("--workers", type=int, default=3)
@@ -448,7 +455,7 @@ def main() -> int:
     sectors = _load(settings.output_dir / "sectors.json")
     today = date.today()
 
-    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors)
+    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors, out_path=out_path)
     merged = {**have, **fetched}
     if not merged:
         logger.warning("no catalyst data resolved (no key / API error); keeping existing file")
