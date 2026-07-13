@@ -236,6 +236,31 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
 
+// Widget tags that are analyst-thesis sources (not SA quant/screener lists).
+const THESIS_SRC_TAGS = new Set(["Ideas", "MyAnalyst"]);
+
+// "Report-only" seeds: on the board SOLELY because an analyst wrote them up —
+// no numeric SA quant score, not in any quant / screener / coverage list — and
+// not a mega-cap. The "BUY" such a row carries is the analyst's own article
+// rating, not an SA rating, so `rated` alone can't tell them apart. These are
+// quarantined to the Analyst-thesis list and kept out of the ranked universe,
+// so a $195M penny stock like PERF can't top the leaderboard. Mega-caps
+// (GOOG / META / NVDA) are exempt — they stay even when only written up.
+export function reportOnlySet(
+  data: SAData | null,
+  marketCaps: MarketCaps | null,
+): Set<string> {
+  const out = new Set<string>();
+  for (const s of buildSeeds(data)) {
+    if (!s.hasThesis) continue; // not a thesis at all → not report-only
+    if (s.quant != null) continue; // has a real SA quant score → backed
+    if (s.tags.some((t) => !THESIS_SRC_TAGS.has(t))) continue; // in a quant/screener/coverage list → backed
+    if (bypassesHeat(marketCaps?.[s.ticker])) continue; // mega-cap exception
+    out.add(s.ticker);
+  }
+  return out;
+}
+
 // Passes the heat gate if it's a mega cap (bypass), OR social heat has
 // ignited/detonated, OR price-volume attention has ignited. The last lane is
 // what lets thinly-discussed mid/small caps through — social mentions are too
@@ -346,7 +371,10 @@ export function buildRankings(
   // Rated seeds, minus confirmed no-data OTC/foreign ADRs (newly-added seeds
   // pending their first fetch still count — they're not confirmed no-data).
   const noData = noDataSet(technical);
-  const uni = buildUniverse(data).filter((u) => u.rated && !noData.has(u.ticker));
+  const reportOnly = reportOnlySet(data, marketCaps);
+  const uni = buildUniverse(data).filter(
+    (u) => u.rated && !noData.has(u.ticker) && !reportOnly.has(u.ticker),
+  );
   const cmap = companyMap(data);
   const capsByTicker = new Map(uni.map((u) => [u.ticker, u.caps]));
   const capOf = (t: string) => capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []);
@@ -514,12 +542,15 @@ export function buildScreen(
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
   const { advancing, advancingBy } = buildRankings(data, heat, technical, marketCaps);
   const noData = noDataSet(technical);
+  const reportOnly = reportOnlySet(data, marketCaps);
   const candidates: ScreenRow[] = [];
   let passedHeat = 0;
 
   for (const s of seeds) {
     // Confirmed no-data (OTC / foreign ADR) → out. Pending new seeds stay.
     if (noData.has(s.ticker)) continue;
+    // Report-only (analyst thesis with no SA rating, non-mega) → out.
+    if (reportOnly.has(s.ticker)) continue;
     // Quality net: must have an SA rating AND an analyst thesis. Independent of Heat.
     if (s.rating == null && s.quant == null) continue;
     if (!s.hasThesis) continue;
@@ -566,8 +597,9 @@ export function buildScreen(
       (b.z ?? -99) - (a.z ?? -99) ||
       (b.attnScore ?? -1) - (a.attnScore ?? -1),
   );
-  // Seed pool = deduped bulls minus confirmed no-data (matches the seed table).
-  const total = seeds.filter((s) => !noData.has(s.ticker)).length;
+  // Seed pool = deduped bulls minus confirmed no-data and report-only (matches
+  // the seed table's "All").
+  const total = seeds.filter((s) => !noData.has(s.ticker) && !reportOnly.has(s.ticker)).length;
   return { candidates, total, passedHeat };
 }
 
@@ -730,8 +762,9 @@ export function buildFocus(
   const eco = buildEcoAdjacency(supplychain, marketCaps);
   const { advancing } = buildRankings(data, heat, technical, marketCaps);
   const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
+  const reportOnly = reportOnlySet(data, marketCaps);
 
-  const rated = uni.filter((u) => u.rated);
+  const rated = uni.filter((u) => u.rated && !reportOnly.has(u.ticker));
   const items: FocusItem[] = [];
   for (const u of rated) {
     const t = u.ticker;

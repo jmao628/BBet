@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildSeeds, noDataSet, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
+import { buildSeeds, noDataSet, reportOnlySet, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
   const data = useStore((s) => s.data);
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
+  const marketCaps = useStore((s) => s.marketCaps);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
   const allSeeds = useMemo(() => buildSeeds(data), [data]);
+  const reportOnly = useMemo(() => reportOnlySet(data, marketCaps), [data, marketCaps]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
@@ -25,24 +27,31 @@ export function SeedsView() {
   const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
   const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
-  const thesisCount = seeds.filter((r) => r.hasThesis).length;
+  // The Analyst-thesis view keeps every ★ thesis (incl. report-only names). The
+  // default universe ("All") drops report-only names — the ones on the board
+  // solely because of an analyst write-up with no SA rating (e.g. PERF) — so
+  // they only surface under ★ Analyst thesis.
+  const thesisPool = useMemo(() => seeds.filter((r) => r.hasThesis), [seeds]);
+  const mainSeeds = useMemo(() => seeds.filter((r) => !reportOnly.has(r.ticker)), [seeds, reportOnly]);
+  const reportOnlyCount = seeds.length - mainSeeds.length;
+
+  const thesisCount = thesisPool.length;
   // Carried-over = kept from a prior scrape (not in today's fresh pull); fresh
   // = seen in today's scrape / a watchlist.
   const isCarried = (r: { tags: string[] }) => r.tags.some((x) => /carried/i.test(x));
-  const carriedCount = seeds.filter(isCarried).length;
-  const freshCount = seeds.length - carriedCount;
+  const carriedCount = mainSeeds.filter(isCarried).length;
+  const freshCount = mainSeeds.length - carriedCount;
 
   const sectorCounts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const s of seeds) {
+    for (const s of mainSeeds) {
       const sec = sectorOf(s.ticker);
       if (sec) c.set(sec, (c.get(sec) ?? 0) + 1);
     }
     return [...c.entries()].sort((a, b) => b[1] - a[1]);
-  }, [seeds, sectors]);
+  }, [mainSeeds, sectors]);
 
-  let rows = seeds;
-  if (thesisOnly) rows = rows.filter((r) => r.hasThesis);
+  let rows = thesisOnly ? thesisPool : mainSeeds;
   if (source === "fresh") rows = rows.filter((r) => !isCarried(r));
   else if (source === "carried") rows = rows.filter((r) => isCarried(r));
   if (sectorFilter) rows = rows.filter((r) => sectorOf(r.ticker) === sectorFilter);
@@ -65,7 +74,7 @@ export function SeedsView() {
             onClick={() => setThesisOnly(false)}
             className={`px-3 py-1.5 text-[12px] ${!thesisOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
           >
-            {t("All", "全部")} {seeds.length}
+            {t("All", "全部")} {mainSeeds.length}
           </button>
           <button
             onClick={() => setThesisOnly(true)}
@@ -79,7 +88,7 @@ export function SeedsView() {
           <div className="flex overflow-hidden rounded-lg border border-line">
             {(
               [
-                ["all", t("All", "全部"), seeds.length],
+                ["all", t("All", "全部"), mainSeeds.length],
                 ["fresh", t("Fresh", "本次新抓"), freshCount],
                 ["carried", t("Carried over", "沿用"), carriedCount],
               ] as const
@@ -120,6 +129,16 @@ export function SeedsView() {
               {sectorLabel(sec, lang)} {n}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* report-only names held back to the thesis view */}
+      {reportOnlyCount > 0 && !thesisOnly && (
+        <div className="mb-2 text-[11px] text-muted2">
+          {t(
+            `${reportOnlyCount} report-only names (analyst thesis, no SA rating, non-mega) are held out of the ranked universe — see ★ Analyst thesis.`,
+            `${reportOnlyCount} 只「只有分析师论点、无 SA 评分、非巨头」的票已移出排名池 —— 见 ★ 有分析师论点。`,
+          )}
         </div>
       )}
 
