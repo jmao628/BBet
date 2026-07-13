@@ -16,7 +16,7 @@ import {
   CATALYST_BAR,
   type FocusItem,
 } from "../pipeline";
-import type { CatalystTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
+import type { Catalyst, CatalystTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
 
 // Human labels for the ranking lenses a name advanced in (Heat Ignition).
 const LENS_LABEL: Record<string, { en: string; zh: string }> = {
@@ -108,61 +108,162 @@ function ScoreBreakdown({
   );
 }
 
-// Transparent catalyst-score breakdown: the strongest catalyst's T/P/M/N, then
-// the depth bonus the other catalysts add (weighted by their own strength).
-function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
-  const primary = cat.catalysts[0];
-  const primScore = catScore10(primary.tpmn);
-  const total = catTickerScore(cat);
-  const depth = Math.round((total - primScore) * 10) / 10;
-  const secs = cat.catalysts.slice(1);
+// Emoji glyphs give each catalyst type an at-a-glance icon.
+const TYPE_ICON: Record<string, string> = {
+  earnings: "📊",
+  guidance: "🧭",
+  approval: "✅",
+  order: "📝",
+  m_and_a: "🤝",
+  capital_return: "💰",
+  policy: "🏛️",
+  index: "📈",
+  mgmt: "👤",
+  revision: "🔄",
+  other: "⚡",
+};
+
+function catDayLabel(c: Catalyst, t: (en: string, zh: string) => string): { label: string; near: boolean } {
+  const d = c.tpmn.days;
+  if (c.cls === "B") return d == null ? { label: t("window TBD", "窗口待定"), near: false } : { label: t(`~${d}d`, `~${d}天`), near: d <= 30 };
+  if (d == null) return { label: t("TBD", "待定"), near: false };
+  if (d < 0) return { label: t(`${-d}d ago`, `${-d}天前`), near: false };
+  if (d === 0) return { label: t("today", "今天"), near: true };
+  return { label: t(`in ${d}d`, `${d}天后`), near: d <= 30 };
+}
+
+// Animated ring for the composite catalyst score.
+function Ring({ score, color }: { score: number; color: string }) {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setGrown(true), 60);
+    return () => clearTimeout(id);
+  }, []);
+  const R = 22;
+  const C = 2 * Math.PI * R;
+  const shown = grown ? score : 0;
+  return (
+    <svg width="58" height="58" viewBox="0 0 58 58" className="flex-none">
+      <circle cx="29" cy="29" r={R} fill="none" stroke="#1c2734" strokeWidth="5" />
+      <circle
+        cx="29"
+        cy="29"
+        r={R}
+        fill="none"
+        stroke={color}
+        strokeWidth="5"
+        strokeLinecap="round"
+        strokeDasharray={C}
+        strokeDashoffset={C * (1 - shown / 10)}
+        transform="rotate(-90 29 29)"
+        style={{ transition: "stroke-dashoffset 0.9s cubic-bezier(0.22,0.61,0.36,1)" }}
+      />
+      <text x="29" y="33.5" textAnchor="middle" fill="#e7edf4" fontFamily="ui-monospace, monospace" fontSize="14" fontWeight="700">
+        {score.toFixed(1)}
+      </text>
+    </svg>
+  );
+}
+
+function TpmnRow({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
   const dims: [string, number, number, string][] = [
-    ["T", primary.tpmn.T, 25, "#9b8cf0"],
-    ["P", primary.tpmn.P, 3, "#5fb0e8"],
-    ["M", primary.tpmn.M, 3, "#e9c46a"],
-    ["N", primary.tpmn.N, 2, "#48c78e"],
+    ["T", tpmn.T, 25, "#9b8cf0"],
+    ["P", tpmn.P, 3, "#5fb0e8"],
+    ["M", tpmn.M, 3, "#e9c46a"],
+    ["N", tpmn.N, 2, "#48c78e"],
   ];
   return (
+    <div className="flex items-center gap-2.5">
+      {dims.map(([k, v, max, c]) => (
+        <div key={k} className="flex items-center gap-1" title={`${k} ${k === "T" ? v.toFixed(1) : v}/${max}`}>
+          <span className="font-mono text-[9px] text-muted2">{k}</span>
+          <span className="h-1.5 w-8 overflow-hidden rounded-full bg-inset">
+            <span className="block h-full rounded-full" style={{ width: `${Math.max(6, (v / max) * 100)}%`, background: c }} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One catalyst, fully recorded: icon + type + title + timing + score, its
+// summary, the P/M/N justification, its T/P/M/N meter, and a source link.
+function CatItem({ c, lang, t }: { c: Catalyst; lang: Lang; t: (en: string, zh: string) => string }) {
+  const cd = catDayLabel(c, t);
+  const sc = catScore10(c.tpmn);
+  return (
+    <div className="rounded-lg border border-line/60 bg-white/[0.02] p-2.5 transition-colors hover:bg-white/[0.045]">
+      <div className="flex items-center gap-2">
+        <span className="text-[14px] leading-none">{TYPE_ICON[c.type] ?? "⚡"}</span>
+        <span className="flex-none rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted">{catalystTypeLabel(c.type, lang)}</span>
+        <span className="min-w-0 flex-1 text-[12px] leading-snug text-text">{c.title}</span>
+        <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>
+        <span className="flex-none font-mono text-[13px] font-semibold" style={{ color: sc >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
+          {sc.toFixed(1)}
+        </span>
+      </div>
+      {c.summary && <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{c.summary}</p>}
+      {c.evidence && <p className="mt-1 text-[10px] italic text-muted2">P/M/N · {c.evidence}</p>}
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <TpmnRow tpmn={c.tpmn} />
+        <a
+          href={c.source_url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex-none font-mono text-[10px] text-signal/80 hover:text-signal hover:underline"
+        >
+          {t("source", "来源")} ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// Full catalyst record for a ticker: an animated score ring, a base+depth
+// composition bar, and every catalyst laid out in detail.
+function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
+  const total = catTickerScore(cat);
+  const primScore = catScore10(cat.catalysts[0].tpmn);
+  const depth = Math.round((total - primScore) * 10) / 10;
+  const color = total >= CATALYST_BAR ? "#48c78e" : "#c7d2dc";
+  const n = cat.catalysts.length;
+  return (
     <div className="rounded-xl border border-line bg-panel2 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-[13px] font-semibold">{t("Catalyst score — how it's built", "催化剂打分 · 拆解")}</div>
-        <span className="font-mono text-[15px] font-semibold" style={{ color: total >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
-          {total.toFixed(1)}
-          <span className="text-[10px] text-muted2">/10</span>
-        </span>
-      </div>
-      <div className="rounded-lg bg-white/[0.02] px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="flex-none rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase text-muted">{catalystTypeLabel(primary.type, lang)}</span>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-text">{primary.title}</span>
-          <span className="flex-none font-mono text-[12px] font-semibold text-signal">{primScore.toFixed(1)}</span>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[13px] font-semibold">{t("Catalyst score — how it's built", "催化剂打分 · 全部记录")}</div>
+          <div className="mt-0.5 text-[11px] text-muted2">{n} {t(n === 1 ? "catalyst" : "catalysts", "条催化剂")}</div>
         </div>
-        <div className="mt-2 flex items-center gap-3">
-          {dims.map(([k, v, max, c]) => (
-            <div key={k} className="flex items-center gap-1" title={`${k} ${k === "T" ? v.toFixed(1) : v}/${max}`}>
-              <span className="font-mono text-[9px] text-muted2">{k}</span>
-              <span className="h-1.5 w-8 overflow-hidden rounded-full bg-inset">
-                <span className="block h-full rounded-full" style={{ width: `${Math.max(6, (v / max) * 100)}%`, background: c }} />
-              </span>
-            </div>
-          ))}
+        <Ring score={total} color={color} />
+      </div>
+
+      {/* composition — base (strongest) + depth toward 10 */}
+      <div className="mb-3">
+        <div className="mb-1 flex items-center justify-between text-[10px]">
+          <span className="text-muted2">
+            {t("Base (strongest)", "主分(最强)")} <span className="font-mono text-muted">{primScore.toFixed(1)}</span>
+          </span>
+          <span className="text-gold">
+            +{depth.toFixed(1)} {t("depth", "深度加成")}
+          </span>
+        </div>
+        <div className="flex h-2.5 overflow-hidden rounded-full bg-inset">
+          <div className="h-full" style={{ width: `${(primScore / 10) * 100}%`, background: color, transition: "width 0.8s ease" }} />
+          <div className="h-full" style={{ width: `${(depth / 10) * 100}%`, background: "#e9c46a", transition: "width 0.8s ease" }} />
         </div>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-[11.5px]">
-        <span className="min-w-0 flex-1 text-muted">
-          {secs.length > 0
-            ? t(
-                `+ depth from ${secs.length} more (${secs.map((s) => catScore10(s.tpmn).toFixed(1)).join(", ")})`,
-                `+ ${secs.length} 条次要催化剂加权 (${secs.map((s) => catScore10(s.tpmn).toFixed(1)).join(", ")})`,
-              )
-            : t("single catalyst — no depth bonus", "仅一条催化剂,无深度加成")}
-        </span>
-        <span className="flex-none font-mono text-ok">{depth > 0 ? `+${depth.toFixed(1)}` : "+0.0"}</span>
+
+      {/* every catalyst, full detail */}
+      <div className="space-y-2">
+        {cat.catalysts.map((c, i) => (
+          <CatItem key={i} c={c} lang={lang} t={t} />
+        ))}
       </div>
-      <div className="mt-2 border-t border-line pt-2 text-[10.5px] leading-relaxed text-muted2">
+
+      <div className="mt-2.5 border-t border-line pt-2 text-[10.5px] leading-relaxed text-muted2">
         {t(
-          "Base = the strongest catalyst; extra catalysts fill the remaining headroom to 10, weighted by their own strength (P/M/N) with diminishing returns.",
-          "基准 = 最强那条催化剂;其余催化剂按各自强度(P/M/N)递减加权,填补到 10 分的余量。",
+          "Base = the strongest catalyst; the rest fill the remaining headroom to 10, weighted by their own strength (P/M/N) with diminishing returns.",
+          "基准 = 最强那条;其余按各自强度(P/M/N)递减加权,填补到 10 分的余量。",
         )}
       </div>
     </div>
