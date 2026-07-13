@@ -138,6 +138,26 @@ body {
   }
 }
 
+/* Catalyst runway density cells — a soft staggered pop-in on mount. */
+@keyframes cat-cell-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.cat-cell {
+  animation: cat-cell-in 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-cell {
+    animation: none;
+  }
+}
+
 /* Catalyst type glyph — a slow pulsing halo behind the coloured core. */
 @keyframes catpulse {
   0%,

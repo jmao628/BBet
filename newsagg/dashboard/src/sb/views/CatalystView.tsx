@@ -52,12 +52,30 @@ function Spark({ data, up }: { data: number[]; up: boolean }) {
 }
 
 // A 90-day "runway" of dated catalysts, CLASSIFIED into one lane per catalyst
-// type. Each dot: position = days out, size = score, colour = status. Two things
-// keep dots from piling up: (1) a ZOOM control stretches the day-axis (the lanes
-// scroll horizontally) so events on nearby dates separate; (2) within a lane,
-// dots that would still collide are stacked onto separate vertical levels. Hover
-// to read, click to open.
+// type. To stay legible with 100+ catalysts, each lane is AGGREGATED into
+// density cells: one soft cell per time-bucket, brighter/larger the more
+// catalysts fall in it, with the count shown. Zoom makes the buckets finer so
+// clustered dates separate. Hover reads the names; click opens the strongest.
 const RUNWAY_ZOOMS = [1, 2, 4] as const;
+// zoom → { bucket width in days (finer de-clusters), px per day (spread) }
+const ZOOM_CFG: Record<number, { bucket: number; ppd: number }> = {
+  1: { bucket: 7, ppd: 13 },
+  2: { bucket: 3.5, ppd: 24 },
+  4: { bucket: 2, ppd: 44 },
+};
+
+function _hex(color: string, alpha: number): string {
+  return color + Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, "0");
+}
+
+interface Cell {
+  key: number;
+  midDays: number;
+  count: number;
+  color: string;
+  best: string; // strongest ticker in the bucket
+  names: string; // tooltip list
+}
 
 function Runway({
   rows,
@@ -72,6 +90,7 @@ function Runway({
 }) {
   const MAXD = 90;
   const [zoom, setZoom] = useState(1);
+  const { bucket, ppd } = ZOOM_CFG[zoom];
 
   // Live days so the runway shifts left each day and drops events once they pass.
   const dated = rows
@@ -85,34 +104,37 @@ function Runway({
   const byType = new Map<string, { r: CatalystRow; days: number }[]>();
   for (const { r, days } of dated) {
     const type = r.best!.type;
-    const arr = byType.get(type) ?? [];
-    arr.push({ r, days });
-    byType.set(type, arr);
+    (byType.get(type) ?? byType.set(type, []).get(type)!).push({ r, days });
   }
   const lanes = [...byType.entries()].sort((a, b) => b[1].length - a[1].length);
 
   const LABEL_W = 84;
-  const PPD = 12 * zoom; // px per day
-  const trackW = MAXD * PPD;
-  const ROW_GAP = 9; // vertical spacing between stacked levels
-  const DOT_GAP = 15; // min horizontal px before a dot stacks to a new level
+  const trackW = MAXD * ppd;
+  const LANE_H = 26;
   const marks = [0, 7, 14, 30, 45, 60, 90].filter((m) => m <= MAXD);
 
-  // Greedy vertical de-stacking: walk dots left→right, drop each onto the lowest
-  // level whose last dot is ≥ DOT_GAP behind it. Same-day clusters fan out.
-  const layout = (arr: { r: CatalystRow; days: number }[]) => {
-    const items = [...arr].sort((a, b) => a.days - b.days);
-    const lastX: number[] = [];
-    const placed = items.map((it) => {
-      const x = it.days * PPD;
-      let lvl = 0;
-      while (lvl < lastX.length && x - lastX[lvl] < DOT_GAP) lvl++;
-      lastX[lvl] = x;
-      return { ...it, x, lvl };
+  // Aggregate one lane into density cells, one per non-empty time-bucket.
+  const cellsFor = (arr: { r: CatalystRow; days: number }[]): Cell[] => {
+    const buckets = new Map<number, { r: CatalystRow; days: number }[]>();
+    for (const it of arr) {
+      const b = Math.floor(it.days / bucket);
+      (buckets.get(b) ?? buckets.set(b, []).get(b)!).push(it);
+    }
+    return [...buckets.entries()].map(([b, items]) => {
+      const sorted = [...items].sort((a, z) => z.r.catScore - a.r.catScore);
+      const advancing = items.some((i) => i.r.status === "advance");
+      const names = sorted.slice(0, 8).map((i) => i.r.ticker).join(", ") + (sorted.length > 8 ? "…" : "");
+      return {
+        key: b,
+        midDays: Math.min((b + 0.5) * bucket, MAXD),
+        count: items.length,
+        color: advancing ? "#48c78e" : "#e9c46a",
+        best: sorted[0].r.ticker,
+        names,
+      };
     });
-    return { placed, levels: Math.max(1, lastX.length) };
   };
-  const laid = lanes.map(([type, arr]) => ({ type, ...layout(arr) }));
+  const laid = lanes.map(([type, arr]) => ({ type, cells: cellsFor(arr) }));
 
   return (
     <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 py-3">
@@ -142,46 +164,47 @@ function Runway({
 
       <div className="overflow-x-auto pb-1">
         <div style={{ width: LABEL_W + trackW }}>
-          <div className="space-y-1">
-            {laid.map(({ type, placed, levels }) => {
-              const laneH = Math.max(20, levels * ROW_GAP + 8);
-              return (
-                <div key={type} className="flex items-center">
-                  <span
-                    className="sticky left-0 z-10 flex-none truncate bg-panel2 pr-2 text-right text-[10px] text-muted2"
-                    style={{ width: LABEL_W }}
-                  >
-                    {catalystTypeLabel(type, lang)}
-                  </span>
-                  <div className="relative flex-none" style={{ width: trackW, height: laneH }}>
-                    <div className="absolute inset-x-0 top-1/2 h-px bg-line/70" />
-                    {placed.map(({ r, days, x, lvl }) => {
-                      const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
-                      const size = 6 + (r.catScore / 10) * 6;
-                      const yOff = (lvl - (levels - 1) / 2) * ROW_GAP;
-                      return (
-                        <button
-                          key={r.ticker}
-                          onClick={() => onOpen(r.ticker)}
-                          title={`${r.ticker} · ${days}d · ${r.catScore.toFixed(1)}/10`}
-                          className="absolute rounded-full transition-transform hover:z-20 hover:scale-150"
-                          style={{
-                            left: x,
-                            top: `calc(50% + ${yOff}px)`,
-                            width: size,
-                            height: size,
-                            marginLeft: -size / 2,
-                            marginTop: -size / 2,
-                            background: color,
-                            boxShadow: `0 0 6px ${color}88`,
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
+          <div className="space-y-0.5">
+            {laid.map(({ type, cells }) => (
+              <div key={type} className="flex items-center">
+                <span
+                  className="sticky left-0 z-10 flex-none truncate bg-panel2 pr-2 text-right text-[10px] text-muted2"
+                  style={{ width: LABEL_W }}
+                >
+                  {catalystTypeLabel(type, lang)}
+                </span>
+                <div className="relative flex-none" style={{ width: trackW, height: LANE_H }}>
+                  <div className="absolute inset-x-0 top-1/2 h-px bg-line/50" />
+                  {cells.map((c, i) => {
+                    const size = Math.min(22, 11 + (c.count - 1) * 2.4);
+                    const a = 0.5 + Math.min(c.count, 8) / 8 * 0.5;
+                    return (
+                      <button
+                        key={c.key}
+                        onClick={() => onOpen(c.best)}
+                        title={`${catalystTypeLabel(type, lang)} · ${Math.round(c.midDays)}d · ${c.count} · ${c.names}`}
+                        className="cat-cell absolute grid place-items-center rounded-full font-mono font-semibold transition-[filter] hover:z-10 hover:brightness-125"
+                        style={{
+                          left: c.midDays * ppd,
+                          top: "50%",
+                          width: size,
+                          height: size,
+                          marginLeft: -size / 2,
+                          marginTop: -size / 2,
+                          background: _hex(c.color, a),
+                          boxShadow: `0 0 7px ${_hex(c.color, 0.28)}`,
+                          fontSize: size >= 16 ? 9 : 8,
+                          color: "#0b0f14",
+                          animationDelay: `${Math.min(i * 18, 260)}ms`,
+                        }}
+                      >
+                        {c.count > 1 ? c.count : ""}
+                      </button>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
 
           <div className="mt-1.5 flex">
@@ -191,7 +214,7 @@ function Runway({
                 <span
                   key={m}
                   className="absolute -translate-x-1/2 font-mono text-[9px] text-muted2"
-                  style={{ left: m * PPD }}
+                  style={{ left: m * ppd }}
                 >
                   {m === 0 ? t("today", "今") : `${m}d`}
                 </span>
