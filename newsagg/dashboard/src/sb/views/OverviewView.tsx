@@ -263,7 +263,7 @@ const SectorGlobe = memo(function SectorGlobe({
           sy = cy - q.y * R;
         const persp = 0.55 + ((q.z + 1) / 2) * 0.7;
         const mag = magOf(p, s.sizeKey);
-        const rad = (5.5 + mag * 10) * persp * dpr * (s.hover === q.i ? 1.4 : 1);
+        const rad = (4.5 + mag * 8) * persp * dpr * (s.hover === q.i ? 1.4 : 1);
         const front = q.z > 0;
         const dim = s.focusSpot && !p.onFocus ? 0.16 : 1;
         ctx.globalAlpha = Math.min((front ? 1 : 0.3) * (0.62 + mag * 0.38) * dim, 1);
@@ -279,24 +279,20 @@ const SectorGlobe = memo(function SectorGlobe({
         const dim = s.focusSpot && !p.onFocus ? 0.16 : 1;
         if (dim < 1) continue;
         const base = pr.r * dpr;
+        // Only genuinely selective signals get a ring, so they stay legible
+        // (Focus-List membership is near-universal here → shown via the list ★
+        // and the Focus spotlight toggle instead, not a per-node ring).
         if (p.breakout) {
           ctx.beginPath();
-          ctx.arc(pr.cx, pr.cy, base + (3 + pulse * 4) * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${rgb},${0.35 + pulse * 0.4})`;
-          ctx.lineWidth = 1.4 * dpr;
-          ctx.stroke();
-        }
-        if (p.onFocus) {
-          ctx.beginPath();
-          ctx.arc(pr.cx, pr.cy, base + 2 * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${gold},0.95)`;
-          ctx.lineWidth = 1.6 * dpr;
+          ctx.arc(pr.cx, pr.cy, base + (2 + pulse * 3) * dpr, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${gold},${0.4 + pulse * 0.45})`;
+          ctx.lineWidth = 1.3 * dpr;
           ctx.stroke();
         }
         if (p.newHigh) {
           ctx.beginPath();
-          ctx.arc(pr.cx, pr.cy, base + 5 * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(235,245,250,0.75)";
+          ctx.arc(pr.cx, pr.cy, base + 2.5 * dpr, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(235,245,250,0.7)";
           ctx.lineWidth = 1 * dpr;
           ctx.stroke();
         }
@@ -607,15 +603,12 @@ export function OverviewView() {
           {t("size = selected signal", "大小 = 所选信号")}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full ring-2 ring-gold" /> ★ {t("on Focus List", "重点名单")}
-        </span>
-        <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/70" /> 52w {t("high", "新高")}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full ring-2 ring-ignite" /> {t("breakout", "突破")}
+          <span className="h-2.5 w-2.5 rounded-full ring-2 ring-gold" /> {t("breakout", "突破")}
         </span>
-        <span>{t("hover to inspect · click to open", "悬停查看 · 点击进入")}</span>
+        <span>{t("★ Focus → use the toggle · hover to inspect · click to open", "★ 重点 → 用右上开关 · 悬停查看 · 点击进入")}</span>
       </div>
 
       {movers.length === 0 ? (
