@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, companyMap, noDataSet, reportOnlySet, sectorLabel } from "../pipeline";
+import { buildFocus, companyMap, noDataSet, unratedSmallCap, sectorLabel } from "../pipeline";
 
 // Landing page: one interactive globe PER sector. Each node is a strong-buy name;
 // size encodes a switchable signal (move / attention / rvol), rings flag Focus-
@@ -497,10 +497,10 @@ export function OverviewView() {
     return new Set(f.map((x) => x.ticker));
   }, [data, heat, technical, marketCaps, sectors, supplychain]);
 
-  // Report-only names (analyst thesis, no SA rating, non-mega — e.g. the $195M
-  // penny stock PERF) are quarantined to the Seeds "★ Analyst thesis" list and
-  // kept off the leaderboard, matching the rest of the funnel.
-  const reportOnly = useMemo(() => reportOnlySet(data, marketCaps), [data, marketCaps]);
+  // Unrated small-caps (< $2B with only a text list "BUY", no quant, no analyst
+  // — e.g. the $195M penny stock PERF) are kept off the leaderboard, matching
+  // the rest of the funnel.
+  const unrated = useMemo(() => unratedSmallCap(data, marketCaps), [data, marketCaps]);
 
   const movers = useMemo<Mover[]>(() => {
     const noData = noDataSet(technical);
@@ -509,7 +509,7 @@ export function OverviewView() {
     for (const [ticker, tt] of Object.entries(technical?.tickers ?? {})) {
       if (noData.has(ticker)) continue;
       if (tt.gauge?.summary !== "strong_buy") continue;
-      if (reportOnly.has(ticker)) continue;
+      if (unrated.has(ticker)) continue;
       const at = tt.attention;
       out.push({
         ticker,
@@ -526,7 +526,7 @@ export function OverviewView() {
       });
     }
     return out.sort((a, b) => b.changePct - a.changePct);
-  }, [technical, data, sectors, focusSet, reportOnly]);
+  }, [technical, data, sectors, focusSet, unrated]);
 
   const bySector = useMemo(() => {
     const m = new Map<string, Mover[]>();

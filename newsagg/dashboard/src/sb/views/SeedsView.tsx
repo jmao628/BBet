@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildSeeds, noDataSet, reportOnlySet, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
+import { buildSeeds, noDataSet, unratedSmallCap, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
@@ -12,7 +12,7 @@ export function SeedsView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
   const allSeeds = useMemo(() => buildSeeds(data), [data]);
-  const reportOnly = useMemo(() => reportOnlySet(data, marketCaps), [data, marketCaps]);
+  const unrated = useMemo(() => unratedSmallCap(data, marketCaps), [data, marketCaps]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
@@ -27,13 +27,12 @@ export function SeedsView() {
   const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
   const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
-  // The Analyst-thesis view keeps every ★ thesis (incl. report-only names). The
-  // default universe ("All") drops report-only names — the ones on the board
-  // solely because of an analyst write-up with no SA rating (e.g. PERF) — so
-  // they only surface under ★ Analyst thesis.
+  // "All" drops unrated small-caps — < $2B names with only a text list "BUY"
+  // (no quant score, no analyst rating), e.g. PERF. Small-caps that carry a
+  // quant score or an analyst thesis stay, as do all mid/large caps.
   const thesisPool = useMemo(() => seeds.filter((r) => r.hasThesis), [seeds]);
-  const mainSeeds = useMemo(() => seeds.filter((r) => !reportOnly.has(r.ticker)), [seeds, reportOnly]);
-  const reportOnlyCount = seeds.length - mainSeeds.length;
+  const mainSeeds = useMemo(() => seeds.filter((r) => !unrated.has(r.ticker)), [seeds, unrated]);
+  const unratedCount = seeds.length - mainSeeds.length;
 
   const thesisCount = thesisPool.length;
   // Carried-over = kept from a prior scrape (not in today's fresh pull); fresh
@@ -132,12 +131,12 @@ export function SeedsView() {
         </div>
       )}
 
-      {/* report-only names held back to the thesis view */}
-      {reportOnlyCount > 0 && !thesisOnly && (
+      {/* unrated small-caps dropped from the ranked universe */}
+      {unratedCount > 0 && !thesisOnly && (
         <div className="mb-2 text-[11px] text-muted2">
           {t(
-            `${reportOnlyCount} report-only names (analyst thesis, no SA rating, non-mega) are held out of the ranked universe — see ★ Analyst thesis.`,
-            `${reportOnlyCount} 只「只有分析师论点、无 SA 评分、非巨头」的票已移出排名池 —— 见 ★ 有分析师论点。`,
+            `${unratedCount} unrated small-caps (< $2B, only a text list rating — no quant score or analyst thesis) were dropped from the ranked universe.`,
+            `${unratedCount} 只「小盘(<$20亿)、只有文字榜单评级、无 quant 分或分析师评分」的票已移出排名池。`,
           )}
         </div>
       )}
