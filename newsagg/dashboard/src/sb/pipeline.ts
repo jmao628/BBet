@@ -356,7 +356,7 @@ interface Lens {
 
 export function buildRankings(
   data: SAData | null,
-  heat: HeatData | null,
+  _heat: HeatData | null, // social-heat lens removed; kept positional for callers
   technical: TechnicalData | null,
   marketCaps: MarketCaps | null,
   sectors: SectorData | null = null,
@@ -414,14 +414,6 @@ export function buildRankings(
       min: 10,
       get: (t) => momentum(t),
       fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`,
-    },
-    {
-      key: "social",
-      label: { en: "Social Heat", zh: "社交热度" },
-      desc: { en: "Ape Wisdom z-score · bar 0.5 (ignite)", zh: "Ape Wisdom z 分数,达标线 0.5(点火线)" },
-      min: 0.5,
-      get: (t) => heat?.tickers?.[t]?.z ?? null,
-      fmt: (v) => v.toFixed(2),
     },
   ];
 
