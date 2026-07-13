@@ -236,25 +236,23 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
 
-// Widget tags that are analyst-thesis sources (not SA quant/screener lists).
-const THESIS_SRC_TAGS = new Set(["Ideas", "MyAnalyst"]);
-
 // "Report-only" seeds: on the board SOLELY because an analyst wrote them up —
-// no numeric SA quant score, not in any quant / screener / coverage list — and
-// not a mega-cap. The "BUY" such a row carries is the analyst's own article
-// rating, not an SA rating, so `rated` alone can't tell them apart. These are
-// quarantined to the Analyst-thesis list and kept out of the ranked universe,
-// so a $195M penny stock like PERF can't top the leaderboard. Mega-caps
-// (GOOG / META / NVDA) are exempt — they stay even when only written up.
+// an analyst thesis with no numeric SA quant score — and not a mega-cap. The
+// "BUY" such a row carries is the analyst's own article rating, not an SA quant
+// rating, so a numeric quant score is the only reliable "SA-rated" signal (tags
+// can't be trusted — carry-over rewrites a name's widget provenance to a single
+// "Carried Over" tag). These are quarantined to the Analyst-thesis list and
+// kept out of the ranked universe, so a $195M penny stock like PERF can't top
+// the leaderboard. Mega-caps (GOOG / META / NVDA) are exempt — they stay even
+// when only written up.
 export function reportOnlySet(
   data: SAData | null,
   marketCaps: MarketCaps | null,
 ): Set<string> {
   const out = new Set<string>();
   for (const s of buildSeeds(data)) {
-    if (!s.hasThesis) continue; // not a thesis at all → not report-only
-    if (s.quant != null) continue; // has a real SA quant score → backed
-    if (s.tags.some((t) => !THESIS_SRC_TAGS.has(t))) continue; // in a quant/screener/coverage list → backed
+    if (!s.hasThesis) continue; // not an analyst thesis → not report-only
+    if (s.quant != null) continue; // has a real numeric SA quant score → backed
     if (bypassesHeat(marketCaps?.[s.ticker])) continue; // mega-cap exception
     out.add(s.ticker);
   }
