@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
 import {
   buildFocus,
@@ -111,13 +111,23 @@ function Row({
   t: (en: string, zh: string) => string;
 }) {
   const [open, setOpen] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const meta = STATUS_META[r.status];
   const best = r.best;
   const more = r.cat ? r.cat.catalysts.length - 1 : 0;
   const cd = best ? timing(best, t) : null;
   const hasDetail = !!best && (!!best.summary || more > 0);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    // When collapsing, the card shrinks under the scroll position — pull it back
+    // into view so the page doesn't strand you in the gap it left behind.
+    if (!next)
+      requestAnimationFrame(() => cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  };
   return (
     <div
+      ref={cardRef}
       className="group relative overflow-hidden rounded-xl border bg-panel2 transition-[transform,border-color] duration-200 hover:-translate-y-0.5"
       style={{ borderColor: r.status === "advance" ? `${meta.color}3a` : "var(--line,#22303c)" }}
     >
@@ -178,7 +188,7 @@ function Row({
       {/* one clear, fixed-position toggle bar */}
       {hasDetail ? (
         <button
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
           className="mt-1 flex w-full items-center justify-center gap-1.5 border-t border-line/60 py-2 text-[10.5px] text-muted2 transition-colors hover:bg-white/[0.04] hover:text-text"
         >
           <span className={`inline-block transition-transform duration-200 ${open ? "rotate-180" : ""}`}>⌄</span>
