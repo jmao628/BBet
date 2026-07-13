@@ -9,7 +9,7 @@ import {
   SHORTLIST_W,
   type LeaderRow,
 } from "../pipeline";
-import { ViewHead, StatStrip } from "../ui";
+import { ViewHead } from "../ui";
 
 const TIER_META: Record<1 | 2 | 3, { color: string; glow: string; medal: string; en: string; zh: string; cond: { en: string; zh: string } }> = {
   1: { color: "#f0c862", glow: "#f0c862", medal: "1st", en: "First — all three", zh: "第一名榜单 · 三条全中", cond: { en: "Focus · Core · Catalyst > 6", zh: "在名单 · 核心 · 催化剂 > 6" } },
@@ -18,17 +18,23 @@ const TIER_META: Record<1 | 2 | 3, { color: string; glow: string; medal: string;
 };
 const LENS = { cat: "#48c78e", focus: "#3dd6c4", attn: "#5fb0e8" } as const;
 
-// Animated strength meter — fills from 0 → value on mount.
-function Strength({ v, color, mounted, delay }: { v: number; color: string; mounted: boolean; delay: number }) {
+// Animated strength meter — fills from 0 → value each time it mounts (so it
+// re-plays when you switch tabs).
+function Strength({ v, color, delay }: { v: number; color: string; delay: number }) {
+  const [grown, setGrown] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setGrown(true), 40 + delay);
+    return () => clearTimeout(id);
+  }, [delay]);
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-inset">
       <div
         className="h-full rounded-full"
         style={{
-          width: mounted ? `${Math.max(2, v)}%` : "0%",
+          width: grown ? `${Math.max(2, v)}%` : "0%",
           background: `linear-gradient(90deg, ${color}77, ${color})`,
           boxShadow: `0 0 8px ${color}88`,
-          transition: `width 0.9s cubic-bezier(0.22,0.61,0.36,1) ${delay}ms`,
+          transition: "width 0.9s cubic-bezier(0.22,0.61,0.36,1)",
         }}
       />
     </div>
@@ -65,7 +71,7 @@ function CondPill({ on, color, label }: { on: boolean; color: string; label: str
   );
 }
 
-function Row({ r, rank, idx, mounted, lang, onOpen, t }: { r: LeaderRow; rank: number; idx: number; mounted: boolean; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+function Row({ r, rank, idx, lang, onOpen, t }: { r: LeaderRow; rank: number; idx: number; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
   const meta = TIER_META[r.tier];
   const top = rank === 1;
   return (
@@ -113,47 +119,39 @@ function Row({ r, rank, idx, mounted, lang, onOpen, t }: { r: LeaderRow; rank: n
           <span className="text-[8.5px] uppercase tracking-wide text-muted2">{t("strength", "强度")}</span>
           <span className="font-disp text-[16px] font-semibold leading-none" style={{ color: meta.color }}>{r.composite.toFixed(0)}</span>
         </div>
-        <Strength v={r.composite} color={meta.color} mounted={mounted} delay={Math.min(idx * 25, 400)} />
+        <Strength v={r.composite} color={meta.color} delay={Math.min(idx * 25, 400)} />
       </div>
     </div>
   );
 }
 
-function TierBlock({ tier, rows, mounted, lang, onOpen, t }: { tier: 1 | 2 | 3; rows: LeaderRow[]; mounted: boolean; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
-  const [open, setOpen] = useState(true);
+// One big tab in the tier switcher.
+function TierTab({ tier, count, active, lang, onClick }: { tier: 1 | 2 | 3; count: number; active: boolean; lang: "en" | "zh"; onClick: () => void }) {
   const meta = TIER_META[tier];
   return (
-    <div className="mb-5 overflow-hidden rounded-2xl border bg-panel" style={{ borderColor: `${meta.color}33` }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
-        style={{ background: `linear-gradient(90deg, ${meta.color}12, transparent)` }}
+    <button
+      onClick={onClick}
+      className="relative flex items-center gap-3 overflow-hidden rounded-2xl border px-4 py-3 text-left transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5"
+      style={{
+        borderColor: active ? meta.color : `${meta.color}30`,
+        background: active ? `linear-gradient(120deg, ${meta.color}22, ${meta.color}0a)` : "transparent",
+        boxShadow: active ? `0 0 22px ${meta.glow}33` : undefined,
+      }}
+    >
+      <span
+        className="grid h-9 w-9 flex-none place-items-center rounded-xl font-mono text-[10px] font-bold"
+        style={{ color: "#0b0f14", background: meta.color, boxShadow: active ? `0 0 14px ${meta.glow}88` : undefined, opacity: active ? 1 : 0.75 }}
       >
-        <span
-          className="grid h-8 w-8 flex-none place-items-center rounded-lg font-mono text-[10px] font-bold"
-          style={{ color: "#0b0f14", background: meta.color, boxShadow: `0 0 12px ${meta.glow}66` }}
-        >
-          {meta.medal}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: meta.color }}>
-            {lang === "zh" ? meta.zh : meta.en}
-          </div>
-          <div className="text-[10.5px] text-muted2">{lang === "zh" ? meta.cond.zh : meta.cond.en}</div>
+        {meta.medal}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-disp text-[13.5px] font-semibold tracking-tight" style={{ color: active ? meta.color : "#c7d2dc" }}>
+          {lang === "zh" ? meta.zh : meta.en}
         </div>
-        <span className="font-disp text-[20px] font-bold tabular-nums" style={{ color: meta.color }}>{rows.length}</span>
-        <span className={`ml-1 text-[12px] text-muted2 transition-transform duration-200 ${open ? "rotate-180" : ""}`}>⌄</span>
-      </button>
-      {open && (
-        <div className="space-y-2 px-3 pb-3 pt-1">
-          {rows.length === 0 ? (
-            <div className="py-4 text-center text-[12px] text-muted2">{t("— empty —", "— 暂无 —")}</div>
-          ) : (
-            rows.map((r, i) => <Row key={r.ticker} r={r} rank={i + 1} idx={i} mounted={mounted} lang={lang} onOpen={onOpen} t={t} />)
-          )}
-        </div>
-      )}
-    </div>
+        <div className="truncate text-[9.5px] text-muted2">{lang === "zh" ? meta.cond.zh : meta.cond.en}</div>
+      </div>
+      <span className="font-disp text-[24px] font-bold leading-none tabular-nums" style={{ color: active ? meta.color : "#6f7f8e" }}>{count}</span>
+    </button>
   );
 }
 
@@ -170,11 +168,7 @@ export function ShortlistView() {
   const t = useT();
 
   const [sector, setSector] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const id = setTimeout(() => setMounted(true), 80);
-    return () => clearTimeout(id);
-  }, []);
+  const [tab, setTab] = useState<1 | 2 | 3 | null>(null); // null = auto-pick first non-empty
 
   const focus = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -187,6 +181,9 @@ export function ShortlistView() {
   const t1 = tier(1);
   const t2 = tier(2);
   const t3 = tier(3);
+  // Active tab: user's choice, else the first tier that actually has names.
+  const activeTier: 1 | 2 | 3 = tab ?? (t1.length ? 1 : t2.length ? 2 : 3);
+  const activeRows = activeTier === 1 ? t1 : activeTier === 2 ? t2 : t3;
 
   const sectorCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -211,15 +208,6 @@ export function ShortlistView() {
         </div>
       ) : (
         <>
-          <StatStrip
-            stats={[
-              { k: t("① First", "① 第一名榜单"), v: t1.length, d: t("all three conditions", "三条全中"), color: TIER_META[1].color },
-              { k: t("② Second", "② 第二名榜单"), v: t2.length, d: t("two of three", "满足两条"), color: TIER_META[2].color },
-              { k: t("③ Third", "③ 第三名榜单"), v: t3.length, d: t("focus only", "仅在名单"), color: TIER_META[3].color },
-              { k: t("Catalyst cover", "催化剂覆盖"), v: `${rows.filter((r) => r.catScore >= 0).length}/${rows.length}` },
-            ]}
-          />
-
           {/* sector filter */}
           <div className="mb-4 flex flex-wrap items-center gap-1.5">
             <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
@@ -240,9 +228,25 @@ export function ShortlistView() {
             ))}
           </div>
 
-          <TierBlock tier={1} rows={t1} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
-          <TierBlock tier={2} rows={t2} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
-          <TierBlock tier={3} rows={t3} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
+          {/* tier switcher — one board at a time */}
+          <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+            <TierTab tier={1} count={t1.length} active={activeTier === 1} lang={lang} onClick={() => setTab(1)} />
+            <TierTab tier={2} count={t2.length} active={activeTier === 2} lang={lang} onClick={() => setTab(2)} />
+            <TierTab tier={3} count={t3.length} active={activeTier === 3} lang={lang} onClick={() => setTab(3)} />
+          </div>
+
+          {/* active board */}
+          <div key={activeTier} className="view-in space-y-2">
+            {activeRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-8 text-center text-[13px] text-muted">
+                {t("No names in this leaderboard yet.", "该榜单暂无票。")}
+              </div>
+            ) : (
+              activeRows.map((r, i) => (
+                <Row key={r.ticker} r={r} rank={i + 1} idx={i} lang={lang} onOpen={openDetail} t={t} />
+              ))
+            )}
+          </div>
         </>
       )}
     </div>
