@@ -757,6 +757,11 @@ export function StockDetail() {
   const liveTime = live?.generated_at
     ? new Date(live.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : null;
+  // When the on-demand live fetch fails (e.g. no VPN to Yahoo), show WHEN the
+  // cached daily snapshot was taken instead of a vague label.
+  const snapTime = technical?.generated_at
+    ? new Date(technical.generated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : null;
   const h = heat?.tickers?.[ticker];
   const mc = marketCaps?.[ticker];
   const cap = capSizeFromCap(mc, caps);
@@ -804,8 +809,15 @@ export function StockDetail() {
                   {t(`Live · ${liveTime}`, `实时 · ${liveTime}`)}
                 </span>
               ) : liveErr ? (
-                <span className="text-[11px] text-muted2" title={t("Live fetch failed — showing the daily snapshot. Check the VPN proxy.", "实时抓取失败——显示每日快照。检查 VPN 代理。")}>
-                  {t("· daily snapshot", "· 每日快照")}
+                <span
+                  className="flex items-center gap-1 text-[11px] text-muted2"
+                  title={t(
+                    "Live quote fetch failed (needs the VPN proxy to reach Yahoo). Showing the latest daily snapshot — it auto-upgrades to Live once the fetch works.",
+                    "实时报价抓取失败（需要 VPN 代理才能连 Yahoo）。显示最近一次每日快照——抓取一旦成功会自动切回实时。",
+                  )}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted2/60" />
+                  {snapTime ? t(`snapshot · ${snapTime}`, `快照 · ${snapTime}`) : t("daily snapshot", "每日快照")}
                 </span>
               ) : loading ? (
                 <span className="text-[11px] text-muted2">{t("· fetching…", "· 抓取中…")}</span>
