@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore, useT } from "../../store";
 import {
   buildFocus,
@@ -214,13 +215,12 @@ function Runway({
                           }
                           const PW = 252;
                           const PH = 340;
-                          // Anchor to the bubble itself, not the cursor: sit just
-                          // to its right (flip left near the edge), top-aligned.
-                          const r = e.currentTarget.getBoundingClientRect();
-                          let x = r.right + 10;
-                          if (x + PW > window.innerWidth - 8) x = r.left - PW - 10;
+                          // Right next to the cursor (flip left near the edge).
+                          // Rendered via a portal so viewport coords are exact.
+                          let x = e.clientX + 12;
+                          if (x + PW > window.innerWidth - 8) x = e.clientX - PW - 12;
                           x = Math.max(8, x);
-                          const y = Math.max(8, Math.min(r.top - 6, window.innerHeight - PH - 12));
+                          const y = Math.max(8, Math.min(e.clientY - 14, window.innerHeight - PH - 8));
                           setPop({ x, y, type, days: Math.round(c.midDays), color: c.color, items: c.items });
                         }}
                         title={`${catalystTypeLabel(type, lang)} · ${Math.round(c.midDays)}d · ${c.count} · ${c.names}`}
@@ -265,8 +265,11 @@ function Runway({
         </div>
       </div>
 
-      {/* bucket picker — every name in the clicked cell, strongest first */}
-      {pop && (
+      {/* bucket picker — every name in the clicked cell, strongest first.
+          Portaled to <body> so `position: fixed` is relative to the viewport,
+          not the transformed `.view-in` ancestor (which was offsetting it). */}
+      {pop &&
+        createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setPop(null)} />
           <div
@@ -316,8 +319,9 @@ function Runway({
               })}
             </div>
           </div>
-        </>
-      )}
+        </>,
+          document.body,
+        )}
     </div>
   );
 }
