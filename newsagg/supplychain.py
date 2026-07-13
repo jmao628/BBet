@@ -12,6 +12,17 @@ Like ``sectors.py`` this is a **cached** fetch: only tickers missing from
 ``data/newsagg/supplychain.json`` are looked up; existing ones are kept. So the
 daily run is usually a no-op and only newly-added SA names cost an API call.
 
+Cache safety — IMPORTANT: this file is only ever *merged*, never replaced.
+``--refresh`` re-maps the requested names (``--tickers X,Y`` or, with no
+``--tickers``, the whole rated universe) and writes them OVER the existing
+cache — every other map is preserved. So ``--refresh --tickers MU,NVDA`` re-maps
+just those two and leaves the other ~500 untouched. (It used to blow the whole
+file away — it no longer does.) Each ticker is checkpointed as it completes, so
+an interrupted rebuild keeps its progress and never loses prior maps.
+
+To rebuild everything from scratch, delete the file first, then run with no
+``--refresh``:  ``rm data/newsagg/supplychain.json && python -m newsagg.supplychain``.
+
 Provider: OpenAI (the user's gateway), same as ``catalyst.py`` — it reads
 ``OPENAI_API_KEY`` (and, if the gateway needs it, ``OPENAI_BASE_URL``) from the
 environment, never from code or the repo. The gateway requires streaming, so we
@@ -22,7 +33,8 @@ Writes ``data/newsagg/supplychain.json`` =
     {ticker: {upstream: [Edge], downstream: [Edge], peers: [Edge], model, ok}}
 where Edge = {ticker, name, reason}.
 
-    OPENAI_API_KEY=... python -m newsagg.supplychain
+    OPENAI_API_KEY=... python -m newsagg.supplychain              # fill missing
+    OPENAI_API_KEY=... python -m newsagg.supplychain --tickers MU --refresh  # re-map one, keep the rest
 """
 
 from __future__ import annotations
