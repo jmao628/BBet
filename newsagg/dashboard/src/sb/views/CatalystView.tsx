@@ -34,14 +34,6 @@ function timing(c: Catalyst, t: (en: string, zh: string) => string): { label: st
   return { label: t(`in ${days}d`, `${days} 天后`), near: days <= 30 };
 }
 
-// Four thin segments — T/P/M/N, each scaled to its own max. Single accent so it
-// reads as one clean meter rather than a rainbow.
-function hashStr(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
 // Recent price trend — quick context on whether the catalyst sits on a rising or
 // falling stock.
 function Spark({ data, up }: { data: number[]; up: boolean }) {
@@ -60,8 +52,13 @@ function Spark({ data, up }: { data: number[]; up: boolean }) {
 }
 
 // A 90-day "runway" of dated catalysts, CLASSIFIED into one lane per catalyst
-// type. Each dot: position = days out, size = score, colour = status. Hover to
-// read it, click to open.
+// type. Each dot: position = days out, size = score, colour = status. Two things
+// keep dots from piling up: (1) a ZOOM control stretches the day-axis (the lanes
+// scroll horizontally) so events on nearby dates separate; (2) within a lane,
+// dots that would still collide are stacked onto separate vertical levels. Hover
+// to read, click to open.
+const RUNWAY_ZOOMS = [1, 2, 4] as const;
+
 function Runway({
   rows,
   onOpen,
@@ -74,6 +71,8 @@ function Runway({
   t: (en: string, zh: string) => string;
 }) {
   const MAXD = 90;
+  const [zoom, setZoom] = useState(1);
+
   // Live days so the runway shifts left each day and drops events once they pass.
   const dated = rows
     .map((r) => ({ r, days: r.best ? catLiveDays(r.best) : null }))
@@ -91,56 +90,115 @@ function Runway({
     byType.set(type, arr);
   }
   const lanes = [...byType.entries()].sort((a, b) => b[1].length - a[1].length);
-  const marks = [0, 14, 30, 60, 90];
+
+  const LABEL_W = 84;
+  const PPD = 12 * zoom; // px per day
+  const trackW = MAXD * PPD;
+  const ROW_GAP = 9; // vertical spacing between stacked levels
+  const DOT_GAP = 15; // min horizontal px before a dot stacks to a new level
+  const marks = [0, 7, 14, 30, 45, 60, 90].filter((m) => m <= MAXD);
+
+  // Greedy vertical de-stacking: walk dots left→right, drop each onto the lowest
+  // level whose last dot is ≥ DOT_GAP behind it. Same-day clusters fan out.
+  const layout = (arr: { r: CatalystRow; days: number }[]) => {
+    const items = [...arr].sort((a, b) => a.days - b.days);
+    const lastX: number[] = [];
+    const placed = items.map((it) => {
+      const x = it.days * PPD;
+      let lvl = 0;
+      while (lvl < lastX.length && x - lastX[lvl] < DOT_GAP) lvl++;
+      lastX[lvl] = x;
+      return { ...it, x, lvl };
+    });
+    return { placed, levels: Math.max(1, lastX.length) };
+  };
+  const laid = lanes.map(([type, arr]) => ({ type, ...layout(arr) }));
 
   return (
     <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 py-3">
-      <div className="mb-2.5 flex items-center justify-between text-[11px]">
+      <div className="mb-2.5 flex items-center justify-between gap-3 text-[11px]">
         <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
-        <span className="flex items-center gap-3 font-mono text-[10px] text-muted2">
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ok" />{t("advancing", "过闸")}</span>
-          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-warn" />{t("watch", "观察")}</span>
-        </span>
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-3 font-mono text-[10px] text-muted2">
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ok" />{t("advancing", "过闸")}</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-warn" />{t("watch", "观察")}</span>
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-[10px] text-muted2">{t("zoom", "缩放")}</span>
+            {RUNWAY_ZOOMS.map((z) => (
+              <button
+                key={z}
+                onClick={() => setZoom(z)}
+                className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                  zoom === z ? "bg-signal/15 text-signal" : "text-muted2 hover:text-text"
+                }`}
+              >
+                {z}×
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="space-y-1">
-        {lanes.map(([type, arr]) => (
-          <div key={type} className="flex items-center gap-3">
-            <span className="w-20 flex-none truncate text-right text-[10px] text-muted2">{catalystTypeLabel(type, lang)}</span>
-            <div className="relative h-5 flex-1">
-              <div className="absolute inset-x-0 top-1/2 h-px bg-line/70" />
-              {arr.map(({ r, days }) => {
-                const x = (Math.min(days, MAXD) / MAXD) * 100;
-                const jx = ((hashStr(r.ticker) % 100) / 100 - 0.5) * 4;
-                const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
-                const size = 6 + (r.catScore / 10) * 6;
-                return (
-                  <button
-                    key={r.ticker}
-                    onClick={() => onOpen(r.ticker)}
-                    title={`${r.ticker} · ${days}d · ${r.catScore.toFixed(1)}/10`}
-                    className="absolute top-1/2 rounded-full transition-transform hover:z-10 hover:scale-150"
-                    style={{
-                      left: `calc(${x}% + ${jx}px)`,
-                      width: size,
-                      height: size,
-                      marginLeft: -size / 2,
-                      marginTop: -size / 2,
-                      background: color,
-                      boxShadow: `0 0 6px ${color}88`,
-                    }}
-                  />
-                );
-              })}
+
+      <div className="overflow-x-auto pb-1">
+        <div style={{ width: LABEL_W + trackW }}>
+          <div className="space-y-1">
+            {laid.map(({ type, placed, levels }) => {
+              const laneH = Math.max(20, levels * ROW_GAP + 8);
+              return (
+                <div key={type} className="flex items-center">
+                  <span
+                    className="sticky left-0 z-10 flex-none truncate bg-panel2 pr-2 text-right text-[10px] text-muted2"
+                    style={{ width: LABEL_W }}
+                  >
+                    {catalystTypeLabel(type, lang)}
+                  </span>
+                  <div className="relative flex-none" style={{ width: trackW, height: laneH }}>
+                    <div className="absolute inset-x-0 top-1/2 h-px bg-line/70" />
+                    {placed.map(({ r, days, x, lvl }) => {
+                      const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
+                      const size = 6 + (r.catScore / 10) * 6;
+                      const yOff = (lvl - (levels - 1) / 2) * ROW_GAP;
+                      return (
+                        <button
+                          key={r.ticker}
+                          onClick={() => onOpen(r.ticker)}
+                          title={`${r.ticker} · ${days}d · ${r.catScore.toFixed(1)}/10`}
+                          className="absolute rounded-full transition-transform hover:z-20 hover:scale-150"
+                          style={{
+                            left: x,
+                            top: `calc(50% + ${yOff}px)`,
+                            width: size,
+                            height: size,
+                            marginLeft: -size / 2,
+                            marginTop: -size / 2,
+                            background: color,
+                            boxShadow: `0 0 6px ${color}88`,
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-1.5 flex">
+            <span className="flex-none" style={{ width: LABEL_W }} />
+            <div className="relative h-3 flex-none" style={{ width: trackW }}>
+              {marks.map((m) => (
+                <span
+                  key={m}
+                  className="absolute -translate-x-1/2 font-mono text-[9px] text-muted2"
+                  style={{ left: m * PPD }}
+                >
+                  {m === 0 ? t("today", "今") : `${m}d`}
+                </span>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
-      <div className="relative ml-[92px] mt-1.5 h-3">
-        {marks.map((m) => (
-          <span key={m} className="absolute -translate-x-1/2 font-mono text-[9px] text-muted2" style={{ left: `${(m / MAXD) * 100}%` }}>
-            {m === 0 ? t("today", "今") : `${m}d`}
-          </span>
-        ))}
+        </div>
       </div>
     </div>
   );
@@ -373,7 +431,6 @@ export function CatalystView() {
     { k: "all", label: t("All", "全部"), n: rows.length },
     { k: "advance", label: t("Advancing", "过闸"), n: counts.advance },
     { k: "watch", label: t("Watch", "观察"), n: counts.watch },
-    { k: "none", label: t("No catalyst", "无催化剂"), n: counts.none },
     { k: "pending", label: t("Pending", "待抓取"), n: counts.pending },
   ];
 
@@ -397,7 +454,6 @@ export function CatalystView() {
             stats={[
               { k: t("Advancing", "过闸"), v: counts.advance, d: t(`catalyst ≥ ${CATALYST_BAR}`, `催化剂 ≥ ${CATALYST_BAR}`), color: "#48c78e" },
               { k: t("Watch", "观察"), v: counts.watch, d: t("has a weaker catalyst", "有较弱催化剂"), color: "#e9c46a" },
-              { k: t("No catalyst", "无催化剂"), v: counts.none, d: t("fetched, none found", "已抓,未发现"), color: "#8aa0b4" },
               { k: t("Coverage", "覆盖"), v: `${fetched}/${rows.length}`, d: t("Focus names fetched", "重点名单已抓取") },
             ]}
           />
