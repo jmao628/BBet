@@ -986,7 +986,7 @@ export function StockDetail() {
                 "还没有供应链生态图。在 Mac 上运行 ",
               )}
               <code className="font-mono text-signal">python -m newsagg.supplychain</code>
-              {t(" runs on the Mac (needs ANTHROPIC_API_KEY).", " 后出现（需 ANTHROPIC_API_KEY）。")}
+              {t(" runs on the Mac (needs OPENAI_API_KEY).", " 后出现（需 OPENAI_API_KEY）。")}
             </div>
           )}
 
