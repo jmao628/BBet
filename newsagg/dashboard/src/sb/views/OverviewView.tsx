@@ -1,13 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
 import { buildFocus, companyMap, noDataSet, belowMinCap, sectorLabel } from "../pipeline";
 
-// Landing page: one interactive globe PER sector. Each node is a strong-buy name;
-// size encodes a switchable signal (move / attention / rvol), rings flag Focus-
-// List / new-high / breakout, hovering pins a detail card and pauses the spin,
-// clicking opens the ticker. All globes share one rAF loop and pause off-screen.
-
-type SizeKey = "move" | "attn" | "rvol";
+// Landing page: one "Ignition Map" per sector — a momentum × volume scatter that
+// makes position MEAN something. X = today's move %, Y = relative volume (RVOL),
+// bubble size = attention (how much money is watching), rings/glow flag
+// 52w-high / breakout, ★ = Focus. The top-right corner = "moving up on real
+// volume" = exactly what the funnel hunts. Hover pins a card; click opens.
 
 interface Mover {
   ticker: string;
@@ -41,352 +40,120 @@ function hexToRgb(h: string): string {
   const n = parseInt(h.slice(1), 16);
   return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
-function hash(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+// ── Ignition Map — momentum × volume scatter ─────────────────────────────────
+// Position encodes the signal: x = today's move %, y = relative volume (RVOL).
+const X_MIN = -4,
+  X_MAX = 8; // move % domain (clamped)
+const Y_MIN = 0.5,
+  Y_MAX = 3; // RVOL domain (clamped)
+function xPct(move: number): number {
+  const c = Math.max(X_MIN, Math.min(X_MAX, move));
+  return 5 + ((c - X_MIN) / (X_MAX - X_MIN)) * 90; // 5%..95%
 }
-function magOf(m: Mover, key: SizeKey): number {
-  if (key === "attn") return Math.min(m.attnScore / 100, 1);
-  if (key === "rvol") return Math.min((m.rvol ?? 0) / 4, 1);
-  return Math.min(Math.abs(m.changePct) / 8, 1);
+function yPct(rvol: number | null): number {
+  const v = Math.max(Y_MIN, Math.min(Y_MAX, rvol ?? 1));
+  return 12 + (1 - (v - Y_MIN) / (Y_MAX - Y_MIN)) * 74; // 12%(top)..86%(bottom)
 }
-
-// ── Shared render loop — one rAF drives every on-screen globe ────────────────
-const _globes = new Set<(now: number) => void>();
-let _raf = 0;
-function _loop(now: number) {
-  _globes.forEach((fn) => fn(now));
-  _raf = requestAnimationFrame(_loop);
-}
-function registerGlobe(fn: (now: number) => void) {
-  _globes.add(fn);
-  if (!_raf) _raf = requestAnimationFrame(_loop);
-  return () => {
-    _globes.delete(fn);
-    if (_globes.size === 0) {
-      cancelAnimationFrame(_raf);
-      _raf = 0;
-    }
-  };
+function bubbleR(m: Mover): number {
+  return 4 + Math.min(m.attnScore / 100, 1) * 7; // 4..11px radius by attention
 }
 
-// Pre-rendered radial glow sprite per colour — blitted instead of shadowBlur.
-const _sprite = new Map<string, HTMLCanvasElement>();
-function glowSprite(rgb: string): HTMLCanvasElement {
-  const cached = _sprite.get(rgb);
-  if (cached) return cached;
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const g = c.getContext("2d")!;
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, `rgba(${rgb},1)`);
-  grad.addColorStop(0.18, `rgba(${rgb},0.9)`);
-  grad.addColorStop(0.5, `rgba(${rgb},0.22)`);
-  grad.addColorStop(1, `rgba(${rgb},0)`);
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  _sprite.set(rgb, c);
-  return c;
-}
-
-interface Proj {
-  x: number;
-  y: number;
-  r: number;
-  i: number;
-  cx: number;
-  cy: number;
-  front: boolean;
-}
-
-const SectorGlobe = memo(function SectorGlobe({
+const SectorScatter = memo(function SectorScatter({
   rows,
   color,
-  sizeKey,
   focusSpot,
   onPick,
   lang,
 }: {
   rows: Mover[];
   color: string;
-  sizeKey: SizeKey;
   focusSpot: boolean;
   onPick: (t: string) => void;
   lang: "en" | "zh";
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState(-1);
-  const st = useRef({
-    yaw: 0,
-    dragging: false,
-    moved: false,
-    paused: false,
-    lastX: 0,
-    hover: -1,
-    last: 0,
-    active: true,
-    sizeKey,
-    focusSpot,
-    projected: [] as Proj[],
-    grad: null as CanvasGradient | null,
-    gradW: 0,
-    gradH: 0,
-  });
-  st.current.sizeKey = sizeKey;
-  st.current.focusSpot = focusSpot;
+  const rgb = hexToRgb(color);
 
-  const pts = useMemo(
+  // Draw order: big bubbles behind, breakouts on top.
+  const order = useMemo(
     () =>
-      rows.slice(0, 90).map((m) => {
-        const u = (hash(m.ticker) % 997) / 997;
-        const v = (hash(m.ticker + "^") % 991) / 991;
-        return { ...m, lat: Math.asin(2 * u - 1), lon: v * Math.PI * 2 };
-      }),
+      rows
+        .map((_, i) => i)
+        .sort((a, b) => {
+          if (rows[a].breakout !== rows[b].breakout) return rows[a].breakout ? 1 : -1;
+          return bubbleR(rows[b]) - bubbleR(rows[a]);
+        }),
     [rows],
   );
-  const ptsRef = useRef(pts);
-  ptsRef.current = pts;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const rgb = hexToRgb(color);
-    const sprite = glowSprite(rgb);
-    const gold = "233,196,106";
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    const tilt = -0.34;
-
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = Math.max(1, Math.round(rect.width * dpr));
-      canvas.height = Math.max(1, Math.round(rect.height * dpr));
-      st.current.grad = null;
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    const io = new IntersectionObserver(([e]) => (st.current.active = e.isIntersecting), {
-      rootMargin: "150px",
-    });
-    io.observe(canvas);
-
-    const rot = (lat: number, lon: number, yaw: number) => {
-      const l = lon + yaw;
-      const x = Math.cos(lat) * Math.sin(l);
-      const y0 = Math.sin(lat);
-      const z0 = Math.cos(lat) * Math.cos(l);
-      return {
-        x,
-        y: y0 * Math.cos(tilt) - z0 * Math.sin(tilt),
-        z: y0 * Math.sin(tilt) + z0 * Math.cos(tilt),
-      };
-    };
-
-    const render = (now: number) => {
-      const s = st.current;
-      if (!s.active) {
-        s.last = now;
-        return;
-      }
-      const dt = Math.min(now - s.last, 50);
-      s.last = now;
-      if (!s.dragging && !s.paused) s.yaw += 0.0016 * (dt / 16.7);
-      const pulse = 0.5 + 0.5 * Math.sin(now / 380);
-
-      const W = canvas.width,
-        H = canvas.height;
-      const cx = W / 2,
-        cy = H / 2;
-      const R = Math.min(W, H) * 0.42;
-      ctx.clearRect(0, 0, W, H);
-
-      if (!s.grad || s.gradW !== W || s.gradH !== H) {
-        const g = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 1.7);
-        g.addColorStop(0, `rgba(${rgb},0.12)`);
-        g.addColorStop(0.55, `rgba(${rgb},0.03)`);
-        g.addColorStop(1, `rgba(${rgb},0)`);
-        s.grad = g;
-        s.gradW = W;
-        s.gradH = H;
-      }
-      ctx.fillStyle = s.grad;
-      ctx.fillRect(0, 0, W, H);
-
-      // wireframe
-      ctx.lineWidth = dpr;
-      for (let li = -2; li <= 2; li++) {
-        const lat = (li * Math.PI) / 6;
-        ctx.beginPath();
-        for (let a = 0; a <= 48; a++) {
-          const p = rot(lat, (a / 48) * Math.PI * 2, s.yaw);
-          const sx = cx + p.x * R,
-            sy = cy - p.y * R;
-          a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-        }
-        ctx.strokeStyle = `rgba(${rgb},0.09)`;
-        ctx.stroke();
-      }
-      for (let mi = 0; mi < 9; mi++) {
-        const lon = (mi * Math.PI) / 9;
-        ctx.beginPath();
-        for (let a = 0; a <= 48; a++) {
-          const p = rot(-Math.PI / 2 + (a / 48) * Math.PI, lon, s.yaw);
-          const sx = cx + p.x * R,
-            sy = cy - p.y * R;
-          a === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-        }
-        ctx.strokeStyle = `rgba(${rgb},0.055)`;
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(${rgb},0.18)`;
-      ctx.lineWidth = dpr * 1.1;
-      ctx.stroke();
-
-      // node glows (additive)
-      const nodes = ptsRef.current;
-      const proj = nodes
-        .map((p, i) => ({ i, ...rot(p.lat, p.lon, s.yaw) }))
-        .sort((a, b) => a.z - b.z);
-      s.projected = [];
-      ctx.globalCompositeOperation = "lighter";
-      for (const q of proj) {
-        const p = nodes[q.i];
-        const sx = cx + q.x * R,
-          sy = cy - q.y * R;
-        const persp = 0.55 + ((q.z + 1) / 2) * 0.7;
-        const mag = magOf(p, s.sizeKey);
-        const rad = (4.5 + mag * 8) * persp * dpr * (s.hover === q.i ? 1.4 : 1);
-        const front = q.z > 0;
-        const dim = s.focusSpot && !p.onFocus ? 0.16 : 1;
-        ctx.globalAlpha = Math.min((front ? 1 : 0.3) * (0.62 + mag * 0.38) * dim, 1);
-        ctx.drawImage(sprite, sx - rad, sy - rad, rad * 2, rad * 2);
-        s.projected.push({ x: sx / dpr, y: sy / dpr, r: Math.max(rad / dpr, 9), i: q.i, cx: sx, cy: sy, front });
-      }
-      // signal rings (crisp, on top)
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
-      for (const pr of s.projected) {
-        if (!pr.front) continue;
-        const p = nodes[pr.i];
-        const dim = s.focusSpot && !p.onFocus ? 0.16 : 1;
-        if (dim < 1) continue;
-        const base = pr.r * dpr;
-        // Only genuinely selective signals get a ring, so they stay legible
-        // (Focus-List membership is near-universal here → shown via the list ★
-        // and the Focus spotlight toggle instead, not a per-node ring).
-        if (p.breakout) {
-          ctx.beginPath();
-          ctx.arc(pr.cx, pr.cy, base + (2 + pulse * 3) * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${gold},${0.4 + pulse * 0.45})`;
-          ctx.lineWidth = 1.3 * dpr;
-          ctx.stroke();
-        }
-        if (p.newHigh) {
-          ctx.beginPath();
-          ctx.arc(pr.cx, pr.cy, base + 2.5 * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(235,245,250,0.7)";
-          ctx.lineWidth = 1 * dpr;
-          ctx.stroke();
-        }
-      }
-      // hover ring
-      if (s.hover >= 0) {
-        const hp = s.projected.find((p) => p.i === s.hover && p.front);
-        if (hp) {
-          ctx.beginPath();
-          ctx.arc(hp.cx, hp.cy, hp.r * dpr + 6 * dpr, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(${rgb},0.9)`;
-          ctx.lineWidth = 1.4 * dpr;
-          ctx.stroke();
-        }
-      }
-    };
-
-    const unregister = registerGlobe(render);
-    return () => {
-      unregister();
-      ro.disconnect();
-      io.disconnect();
-    };
-  }, [color]);
-
-  const hitTest = (x: number, y: number) => {
-    let best = -1,
-      bd = Infinity;
-    for (const p of st.current.projected) {
-      if (!p.front) continue;
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < p.r + 5 && d < bd) {
-        bd = d;
-        best = p.i;
-      }
-    }
-    return best;
-  };
-  const setHov = (i: number) => {
-    if (st.current.hover === i) return;
-    st.current.hover = i;
-    st.current.paused = i >= 0;
-    setHover(i);
-  };
-  const onDown = (e: React.PointerEvent) => {
-    const s = st.current;
-    s.dragging = true;
-    s.moved = false;
-    s.lastX = e.clientX;
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  };
-  const onMove = (e: React.PointerEvent) => {
-    const s = st.current;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (s.dragging) {
-      const dx = e.clientX - s.lastX;
-      if (Math.abs(dx) > 2) s.moved = true;
-      s.yaw += dx * 0.008;
-      s.lastX = e.clientX;
-    } else {
-      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-      setHov(hit);
-      (e.currentTarget as HTMLElement).style.cursor = hit >= 0 ? "pointer" : "grab";
-    }
-  };
-  const onUp = (e: React.PointerEvent) => {
-    const s = st.current;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (s.dragging && !s.moved) {
-      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-      if (hit >= 0) onPick(pts[hit].ticker);
-    }
-    s.dragging = false;
-  };
-  const onLeave = () => {
-    st.current.dragging = false;
-    setHov(-1);
-  };
-
-  const hv = hover >= 0 ? pts[hover] : null;
+  const hv = hover >= 0 ? rows[hover] : null;
+  const surgeTop = yPct(1.5);
+  const zeroLeft = xPct(0);
 
   return (
-    <div className="relative h-full w-full">
-      <canvas
-        ref={canvasRef}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerLeave={onLeave}
-        className="h-full w-full touch-none select-none"
-        style={{ cursor: "grab" }}
-      />
+    <div className="relative h-full w-full overflow-hidden">
+      {/* reference grid — 0% move (vertical) · 1.5× surge (horizontal) */}
+      <div className="pointer-events-none absolute inset-y-3 w-px bg-white/[0.07]" style={{ left: `${zeroLeft}%` }} />
+      <div className="pointer-events-none absolute inset-x-3 border-t border-dashed border-white/[0.08]" style={{ top: `${surgeTop}%` }} />
+
+      {/* axis + quadrant hints */}
+      <span className="pointer-events-none absolute left-2 top-1.5 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted2/70">RVOL ↑</span>
+      <span className="pointer-events-none absolute bottom-1 right-2 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted2/70">move % →</span>
+      <span
+        className="pointer-events-none absolute right-2.5 font-mono text-[8px] text-ok/50"
+        style={{ top: `${surgeTop}%`, transform: "translateY(-125%)" }}
+      >
+        1.5× surge
+      </span>
+
+      {/* bubbles */}
+      {order.map((i) => {
+        const m = rows[i];
+        const r = bubbleR(m);
+        const isHover = hover === i;
+        const dim = focusSpot && !m.onFocus ? 0.14 : 1;
+        return (
+          <button
+            key={m.ticker}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
+            onClick={() => onPick(m.ticker)}
+            className="absolute rounded-full transition-transform duration-150"
+            title={m.ticker}
+            style={{
+              left: `${xPct(m.changePct)}%`,
+              top: `${yPct(m.rvol)}%`,
+              width: r * 2,
+              height: r * 2,
+              marginLeft: -r,
+              marginTop: -r,
+              opacity: dim,
+              zIndex: isHover ? 30 : m.breakout ? 20 : 10,
+              transform: isHover ? "scale(1.4)" : "scale(1)",
+              background: `radial-gradient(circle at 35% 32%, rgba(${rgb},0.95), rgba(${rgb},0.42))`,
+              boxShadow: m.breakout ? `0 0 11px rgba(${rgb},0.9)` : `0 0 5px rgba(${rgb},0.4)`,
+              border: m.newHigh
+                ? "1.5px solid rgba(255,255,255,0.85)"
+                : m.breakout
+                  ? `1.5px solid rgba(${rgb},1)`
+                  : "none",
+              cursor: "pointer",
+            }}
+          >
+            {m.onFocus && (
+              <span
+                className="absolute -right-1.5 -top-1.5 text-[8px] leading-none text-gold"
+                style={{ textShadow: "0 0 3px #000" }}
+              >
+                ★
+              </span>
+            )}
+          </button>
+        );
+      })}
+
       {hv && (
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg border border-line bg-ink/85 px-3 py-2 backdrop-blur-sm">
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 z-40 rounded-lg border border-line bg-ink/90 px-3 py-2 backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="font-mono text-[13px] font-semibold text-text">{hv.ticker}</span>
@@ -399,7 +166,11 @@ const SectorGlobe = memo(function SectorGlobe({
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[10.5px] text-muted2">
             <span>RVOL {hv.rvol != null ? `${hv.rvol.toFixed(1)}×` : "—"}</span>
-            <span>{hv.buyStreak}{t2(lang, "d streak", "天连买")}</span>
+            <span>attn {Math.round(hv.attnScore)}</span>
+            <span>
+              {hv.buyStreak}
+              {t2(lang, "d streak", "天连买")}
+            </span>
             {hv.onFocus && <span className="text-gold">★ {t2(lang, "Focus", "重点")}</span>}
             {hv.newHigh && <span className="text-signal">52w {t2(lang, "high", "新高")}</span>}
             {hv.breakout && <span className="text-ignite">{t2(lang, "breakout", "突破")}</span>}
@@ -488,7 +259,6 @@ export function OverviewView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
 
-  const [sizeKey, setSizeKey] = useState<SizeKey>("move");
   const [focusSpot, setFocusSpot] = useState(false);
 
   const focusSet = useMemo(() => {
@@ -541,11 +311,6 @@ export function OverviewView() {
 
   const focusCount = movers.filter((m) => m.onFocus).length;
 
-  const SIZE_OPTS: { k: SizeKey; label: string }[] = [
-    { k: "move", label: t("Move", "涨跌") },
-    { k: "rvol", label: t("RVOL", "放量") },
-  ];
-
   return (
     <div className="view-in space-y-5">
       {/* HEADER */}
@@ -562,28 +327,12 @@ export function OverviewView() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
             </span>
-            {t("live · ranked by today's move · one globe per sector", "实时 · 按当日涨跌排名 · 每个板块一颗星球")}
+            {t("live · one ignition map per sector · move × volume", "实时 · 每板块一张点火图 · 涨跌 × 放量")}
           </p>
         </div>
 
         {/* controls */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-1.5 rounded-xl border border-line bg-panel2/70 px-2 py-1.5">
-            <span className="pl-1 text-[10.5px] uppercase tracking-wide text-muted2">{t("Size", "大小")}</span>
-            <div className="flex overflow-hidden rounded-lg border border-line">
-              {SIZE_OPTS.map((o) => (
-                <button
-                  key={o.k}
-                  onClick={() => setSizeKey(o.k)}
-                  className={`px-2.5 py-1 text-[11.5px] transition-colors ${
-                    sizeKey === o.k ? "bg-signal/15 text-signal" : "text-muted hover:text-text"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
           <button
             onClick={() => setFocusSpot((v) => !v)}
             className={`rounded-xl border px-3 py-2 text-[11.5px] transition-colors ${
@@ -598,13 +347,14 @@ export function OverviewView() {
 
       {/* legend */}
       <div className="-mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-muted2">
+        <span className="font-medium text-muted">{t("→ move %  ·  ↑ RVOL  ·  top-right = igniting", "→ 涨跌 %  ·  ↑ 放量  ·  右上 = 点火")}</span>
         <span className="flex items-center gap-1.5">
           <span className="flex items-end gap-1">
             {[3, 5, 8].map((d, i) => (
               <span key={d} className="ramp-dot rounded-full bg-signal" style={{ width: d, height: d, animationDelay: `${i * 0.3}s` }} />
             ))}
           </span>
-          {t("size = selected signal", "大小 = 所选信号")}
+          {t("size = attention", "大小 = 注意力")}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/70" /> 52w {t("high", "新高")}
@@ -612,7 +362,7 @@ export function OverviewView() {
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full ring-2 ring-gold" /> {t("breakout", "突破")}
         </span>
-        <span>{t("★ Focus → use the toggle · hover to inspect · click to open", "★ 重点 → 用右上开关 · 悬停查看 · 点击进入")}</span>
+        <span>{t("★ Focus · hover to inspect · click to open", "★ 重点 · 悬停查看 · 点击进入")}</span>
       </div>
 
       {movers.length === 0 ? (
@@ -634,14 +384,7 @@ export function OverviewView() {
                   <span className="font-mono text-[11px] text-muted2">{rows.length}</span>
                 </header>
                 <div className="relative h-[172px] w-full border-b border-line/60">
-                  <SectorGlobe
-                    rows={rows}
-                    color={color}
-                    sizeKey={sizeKey}
-                    focusSpot={focusSpot}
-                    onPick={openDetail}
-                    lang={lang}
-                  />
+                  <SectorScatter rows={rows} color={color} focusSpot={focusSpot} onPick={openDetail} lang={lang} />
                 </div>
                 <div className="max-h-[300px] overflow-y-auto p-1.5">
                   {rows.map((m, i) => (
