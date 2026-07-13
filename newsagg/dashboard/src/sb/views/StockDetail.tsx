@@ -110,20 +110,35 @@ function ScoreBreakdown({
   );
 }
 
-// Emoji glyphs give each catalyst type an at-a-glance icon.
-const TYPE_ICON: Record<string, string> = {
-  earnings: "📊",
-  guidance: "🧭",
-  approval: "✅",
-  order: "📝",
-  m_and_a: "🤝",
-  capital_return: "💰",
-  policy: "🏛️",
-  index: "📈",
-  mgmt: "👤",
-  revision: "🔄",
-  other: "⚡",
+// Each catalyst type gets its own accent colour, rendered as a small live
+// "signal" glyph (a solid core with a slow pulsing halo) — cleaner and more
+// premium than an emoji, and the motion reads as "active".
+const TYPE_COLOR: Record<string, string> = {
+  earnings: "#5fb0e8",
+  guidance: "#8aa2ff",
+  approval: "#48c78e",
+  order: "#3dd6c4",
+  m_and_a: "#e9c46a",
+  capital_return: "#f2a73c",
+  policy: "#c98bff",
+  index: "#7fce9e",
+  mgmt: "#9aa7b3",
+  revision: "#e08bd0",
+  other: "#9b8cf0",
 };
+
+function TypeGlyph({ type }: { type: string }) {
+  const c = TYPE_COLOR[type] ?? TYPE_COLOR.other;
+  return (
+    <span className="relative grid h-3.5 w-3.5 flex-none place-items-center" aria-hidden>
+      <span
+        className="absolute inset-0 rounded-full"
+        style={{ background: c, opacity: 0.16, animation: "catpulse 2.6s ease-in-out infinite" }}
+      />
+      <span className="h-[7px] w-[7px] rounded-full" style={{ background: c, boxShadow: `0 0 6px ${c}` }} />
+    </span>
+  );
+}
 
 function catDayLabel(c: Catalyst, t: (en: string, zh: string) => string): { label: string; near: boolean } {
   const d = catLiveDays(c);
@@ -196,7 +211,7 @@ function CatItem({ c, lang, t }: { c: Catalyst; lang: Lang; t: (en: string, zh: 
   return (
     <div className="rounded-lg border border-line/60 bg-white/[0.02] p-2.5 transition-colors hover:bg-white/[0.045]">
       <div className="flex items-center gap-2">
-        <span className="text-[14px] leading-none">{TYPE_ICON[c.type] ?? "⚡"}</span>
+        <TypeGlyph type={c.type} />
         <span className="flex-none rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted">{catalystTypeLabel(c.type, lang)}</span>
         <span className="min-w-0 flex-1 text-[12px] leading-snug text-text">{c.title}</span>
         <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>

@@ -96,8 +96,8 @@ export function FocusView() {
         eyebrow={t("Step 2 · Output", "第 2 步 · 输出")}
         title={t("Focus List · Graded, Not Cut", "重点名单 · 分级不砍")}
         desc={t(
-          `Inclusive on purpose — nothing is dropped prematurely; the deeper stages (catalyst + earnings-call) do the fine cut. Each name is GRADED by how many of three independent signals fire: BUY (strong-buy or ${SUSTAINED_DAYS}-day sustained) · ECOSYSTEM (tied to a mega-cap anchor, or ≥${FOCUS_ECO_LINKS} in-universe links) · THESIS (analyst write-up — a bonus, since it can't be scraped in full). Ecosystem is weighted heavily and by CRITICALITY: an edge that's sole-source / hard-to-replace (importance 3) counts most. Sorted by gates, then an ecosystem-heavy composite. ★ Core = both hard signals (buy + ecosystem) fire.`,
-          `刻意做成包容——不提前砍票,精挑留给后面的催化剂+财报电话。每只票按"过了几个信号闸"分级,共三闸:买入(强买 或 连续${SUSTAINED_DAYS}天) · 生态(挂靠大票锚,或 ≥${FOCUS_ECO_LINKS} 个 universe 内关联) · 论点(分析师发文——加分项,因为抓不全)。生态权重很高且按"关键度"算:某条关系越是独家/非他不可(importance 3)分越高。先按过闸数排,再按生态加权综合分。★ 核心 = 两个硬信号(买入+生态)全中。`,
+          `Inclusive on purpose — nothing is dropped prematurely; the deeper stages (catalyst + earnings-call) do the fine cut. The SCORE (0–10) weights two dimensions: BUY 0–5 (strong-buy 3.0 or ${SUSTAINED_DAYS}-day sustained 1.6, plus up to 2.0 for a longer streak) · ECOSYSTEM 0–4.5 (tied to a mega-cap anchor, or ≥${FOCUS_ECO_LINKS} in-universe links, weighted by CRITICALITY — a sole-source / hard-to-replace edge counts most), plus a +0.5 both-nets bonus. THESIS (analyst write-up) is shown as a signal flag but is NO LONGER scored — its point now sits in Buy. Sorted by gates fired, then the composite. ★ Core = both hard signals (buy + ecosystem) fire.`,
+          `刻意做成包容——不提前砍票,精挑留给后面的催化剂+财报电话。综合分(0–10)只看两个维度:买入 0–5(强买 3.0 或 连续${SUSTAINED_DAYS}天 1.6,外加最多 2.0 的更长连续买入天数) · 生态 0–4.5(挂靠大票锚,或 ≥${FOCUS_ECO_LINKS} 个 universe 内关联,按"关键度"加权——越独家/非他不可分越高),再加 +0.5 双网命中。论点(分析师发文)作为信号标记显示,但已不再计分——那 1 分现已并入买入。先按过闸数排,再按综合分。★ 核心 = 两个硬信号(买入+生态)全中。`,
         )}
         actions={<MethodInfo />}
       />

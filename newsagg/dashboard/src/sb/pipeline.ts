@@ -778,13 +778,13 @@ export function buildFocus(
 
     const core = gBuy && gEco; // both hard signals fire (buy + ecosystem)
     // 0-10 score, each dimension CAPPED so no single one (e.g. a mega-cap's huge
-    // ecosystem) can dominate: Buy 0-4 · Ecosystem 0-4.5 (capped) · Thesis 0-1 ·
-    // both-nets bonus 0-0.5. (Attention was dropped from the score.)
-    const buyPart = (strongBuy ? 2.5 : gBuy ? 1.3 : 0) + (Math.min(buyStreak, 5) / 5) * 1.5;
+    // ecosystem) can dominate: Buy 0-5 · Ecosystem 0-4.5 (capped) · both-nets
+    // bonus 0-0.5. Thesis and Attention are NOT scored — analyst thesis is shown
+    // as a signal flag, and the point it used to carry now sits in Buy.
+    const buyPart = (strongBuy ? 3.0 : gBuy ? 1.6 : 0) + (Math.min(buyStreak, 5) / 5) * 2.0;
     const ecoPart = Math.min(ecoWeight / 16, 1) * 4.5;
-    const thesisPart = gThesis ? 1 : 0;
     const bonus = inBoth ? 0.5 : 0;
-    const score = Math.round((buyPart + ecoPart + thesisPart + bonus) * 10) / 10;
+    const score = Math.round((buyPart + ecoPart + bonus) * 10) / 10;
 
     items.push({
       ticker: t,
