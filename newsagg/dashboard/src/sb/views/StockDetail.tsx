@@ -10,7 +10,9 @@ import {
   passesHeatGate,
   sectorLabel,
   capLabel,
-  catScore10,
+  catLiveScore10,
+  catLiveDays,
+  catLiveBest,
   catTickerScore,
   catalystTypeLabel,
   CATALYST_BAR,
@@ -124,7 +126,7 @@ const TYPE_ICON: Record<string, string> = {
 };
 
 function catDayLabel(c: Catalyst, t: (en: string, zh: string) => string): { label: string; near: boolean } {
-  const d = c.tpmn.days;
+  const d = catLiveDays(c);
   if (c.cls === "B") return d == null ? { label: t("window TBD", "窗口待定"), near: false } : { label: t(`~${d}d`, `~${d}天`), near: d <= 30 };
   if (d == null) return { label: t("TBD", "待定"), near: false };
   if (d < 0) return { label: t(`${-d}d ago`, `${-d}天前`), near: false };
@@ -190,7 +192,7 @@ function TpmnRow({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
 // summary, the P/M/N justification, its T/P/M/N meter, and a source link.
 function CatItem({ c, lang, t }: { c: Catalyst; lang: Lang; t: (en: string, zh: string) => string }) {
   const cd = catDayLabel(c, t);
-  const sc = catScore10(c.tpmn);
+  const sc = catLiveScore10(c);
   return (
     <div className="rounded-lg border border-line/60 bg-white/[0.02] p-2.5 transition-colors hover:bg-white/[0.045]">
       <div className="flex items-center gap-2">
@@ -223,7 +225,8 @@ function CatItem({ c, lang, t }: { c: Catalyst; lang: Lang; t: (en: string, zh: 
 // composition bar, and every catalyst laid out in detail.
 function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
   const total = catTickerScore(cat);
-  const primScore = catScore10(cat.catalysts[0].tpmn);
+  const prim = catLiveBest(cat) ?? cat.catalysts[0];
+  const primScore = catLiveScore10(prim);
   const depth = Math.round((total - primScore) * 10) / 10;
   const color = total >= CATALYST_BAR ? "#48c78e" : "#c7d2dc";
   const n = cat.catalysts.length;
@@ -253,11 +256,13 @@ function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (e
         </div>
       </div>
 
-      {/* every catalyst, full detail */}
+      {/* every catalyst, full detail — strongest (live) first */}
       <div className="space-y-2">
-        {cat.catalysts.map((c, i) => (
-          <CatItem key={i} c={c} lang={lang} t={t} />
-        ))}
+        {[...cat.catalysts]
+          .sort((a, b) => catLiveScore10(b) - catLiveScore10(a))
+          .map((c, i) => (
+            <CatItem key={i} c={c} lang={lang} t={t} />
+          ))}
       </div>
 
       <div className="mt-2.5 border-t border-line pt-2 text-[10.5px] leading-relaxed text-muted2">

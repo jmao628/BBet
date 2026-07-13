@@ -4,6 +4,7 @@ import {
   buildFocus,
   buildCatalystRows,
   catalystTypeLabel,
+  catLiveDays,
   sectorLabel,
   capLabel,
   CATALYST_BAR,
@@ -21,7 +22,7 @@ const STATUS_META: Record<CatalystStatus, { color: string; en: string; zh: strin
 };
 
 function timing(c: Catalyst, t: (en: string, zh: string) => string): { label: string; near: boolean } {
-  const days = c.tpmn.days;
+  const days = catLiveDays(c);
   if (c.cls === "B") {
     if (days == null) return { label: t("window TBD", "窗口待定"), near: false };
     return { label: t(`~${days}d window`, `~${days} 天窗口`), near: days <= 30 };
@@ -73,16 +74,20 @@ function Runway({
   t: (en: string, zh: string) => string;
 }) {
   const MAXD = 90;
-  const dated = rows.filter(
-    (r) => r.best && r.best.tpmn.days != null && r.best.tpmn.days >= 0 && r.best.tpmn.days <= MAXD && r.status !== "pending",
-  );
+  // Live days so the runway shifts left each day and drops events once they pass.
+  const dated = rows
+    .map((r) => ({ r, days: r.best ? catLiveDays(r.best) : null }))
+    .filter(
+      (x): x is { r: CatalystRow; days: number } =>
+        x.days != null && x.days >= 0 && x.days <= MAXD && x.r.status !== "pending",
+    );
   if (dated.length === 0) return null;
 
   const byType = new Map<string, { r: CatalystRow; days: number }[]>();
-  for (const r of dated) {
+  for (const { r, days } of dated) {
     const type = r.best!.type;
     const arr = byType.get(type) ?? [];
-    arr.push({ r, days: r.best!.tpmn.days as number });
+    arr.push({ r, days });
     byType.set(type, arr);
   }
   const lanes = [...byType.entries()].sort((a, b) => b[1].length - a[1].length);
@@ -294,9 +299,11 @@ function Row({
           {best.summary && (
             <p className="rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-muted">{best.summary}</p>
           )}
-          {r.cat!.catalysts.slice(1).map((c, i) => (
-            <CatalystLine key={i} c={c} lang={lang} t={t} />
-          ))}
+          {r.cat!.catalysts
+            .filter((c) => c !== best)
+            .map((c, i) => (
+              <CatalystLine key={i} c={c} lang={lang} t={t} />
+            ))}
         </div>
       )}
 

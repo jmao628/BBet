@@ -830,6 +830,27 @@ export function catScore10(tpmn: CatalystTPMN): number {
   return Math.round((total / 33) * 100) / 10;
 }
 
+// LIVE timing — recomputed against TODAY on every render so dated catalysts age
+// on their own between fetches: the countdown ticks down and, once the event
+// passes, T decays to 0 (the score drops) without re-running the LLM.
+const _MS_DAY = 86400000;
+export function catLiveDays(c: Catalyst): number | null {
+  if (c.event_date) {
+    const d = new Date(c.event_date + "T00:00:00").getTime();
+    if (!Number.isNaN(d)) return Math.round((d - Date.now()) / _MS_DAY);
+  }
+  return c.tpmn.days; // B-class window / undated → keep the stored estimate
+}
+function _timingCurve(days: number | null): number {
+  if (days == null || days < 0) return 0;
+  return 25 * Math.exp(-((days - 14) ** 2) / (2 * 21 * 21));
+}
+// A catalyst's live 0-10 (T recomputed for today; P/M/N unchanged).
+export function catLiveScore10(c: Catalyst): number {
+  const total = _timingCurve(catLiveDays(c)) + c.tpmn.P + c.tpmn.M + c.tpmn.N;
+  return Math.round((total / 33) * 100) / 10;
+}
+
 // A ticker's catalyst score: the STRONGEST catalyst is the base, and additional
 // catalysts add a depth bonus weighted by THEIR OWN strength (which already
 // encodes P/M/N importance) with diminishing returns — so more strong catalysts
@@ -844,10 +865,27 @@ export function catDepthBonus(scoresDesc: number[]): number {
 export function catTickerScore(cat: CatalystTicker | null): number {
   if (!cat) return -1;
   if (!cat.catalysts.length) return 0;
-  const scores = cat.catalysts.map((c) => catScore10(c.tpmn)).sort((a, b) => b - a);
+  // LIVE scores so the ticker score decays as events pass, without re-fetching.
+  const scores = cat.catalysts.map((c) => catLiveScore10(c)).sort((a, b) => b - a);
   const best = scores[0];
   const score = best + (10 - best) * catDepthBonus(scores);
   return Math.round(score * 10) / 10;
+}
+
+// The live-strongest catalyst for a ticker (drives the headline card). Chosen by
+// today's score so a passed event yields to a fresher upcoming one on its own.
+export function catLiveBest(cat: CatalystTicker | null): Catalyst | null {
+  if (!cat || !cat.catalysts.length) return null;
+  let best = cat.catalysts[0];
+  let bestScore = catLiveScore10(best);
+  for (const c of cat.catalysts) {
+    const s = catLiveScore10(c);
+    if (s > bestScore) {
+      best = c;
+      bestScore = s;
+    }
+  }
+  return best;
 }
 
 export const CATALYST_BAR = 5.5; // 0-10 to advance
@@ -876,7 +914,7 @@ export function buildCatalystRows(
 ): CatalystRow[] {
   const rows: CatalystRow[] = focus.map((f) => {
     const cat = catalyst?.[f.ticker] ?? null;
-    const best = cat?.catalysts?.[0] ?? null;
+    const best = catLiveBest(cat);
     // Depth-weighted 0-10 score: strongest catalyst + a diminishing bonus from
     // the rest (weighted by their own strength). Recomputed here so old and new
     // cache entries share one scale.
