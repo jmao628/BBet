@@ -148,9 +148,9 @@ function Row({
         {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
       </div>
 
-      {/* primary catalyst — one clean line */}
+      {/* primary catalyst — always compact (no summary here) */}
       {best && cd && (
-        <div className="mx-2.5 mb-1 rounded-lg bg-white/[0.025] px-3 py-2.5">
+        <div className="mx-2.5 mb-2.5 rounded-lg bg-white/[0.025] px-3 py-2.5">
           <div className="flex items-center gap-2">
             <TypeChip type={best.type} lang={lang} />
             <span className="min-w-0 flex-1 truncate text-[12px] text-text">{best.title}</span>
@@ -160,31 +160,36 @@ function Row({
             <TpmnMini tpmn={best.tpmn} />
             <Src url={best.source_url} t={t} />
           </div>
-          {open && best.summary && (
-            <p className="mt-2.5 border-t border-white/[0.06] pt-2 text-[11px] leading-relaxed text-muted">{best.summary}</p>
-          )}
         </div>
       )}
 
-      {/* expand toggle — reveals summaries + the rest of the catalysts */}
-      {hasDetail ? (
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-1 px-4 pb-3 pt-1 text-[10px] text-muted2 transition-colors hover:text-text"
-        >
-          <span className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>
-          {open ? t("hide", "收起") : more > 0 ? t(`details · +${more}`, `详情 · +${more}`) : t("details", "详情")}
-        </button>
-      ) : (
-        <div className="pb-3" />
-      )}
-
-      {open && more > 0 && (
-        <div className="space-y-2 px-2.5 pb-3">
+      {/* expanded detail — the primary summary + the other catalysts */}
+      {open && best && (
+        <div className="space-y-2 px-2.5 pb-1">
+          {best.summary && (
+            <p className="rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-muted">{best.summary}</p>
+          )}
           {r.cat!.catalysts.slice(1).map((c, i) => (
             <CatalystLine key={i} c={c} lang={lang} t={t} />
           ))}
         </div>
+      )}
+
+      {/* one clear, fixed-position toggle bar */}
+      {hasDetail ? (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="mt-1 flex w-full items-center justify-center gap-1.5 border-t border-line/60 py-2 text-[10.5px] text-muted2 transition-colors hover:bg-white/[0.04] hover:text-text"
+        >
+          <span className={`inline-block transition-transform duration-200 ${open ? "rotate-180" : ""}`}>⌄</span>
+          {open
+            ? t("Collapse", "收起")
+            : more > 0
+              ? t(`Details · +${more} more`, `展开详情 · 另 ${more} 条`)
+              : t("Details", "展开详情")}
+        </button>
+      ) : (
+        <div className="pb-2.5" />
       )}
     </div>
   );
