@@ -35,22 +35,25 @@ export function SeedsView() {
   const tinyCount = seeds.length - mainSeeds.length;
 
   const thesisCount = thesisPool.length;
+  // The active tab drives every count below, so Fresh/Carried and the sector
+  // chips always reflect what's actually on screen (not the other tab).
+  const base = thesisOnly ? thesisPool : mainSeeds;
   // Carried-over = kept from a prior scrape (not in today's fresh pull); fresh
   // = seen in today's scrape / a watchlist.
   const isCarried = (r: { tags: string[] }) => r.tags.some((x) => /carried/i.test(x));
-  const carriedCount = mainSeeds.filter(isCarried).length;
-  const freshCount = mainSeeds.length - carriedCount;
+  const carriedCount = base.filter(isCarried).length;
+  const freshCount = base.length - carriedCount;
 
   const sectorCounts = useMemo(() => {
     const c = new Map<string, number>();
-    for (const s of mainSeeds) {
+    for (const s of base) {
       const sec = sectorOf(s.ticker);
       if (sec) c.set(sec, (c.get(sec) ?? 0) + 1);
     }
     return [...c.entries()].sort((a, b) => b[1] - a[1]);
-  }, [mainSeeds, sectors]);
+  }, [base, sectors]);
 
-  let rows = thesisOnly ? thesisPool : mainSeeds;
+  let rows = base;
   if (source === "fresh") rows = rows.filter((r) => !isCarried(r));
   else if (source === "carried") rows = rows.filter((r) => isCarried(r));
   if (sectorFilter) rows = rows.filter((r) => sectorOf(r.ticker) === sectorFilter);
@@ -70,13 +73,21 @@ export function SeedsView() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex overflow-hidden rounded-lg border border-line">
           <button
-            onClick={() => setThesisOnly(false)}
+            onClick={() => {
+              setThesisOnly(false);
+              setSource("all");
+              setSectorFilter(null);
+            }}
             className={`px-3 py-1.5 text-[12px] ${!thesisOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
           >
             {t("All", "全部")} {mainSeeds.length}
           </button>
           <button
-            onClick={() => setThesisOnly(true)}
+            onClick={() => {
+              setThesisOnly(true);
+              setSource("all");
+              setSectorFilter(null);
+            }}
             className={`px-3 py-1.5 text-[12px] ${thesisOnly ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
           >
             {t("★ Analyst thesis", "★ 有分析师论点")} {thesisCount}
@@ -87,7 +98,7 @@ export function SeedsView() {
           <div className="flex overflow-hidden rounded-lg border border-line">
             {(
               [
-                ["all", t("All", "全部"), mainSeeds.length],
+                ["all", t("All", "全部"), base.length],
                 ["fresh", t("Fresh", "本次新抓"), freshCount],
                 ["carried", t("Carried over", "沿用"), carriedCount],
               ] as const
@@ -154,7 +165,9 @@ export function SeedsView() {
       <Card pad0>
         {rows.length === 0 ? (
           <div className="p-8 text-center text-[13px] text-muted">
-            {t("No seeds yet — run the scraper and bulls will appear here.", "暂无种子。运行抓取器后，看多票会出现在这里。")}
+            {seeds.length === 0
+              ? t("No seeds yet — run the scraper and bulls will appear here.", "暂无种子。运行抓取器后，看多票会出现在这里。")
+              : t("No seeds match the current filters — clear a filter above.", "当前筛选无匹配 —— 清掉上面某个筛选即可。")}
           </div>
         ) : (
           <div className="max-h-[calc(100vh-320px)] overflow-auto">
