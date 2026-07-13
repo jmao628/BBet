@@ -238,8 +238,12 @@ def fetch_missing(
     workers: int = 4,
     model: str = MODEL,
     sectors: dict[str, dict] | None = None,
+    out_path: Path | None = None,
+    base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
-    """Look up the supply chain for tickers not already cached."""
+    """Look up the supply chain for tickers not already cached. If ``out_path``
+    is given, checkpoint after every ticker (``base`` = the full existing cache
+    to preserve, overlaid with new results) so a long run survives interruption."""
     try:
         from openai import OpenAI
     except ImportError:
@@ -275,6 +279,10 @@ def fetch_missing(
             res = fut.result()
             if res:
                 out[t] = res
+                # Checkpoint after every ticker so a long rebuild is never lost.
+                if out_path is not None:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_text(json.dumps({**(base or {}), **out}))
             if i % 10 == 0 or i == len(missing):
                 logger.info("  %d/%d…", i, len(missing))
     return out
@@ -284,7 +292,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Map upstream/downstream/peers per rated seed ticker (LLM, cached)")
     ap.add_argument("--config", default=None)
     ap.add_argument("--tickers", default=None, help="comma-separated override")
-    ap.add_argument("--refresh", action="store_true", help="re-map all, ignore cache")
+    ap.add_argument("--refresh", action="store_true", help="re-map the requested names (or the full rated universe), KEEPING every other cached map")
     ap.add_argument("--limit", type=int, default=None, help="cap how many new tickers to map this run")
     ap.add_argument("--model", default=MODEL, help=f"OpenAI model id (default {MODEL})")
     ap.add_argument("--min-cap", type=float, default=3e8, help="skip tickers below this market cap (default $300M)")
@@ -293,7 +301,8 @@ def main() -> int:
 
     settings = load_settings(args.config)
     out_path = settings.output_dir / SUPPLYCHAIN_FILE
-    have = {} if args.refresh else _load(out_path)
+    existing = _load(out_path)  # everything currently cached — NEVER dropped
+    have = dict(existing)
 
     if args.tickers:
         names = {t.strip().upper(): "" for t in args.tickers.split(",") if t.strip()}
@@ -313,6 +322,11 @@ def main() -> int:
         if skipped:
             logger.info("skipping %d tickers below $%.0fM market cap", skipped, args.min_cap / 1e6)
 
+    # --refresh re-maps the REQUESTED names only; every other cached map is kept.
+    if args.refresh:
+        for t in names:
+            have.pop(t, None)
+
     if args.limit:
         # Only map the first N *uncached* tickers this run (spread cost over days).
         pending = [t for t in names if t not in have][: args.limit]
@@ -321,8 +335,8 @@ def main() -> int:
     # Sector/industry context helps the model pin down the RIGHT company.
     sectors = _load(settings.output_dir / "sectors.json")
 
-    fetched = fetch_missing(names, have, model=args.model, sectors=sectors)
-    merged = {**have, **fetched}
+    fetched = fetch_missing(names, have, model=args.model, sectors=sectors, out_path=out_path, base=existing)
+    merged = {**existing, **fetched}  # untouched maps survive; refetched overwrite
     if not merged:
         logger.warning("no supply-chain data resolved (no key / API error); keeping existing file")
         return 1
