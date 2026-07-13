@@ -158,6 +158,36 @@ body {
   }
 }
 
+/* Catalyst runway bucket popover — a quick, soft pop-in from the click point. */
+@keyframes cat-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.cat-pop {
+  animation: cat-pop-in 0.17s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.cat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.cat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+.cat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-pop {
+    animation: none;
+  }
+}
+
 /* Catalyst type glyph — a slow pulsing halo behind the coloured core. */
 @keyframes catpulse {
   0%,

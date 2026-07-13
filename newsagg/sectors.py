@@ -5,7 +5,7 @@ Sector rarely changes, so this is a *cached* fetch: only tickers missing from
 ``data/newsagg/sectors.json`` are looked up; existing ones are kept. That keeps
 the daily run cheap (usually a no-op) even though yfinance's .info is heavy.
 
-Writes ``data/newsagg/sectors.json`` = {ticker: {sector, industry}}.
+Writes ``data/newsagg/sectors.json`` = {ticker: {sector, industry, name}}.
 
     python -m newsagg.sectors
 """
@@ -45,19 +45,22 @@ def _fetch_one(ticker: str) -> dict | None:
         return None
     sector = info.get("sector")
     industry = info.get("industry")
+    name = info.get("longName") or info.get("shortName") or ""
     if not sector and not industry:
         return None
-    return {"sector": sector or "", "industry": industry or ""}
+    return {"sector": sector or "", "industry": industry or "", "name": name}
 
 
 def fetch_missing(tickers: list[str], have: dict[str, dict], workers: int = 8) -> dict[str, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    missing = [t for t in tickers if t not in have]
+    # Re-fetch tickers with no cached entry OR an entry that predates the `name`
+    # field, so company names backfill on a normal run (no --refresh needed).
+    missing = [t for t in tickers if t not in have or not have[t].get("name")]
     if not missing:
         logger.info("no new tickers — sectors cache already complete (%d)", len(have))
         return {}
-    logger.info("fetching sector for %d new tickers…", len(missing))
+    logger.info("fetching sector/name for %d tickers…", len(missing))
 
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:

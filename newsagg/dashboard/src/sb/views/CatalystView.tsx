@@ -96,7 +96,7 @@ function Runway({
 }) {
   const MAXD = 90;
   const [zoom, setZoom] = useState(1);
-  const [pop, setPop] = useState<{ x: number; y: number; type: string; days: number; items: CellItem[] } | null>(null);
+  const [pop, setPop] = useState<{ x: number; y: number; type: string; days: number; color: string; items: CellItem[] } | null>(null);
   const { bucket, ppd } = ZOOM_CFG[zoom];
 
   // Live days so the runway shifts left each day and drops events once they pass.
@@ -145,28 +145,42 @@ function Runway({
 
   return (
     <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 py-3">
-      <div className="mb-2.5 flex items-start justify-between gap-3 text-[11px]">
-        <div className="flex flex-col">
-          <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
-          <span className="text-[10px] text-muted2">
-            {t("number = catalysts in that window · click a cell to list them", "数字 = 该时段内催化剂数 · 点击查看名单")}
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[13px] font-semibold tracking-tight text-text">
+            {t("Catalyst Runway", "催化剂时间线")}
+            <span className="ml-2 font-mono text-[10px] font-normal uppercase tracking-[0.14em] text-muted2">
+              {t("next 90 days", "未来 90 天")}
+            </span>
+          </span>
+          <span className="text-[10.5px] leading-none text-muted2">
+            {t("bubble size = catalyst count · click to list the names", "气泡大小 = 催化剂数 · 点击查看名单")}
           </span>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-3 font-mono text-[10px] text-muted2">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ok" />{t("advancing", "过闸")}</span>
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-warn" />{t("watch", "观察")}</span>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2.5 text-[10px] font-medium">
+            <span className="flex items-center gap-1.5 text-ok">
+              <span className="h-2 w-2 rounded-full bg-ok" style={{ boxShadow: "0 0 6px #48c78e" }} />
+              {t("advancing", "过闸")}
+            </span>
+            <span className="flex items-center gap-1.5 text-warn">
+              <span className="h-2 w-2 rounded-full bg-warn" style={{ boxShadow: "0 0 6px #e9c46a" }} />
+              {t("watch", "观察")}
+            </span>
           </span>
-          <div className="flex items-center gap-1">
-            <span className="font-mono text-[10px] text-muted2">{t("zoom", "缩放")}</span>
+          {/* segmented zoom control with a sliding highlight */}
+          <div className="relative flex items-center gap-0.5 rounded-full border border-line/70 bg-inset p-0.5">
             {RUNWAY_ZOOMS.map((z) => (
               <button
                 key={z}
                 onClick={() => setZoom(z)}
-                className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
-                  zoom === z ? "bg-signal/15 text-signal" : "text-muted2 hover:text-text"
+                className={`relative z-10 rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold transition-colors duration-200 ${
+                  zoom === z ? "text-[#0b0f14]" : "text-muted2 hover:text-text"
                 }`}
               >
+                {zoom === z && (
+                  <span className="absolute inset-0 -z-10 rounded-full bg-signal" style={{ boxShadow: "0 0 10px #3dd6c455" }} />
+                )}
                 {z}×
               </button>
             ))}
@@ -198,13 +212,14 @@ function Runway({
                             onOpen(c.items[0].ticker);
                             return;
                           }
-                          const PW = 236;
-                          const PH = 320;
+                          const PW = 252;
+                          const PH = 340;
                           setPop({
-                            x: Math.min(e.clientX + 6, window.innerWidth - PW - 12),
-                            y: Math.min(e.clientY + 6, window.innerHeight - PH - 12),
+                            x: Math.min(e.clientX + 8, window.innerWidth - PW - 12),
+                            y: Math.min(e.clientY + 8, window.innerHeight - PH - 12),
                             type,
                             days: Math.round(c.midDays),
+                            color: c.color,
                             items: c.items,
                           });
                         }}
@@ -255,35 +270,50 @@ function Runway({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setPop(null)} />
           <div
-            className="fixed z-50 flex max-h-[320px] w-[236px] flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
-            style={{ left: pop.x, top: pop.y }}
+            className="cat-pop fixed z-50 flex max-h-[340px] w-[252px] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl"
+            style={{ left: pop.x, top: pop.y, background: "rgba(15,21,29,0.94)", transformOrigin: "top left" }}
           >
-            <div className="flex items-center justify-between border-b border-line px-3 py-2">
-              <span className="text-[11px] font-semibold text-text">
-                {catalystTypeLabel(pop.type, lang)} · {t(`in ${pop.days}d`, `${pop.days} 天后`)}
+            <div
+              className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3.5 py-2.5"
+              style={{ background: `linear-gradient(180deg, ${pop.color}14, transparent)` }}
+            >
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 flex-none rounded-full" style={{ background: pop.color, boxShadow: `0 0 7px ${pop.color}` }} />
+                <span className="text-[11.5px] font-semibold text-text">{catalystTypeLabel(pop.type, lang)}</span>
+                <span className="font-mono text-[10px] text-muted2">{t(`· in ${pop.days}d`, `· ${pop.days} 天后`)}</span>
               </span>
-              <span className="font-mono text-[10px] text-muted2">{pop.items.length}</span>
+              <span className="flex-none rounded-full bg-white/[0.07] px-2 py-0.5 font-mono text-[10px] font-semibold text-muted">
+                {pop.items.length}
+              </span>
             </div>
-            <div className="overflow-y-auto p-1">
-              {pop.items.map((it) => (
-                <button
-                  key={it.ticker}
-                  onClick={() => {
-                    onOpen(it.ticker);
-                    setPop(null);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
-                >
-                  <span className="font-mono text-[12px] font-bold text-text">{it.ticker}</span>
-                  <span className="min-w-0 flex-1 truncate text-[10px] text-muted2">{it.company || "—"}</span>
-                  <span
-                    className="flex-none font-mono text-[11px] font-semibold"
-                    style={{ color: it.score >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}
+            <div className="cat-scroll overflow-y-auto p-1.5">
+              {pop.items.map((it, i) => {
+                const hot = it.score >= CATALYST_BAR;
+                return (
+                  <button
+                    key={it.ticker}
+                    onClick={() => {
+                      onOpen(it.ticker);
+                      setPop(null);
+                    }}
+                    className="group relative flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.06]"
                   >
-                    {it.score.toFixed(1)}
-                  </span>
-                </button>
-              ))}
+                    <span className="w-3.5 flex-none text-right font-mono text-[9px] tabular-nums text-muted2">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-mono text-[12.5px] font-bold leading-tight text-text transition-colors group-hover:text-signal">
+                        {it.ticker}
+                      </div>
+                      {it.company && <div className="truncate text-[9.5px] leading-tight text-muted2">{it.company}</div>}
+                    </div>
+                    <span
+                      className="flex-none rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums"
+                      style={{ color: hot ? "#48c78e" : "#c7d2dc", background: hot ? "#48c78e18" : "rgba(255,255,255,0.05)" }}
+                    >
+                      {it.score.toFixed(1)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </>

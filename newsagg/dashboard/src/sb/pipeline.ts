@@ -788,7 +788,7 @@ export function buildFocus(
 
     items.push({
       ticker: t,
-      company: cmap.get(t) ?? "",
+      company: cmap.get(t) || sectors?.[t]?.name || "",
       cap: capSizeFromCap(marketCaps?.[t], capsByTicker.get(t) ?? []),
       sector: sectors?.[t]?.sector ?? "",
       strongBuy,
