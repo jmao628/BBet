@@ -359,6 +359,32 @@ def _fetch_one(client, ticker: str, name: str, today: date, model: str, sector: 
     }
 
 
+def _is_stale(entry: dict, today: date, max_age_days: float) -> bool:
+    """A cached ticker worth re-fetching. Two triggers:
+    1. the record is older than ``max_age_days`` (fresh market catalysts may
+       have appeared since), or
+    2. every dated catalyst it holds has already fired — its forward-looking
+       view is spent, so re-scan for what's next.
+    """
+    ga = entry.get("generated_at")
+    if not ga:
+        return True
+    try:
+        age = (today - date.fromisoformat(ga)).days
+    except ValueError:
+        return True  # unparseable stamp — refresh it
+    if age >= max_age_days:
+        return True
+    dated = [c.get("event_date") for c in (entry.get("catalysts") or []) if c.get("cls") == "A" and c.get("event_date")]
+    if dated:
+        try:
+            if max(date.fromisoformat(d) for d in dated) < today:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
 def fetch_missing(
     tickers: dict[str, str],
     have: dict[str, dict],
@@ -367,6 +393,7 @@ def fetch_missing(
     model: str = MODEL,
     sectors: dict[str, dict] | None = None,
     out_path: Path | None = None,
+    refetch: set[str] | None = None,
 ) -> dict[str, dict]:
     try:
         from openai import OpenAI
@@ -377,11 +404,16 @@ def fetch_missing(
         logger.warning("OPENAI_API_KEY not set — skipping catalyst discovery")
         return {}
 
-    missing = {t: n for t, n in tickers.items() if t not in have}
+    refetch = refetch or set()
+    missing = {t: n for t, n in tickers.items() if t not in have or t in refetch}
     if not missing:
         logger.info("no new tickers — catalyst cache already complete (%d)", len(have))
         return {}
-    logger.info("finding catalysts for %d new tickers via %s (web search)…", len(missing), model)
+    nnew = sum(1 for t in missing if t not in have)
+    logger.info(
+        "finding catalysts for %d tickers via %s (web search) — %d new, %d stale re-fetch…",
+        len(missing), model, nnew, len(missing) - nnew,
+    )
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -417,6 +449,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=25, help="cap how many new tickers to fetch this run (default 25; --limit 0 = all uncached; web search is slow)")
     ap.add_argument("--model", default=MODEL, help=f"OpenAI model id (default {MODEL})")
     ap.add_argument("--min-cap", type=float, default=3e8, help="skip tickers below this market cap (default $300M)")
+    ap.add_argument("--max-age", type=float, default=0.0, help="re-fetch cached tickers older than N days (or whose dated catalysts have all fired); 0 = never re-fetch (default)")
     ap.add_argument("--workers", type=int, default=3)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
@@ -449,14 +482,26 @@ def main() -> int:
         if skipped:
             logger.info("skipping %d tickers below $%.0fM market cap", skipped, args.min_cap / 1e6)
 
+    today = date.today()
+
+    # Staleness: cached names old enough (or whose dated catalysts have all
+    # fired) are eligible to be re-fetched so new market catalysts get picked up.
+    stale: set[str] = set()
+    if args.max_age > 0:
+        stale = {t for t in names if t in have and _is_stale(have[t], today, args.max_age)}
+        if stale:
+            logger.info("%d cached tickers stale (>%.0fd or events fired) — will re-fetch", len(stale), args.max_age)
+
     if args.limit:
+        # New tickers first, then stale re-fetches — both in Focus-rank order.
         pending = [t for t in names if t not in have][: args.limit]
+        if len(pending) < args.limit:
+            pending += [t for t in names if t in stale and t not in pending][: args.limit - len(pending)]
         names = {t: names[t] for t in pending}
 
     sectors = _load(settings.output_dir / "sectors.json")
-    today = date.today()
 
-    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors, out_path=out_path)
+    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors, out_path=out_path, refetch=stale)
     merged = {**have, **fetched}
     if not merged:
         logger.warning("no catalyst data resolved (no key / API error); keeping existing file")

@@ -9,6 +9,7 @@
 #   com.newsagg.sectors    — yfinance sector classification (cached)(:17)
 #   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
 #   com.newsagg.supplychain— LLM upstream/downstream/peers (cached)  (:25)
+#   com.newsagg.catalyst   — LLM catalyst discovery + stale re-fetch  (:30)
 #   com.newsagg.web        — local web server on http://localhost:8000
 #
 # Re-run this any time to update the schedule. Uninstall with uninstall_mac.sh.
@@ -41,6 +42,18 @@ if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   ANTHROPIC_LINES="    <key>ANTHROPIC_API_KEY</key><string>$ANTHROPIC_API_KEY</string>"
 fi
 
+# Same story for the catalyst job — it calls the OpenAI web-search model, so the
+# OPENAI_API_KEY set right now is baked into that one plist (never committed).
+OPENAI_LINES=""
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  OPENAI_LINES="    <key>OPENAI_API_KEY</key><string>$OPENAI_API_KEY</string>"
+fi
+
+# Daily catalyst budget: fetch at most CAT_LIMIT tickers (new focus names first,
+# then re-fetch cached ones older than CAT_MAX_AGE days or whose events fired).
+CAT_LIMIT="${CAT_LIMIT:-60}"
+CAT_MAX_AGE="${CAT_MAX_AGE:-4}"
+
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -62,6 +75,7 @@ MCAP_PLIST="$LA_DIR/com.newsagg.marketcap.plist"
 TECH_PLIST="$LA_DIR/com.newsagg.technical.plist"
 SECTOR_PLIST="$LA_DIR/com.newsagg.sectors.plist"
 SUPPLY_PLIST="$LA_DIR/com.newsagg.supplychain.plist"
+CATALYST_PLIST="$LA_DIR/com.newsagg.catalyst.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -240,6 +254,39 @@ $ANTHROPIC_LINES
 </plist>
 EOF
 
+cat > "$CATALYST_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.catalyst</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.catalyst</string>
+    <string>--limit</string>
+    <string>$CAT_LIMIT</string>
+    <string>--max-age</string>
+    <string>$CAT_MAX_AGE</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$OPENAI_LINES
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/catalyst.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/catalyst.log</string>
+</dict>
+</plist>
+EOF
+
 cat > "$WEB_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -268,7 +315,7 @@ $PROXY_LINES
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$CATALYST_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

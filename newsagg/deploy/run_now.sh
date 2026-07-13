@@ -4,6 +4,7 @@
 #   scrape  — re-pull the SA homepage (picks up any newly-added tickers)
 #   marketcap / technical — re-fetch caps + price-volume for the updated universe
 #   heat    — accumulate today's social mentions
+#   supplychain / catalyst — LLM maps + catalyst discovery (new + stale re-fetch)
 #
 # The daily launchd jobs already do this automatically; use this only when you
 # want new tickers pulled in *right now* instead of waiting for the next run.
@@ -40,10 +41,12 @@ echo "▶ 3/6 technical…"
 "$PY" -m newsagg.technical || echo "  (technical failed; keeping existing technicals)"
 echo "▶ 4/6 sectors…"
 "$PY" -m newsagg.sectors || echo "  (sectors failed; keeping existing sectors)"
-echo "▶ 5/6 heat…"
+echo "▶ 5/7 heat…"
 "$PY" -m newsagg.heat || echo "  (heat failed; keeping existing heat)"
-echo "▶ 6/6 supplychain (needs ANTHROPIC_API_KEY; skipped if unset)…"
+echo "▶ 6/7 supplychain (needs ANTHROPIC_API_KEY; skipped if unset)…"
 "$PY" -m newsagg.supplychain || echo "  (supplychain skipped/failed; keeping existing maps)"
+echo "▶ 7/7 catalyst (needs OPENAI_API_KEY; new focus names + stale re-fetch)…"
+"$PY" -m newsagg.catalyst --limit "${CAT_LIMIT:-60}" --max-age "${CAT_MAX_AGE:-4}" || echo "  (catalyst skipped/failed; keeping existing catalysts)"
 
 echo
 echo "✓ done — hard-refresh the dashboard (Cmd+Shift+R) to see the updated universe."
