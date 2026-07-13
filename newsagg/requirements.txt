@@ -13,6 +13,6 @@ playwright>=1.44
 # Market caps for cap-size gating (big caps bypass the heat gate).
 yfinance>=0.2.40
 
-# LLM-derived supply-chain map (upstream/downstream/peers) per ticker.
-# Needs ANTHROPIC_API_KEY in the environment; the step is skipped without it.
-anthropic>=0.40
+# LLM steps (supply-chain map + Stage-3 catalyst discovery) call OpenAI.
+# Needs OPENAI_API_KEY in the environment; those steps are skipped without it.
+openai>=1.40

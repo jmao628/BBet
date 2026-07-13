@@ -8,7 +8,7 @@
 #   com.newsagg.technical  — yfinance price-volume + technicals    (:15)
 #   com.newsagg.sectors    — yfinance sector classification (cached)(:17)
 #   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
-#   com.newsagg.supplychain— LLM upstream/downstream/peers (cached)  (:25)
+#   com.newsagg.supplychain— OpenAI upstream/downstream/peers (cached)(:25)
 #   com.newsagg.catalyst   — LLM catalyst discovery + stale re-fetch  (:30)
 #   com.newsagg.web        — local web server on http://localhost:8000
 #
@@ -33,17 +33,11 @@ if [[ -n "$PROXY" ]]; then
     <key>HTTP_PROXY</key><string>$PROXY</string>"
 fi
 
-# The supply-chain job needs ANTHROPIC_API_KEY, and launchd jobs do NOT inherit
-# your shell env — so we bake the key that's set *right now* (at install time)
-# into that one plist. The plist lives in ~/Library/LaunchAgents (not the repo),
-# so the key never touches version control. Re-run install after `export`ing it.
-ANTHROPIC_LINES=""
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-  ANTHROPIC_LINES="    <key>ANTHROPIC_API_KEY</key><string>$ANTHROPIC_API_KEY</string>"
-fi
-
-# Same story for the catalyst job — it calls the OpenAI web-search model, so the
-# OPENAI_API_KEY set right now is baked into that one plist (never committed).
+# The supply-chain and catalyst jobs both call OpenAI, and launchd jobs do NOT
+# inherit your shell env — so we bake the OPENAI_API_KEY that's set *right now*
+# (at install time) into those plists. They live in ~/Library/LaunchAgents (not
+# the repo), so the key never touches version control. Re-run install after
+# `export`ing it.
 OPENAI_LINES=""
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   OPENAI_LINES="    <key>OPENAI_API_KEY</key><string>$OPENAI_API_KEY</string>"
@@ -241,7 +235,7 @@ cat > "$SUPPLY_PLIST" <<EOF
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-$ANTHROPIC_LINES
+$OPENAI_LINES
   </dict>
   <key>StartCalendarInterval</key>
   <dict>

@@ -3,7 +3,7 @@ ticker, so the dashboard can draw a radial ecosystem graph on a stock's detail
 page — who feeds it, who it feeds, and who it competes with.
 
 Why an LLM (not a database): there is no clean, free machine-readable feed of
-"who supplies whom" for US equities. Claude knows the major, well-reported
+"who supplies whom" for US equities. The model knows the major, well-reported
 relationships (NVDA→TSMC, AAPL→its assemblers, etc.). We ask it for *major*
 relationships only, with a one-line reason per edge, and we label the output
 honestly in the UI as AI-derived and non-exhaustive.
@@ -12,15 +12,17 @@ Like ``sectors.py`` this is a **cached** fetch: only tickers missing from
 ``data/newsagg/supplychain.json`` are looked up; existing ones are kept. So the
 daily run is usually a no-op and only newly-added SA names cost an API call.
 
-Credentials: the Anthropic SDK reads ``ANTHROPIC_API_KEY`` from the environment
-(set it in your shell / launchd, never in code or the repo). No key → this step
-logs a warning and is skipped; the rest of the pipeline is unaffected.
+Provider: OpenAI (the user's gateway), same as ``catalyst.py`` — it reads
+``OPENAI_API_KEY`` (and, if the gateway needs it, ``OPENAI_BASE_URL``) from the
+environment, never from code or the repo. The gateway requires streaming, so we
+stream and collect the output text. No key / SDK → this step logs a warning and
+is skipped; the rest of the pipeline is unaffected.
 
 Writes ``data/newsagg/supplychain.json`` =
     {ticker: {upstream: [Edge], downstream: [Edge], peers: [Edge], model, ok}}
 where Edge = {ticker, name, reason}.
 
-    ANTHROPIC_API_KEY=... python -m newsagg.supplychain
+    OPENAI_API_KEY=... python -m newsagg.supplychain
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from newsagg.config import load_settings
@@ -36,7 +39,7 @@ from newsagg.config import load_settings
 logger = logging.getLogger("newsagg.supplychain")
 
 SUPPLYCHAIN_FILE = "supplychain.json"
-MODEL = "claude-opus-4-8"
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
 # Keep each relationship list short so the graph stays readable and the model
 # stays on the *major* names instead of padding with speculative small fry.
@@ -133,8 +136,43 @@ def _prompt(ticker: str, name: str, sector: str = "", industry: str = "") -> str
         "integrated (the counterparty is nearly irreplaceable, or its results materially swing this company), "
         "2 = significant, 1 = minor / easily substituted.\n"
         "- Do NOT invent tickers or relationships you aren't confident about. Omit rather than guess.\n"
-        "- If the company itself is obscure and you have little reliable information, return short or empty lists."
+        "- If the company itself is obscure and you have little reliable information, return short or empty lists.\n\n"
+        "Return ONLY a single JSON object (no prose, no markdown fences) of the exact shape:\n"
+        '{"upstream": [{"ticker": "", "name": "", "reason": "", "importance": 1}], '
+        '"downstream": [...], "peers": [...]}\n'
+        "Every edge object must have all four keys; `importance` is an integer 1-3."
     )
+
+
+def _extract_json(text: str) -> dict | None:
+    """Pull the JSON object out of the model's text (tolerant of stray prose)."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except ValueError:
+        return None
+
+
+def _complete(client, model: str, prompt: str) -> str:
+    """One streamed completion; returns the concatenated output text. The gateway
+    requires stream=True and input as a role/content list."""
+    parts: list[str] = []
+    stream = client.responses.create(
+        model=model,
+        input=[{"role": "user", "content": prompt}],
+        stream=True,
+    )
+    for ev in stream:
+        if getattr(ev, "type", "") == "response.output_text.delta":
+            parts.append(ev.delta)
+    return "".join(parts)
 
 
 def _clean_edges(raw: list) -> list[dict]:
@@ -164,27 +202,15 @@ def _clean_edges(raw: list) -> list[dict]:
 
 
 def _fetch_one(client, ticker: str, name: str, model: str = MODEL, sector: str = "", industry: str = "") -> dict | None:
-    """One structured call. Returns the cleaned map, or None on failure."""
+    """One call. Returns the cleaned map, or None on failure."""
     try:
-        # Adaptive thinking only exists on Claude 4.6+; skip it for other models
-        # (e.g. Haiku) so the request doesn't 400.
-        kwargs = {"thinking": {"type": "adaptive"}} if model.startswith("claude-opus") or model.startswith("claude-sonnet") else {}
-        msg = client.messages.create(
-            model=model,
-            max_tokens=1500,
-            output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
-            messages=[{"role": "user", "content": _prompt(ticker, name, sector, industry)}],
-            **kwargs,
-        )
+        text = _complete(client, model, _prompt(ticker, name, sector, industry))
     except Exception as exc:  # noqa: BLE001
         logger.warning("  %s: API error (%s)", ticker, exc)
         return None
 
-    # With json_schema output the assistant text is the JSON object.
-    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
-    try:
-        parsed = json.loads(text)
-    except ValueError:
+    parsed = _extract_json(text)
+    if parsed is None:
         logger.warning("  %s: could not parse JSON response", ticker)
         return None
 
@@ -206,13 +232,13 @@ def fetch_missing(
 ) -> dict[str, dict]:
     """Look up the supply chain for tickers not already cached."""
     try:
-        import anthropic
+        from openai import OpenAI
     except ImportError:
-        logger.warning("anthropic SDK not installed — `pip install anthropic`; skipping supply chain")
+        logger.warning("openai SDK not installed — `pip install openai`; skipping supply chain")
         return {}
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.warning("ANTHROPIC_API_KEY not set — skipping supply-chain enrichment")
+    if not os.environ.get("OPENAI_API_KEY"):
+        logger.warning("OPENAI_API_KEY not set — skipping supply-chain enrichment")
         return {}
 
     missing = {t: n for t, n in tickers.items() if t not in have}
@@ -224,7 +250,7 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    client = anthropic.Anthropic()
+    client = OpenAI()
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {
@@ -251,7 +277,7 @@ def main() -> int:
     ap.add_argument("--tickers", default=None, help="comma-separated override")
     ap.add_argument("--refresh", action="store_true", help="re-map all, ignore cache")
     ap.add_argument("--limit", type=int, default=None, help="cap how many new tickers to map this run")
-    ap.add_argument("--model", default=MODEL, help=f"model id (default {MODEL}; e.g. claude-haiku-4-5 to save cost)")
+    ap.add_argument("--model", default=MODEL, help=f"OpenAI model id (default {MODEL})")
     ap.add_argument("--min-cap", type=float, default=3e8, help="skip tickers below this market cap (default $300M)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
