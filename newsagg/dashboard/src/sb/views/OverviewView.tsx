@@ -44,18 +44,21 @@ function hexToRgb(h: string): string {
 // Position encodes the signal: x = today's move %, y = relative volume (RVOL).
 const X_MIN = -4,
   X_MAX = 8; // move % domain (clamped)
-const Y_MIN = 0.5,
-  Y_MAX = 3; // RVOL domain (clamped)
+// RVOL on a LOG axis so the normal band (~1.0) sits mid-height and the common
+// 0.8–1.6 range spreads out, instead of everything piling at the bottom.
+const LN_MIN = Math.log(0.5),
+  LN_MAX = Math.log(3);
 function xPct(move: number): number {
   const c = Math.max(X_MIN, Math.min(X_MAX, move));
   return 5 + ((c - X_MIN) / (X_MAX - X_MIN)) * 90; // 5%..95%
 }
 function yPct(rvol: number | null): number {
-  const v = Math.max(Y_MIN, Math.min(Y_MAX, rvol ?? 1));
-  return 12 + (1 - (v - Y_MIN) / (Y_MAX - Y_MIN)) * 74; // 12%(top)..86%(bottom)
+  const v = Math.max(0.5, Math.min(3, rvol ?? 1));
+  const f = (Math.log(v) - LN_MIN) / (LN_MAX - LN_MIN);
+  return 12 + (1 - f) * 74; // 12%(top)..86%(bottom); RVOL 1.0 ≈ mid
 }
 function bubbleR(m: Mover): number {
-  return 4 + Math.min(m.attnScore / 100, 1) * 7; // 4..11px radius by attention
+  return 3.5 + Math.min(m.attnScore / 100, 1) * 5; // 3.5..8.5px radius by attention
 }
 
 const SectorScatter = memo(function SectorScatter({
@@ -119,7 +122,7 @@ const SectorScatter = memo(function SectorScatter({
             onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
             onClick={() => onPick(m.ticker)}
             className="absolute rounded-full transition-transform duration-150"
-            title={m.ticker}
+            title={`${m.ticker} · ${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(1)}% · RVOL ${m.rvol?.toFixed(1) ?? "—"}×`}
             style={{
               left: `${xPct(m.changePct)}%`,
               top: `${yPct(m.rvol)}%`,
@@ -129,26 +132,19 @@ const SectorScatter = memo(function SectorScatter({
               marginTop: -r,
               opacity: dim,
               zIndex: isHover ? 30 : m.breakout ? 20 : 10,
-              transform: isHover ? "scale(1.4)" : "scale(1)",
-              background: `radial-gradient(circle at 35% 32%, rgba(${rgb},0.95), rgba(${rgb},0.42))`,
-              boxShadow: m.breakout ? `0 0 11px rgba(${rgb},0.9)` : `0 0 5px rgba(${rgb},0.4)`,
+              transform: isHover ? "scale(1.5)" : "scale(1)",
+              // A thin dark rim separates overlapping bubbles; only breakouts glow
+              // (so dense clusters read cleanly instead of blooming into a blob).
+              background: `radial-gradient(circle at 36% 32%, rgba(${rgb},0.92), rgba(${rgb},0.48))`,
+              boxShadow: m.breakout ? `0 0 9px rgba(${rgb},0.8)` : undefined,
               border: m.newHigh
-                ? "1.5px solid rgba(255,255,255,0.85)"
+                ? "1.5px solid rgba(255,255,255,0.9)"
                 : m.breakout
                   ? `1.5px solid rgba(${rgb},1)`
-                  : "none",
+                  : "1px solid rgba(9,13,19,0.6)",
               cursor: "pointer",
             }}
-          >
-            {m.onFocus && (
-              <span
-                className="absolute -right-1.5 -top-1.5 text-[8px] leading-none text-gold"
-                style={{ textShadow: "0 0 3px #000" }}
-              >
-                ★
-              </span>
-            )}
-          </button>
+          />
         );
       })}
 

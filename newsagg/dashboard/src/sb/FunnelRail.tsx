@@ -64,7 +64,9 @@ function NavRow({
   const lang = useStore((s) => s.lang);
   const active = view === stage.key;
   const primary = lang === "zh" ? stage.zh : stage.en;
-  const hint = stage.hint ? (lang === "zh" ? stage.hint.zh : stage.hint.en) : lang === "zh" ? stage.en : stage.zh;
+  // Subtitle follows the selected language — only the descriptive hint, never a
+  // cross-language echo of the name (that showed Chinese in English mode).
+  const hint = stage.hint ? (lang === "zh" ? stage.hint.zh : stage.hint.en) : "";
   return (
     <button
       onClick={() => setView(stage.key)}
@@ -91,7 +93,7 @@ function NavRow({
         ))}
       <span className="min-w-0 flex-1">
         <span className="block text-[13px]">{primary}</span>
-        <span className="block text-[10px] text-muted2">{hint}</span>
+        {hint && <span className="block text-[10px] text-muted2">{hint}</span>}
       </span>
       <span className="font-mono text-[13px] font-semibold text-text">
         {/* overview is a landing page, not a counted stage → no "—" */}
