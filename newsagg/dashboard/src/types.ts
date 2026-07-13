@@ -152,23 +152,26 @@ export interface RankRow {
 }
 
 // Stage 3 — catalyst discovery (TPMN). Written by newsagg.catalyst.
+// Per catalyst: total = T(0-25) + P(0-3) + M(0-3) + N(0-2), max ~33.
 export interface CatalystTPMN {
-  T: number; // trigger (type weight)
-  P: number; // probability (de-rated by priced_in)
-  M: number; // magnitude (est. % upside, capped)
-  N: number; // nearness (days to a dated event)
-  score: number; // 0-10
+  T: number; // timing 0-25 (peak curve on days-to-event, peaks ~2 weeks)
+  P: number; // probability / evidence strength 0-3
+  M: number; // magnitude / impact 0-3
+  N: number; // narrative fit 0-2
+  days: number | null; // days to the event (A) or window midpoint (B)
+  cls: string; // "A" timed / "B" untimed
+  score: number; // T+P+M+N
   type: string;
 }
 export interface Catalyst {
   type: string;
   title: string;
+  cls: string;
   event_date: string | null;
-  probability: number;
-  magnitude_pct: number;
-  priced_in: number;
+  window_days: number | null;
   source_url: string;
   thesis: string;
+  evidence: string;
   tpmn: CatalystTPMN;
 }
 export interface CatalystTicker {

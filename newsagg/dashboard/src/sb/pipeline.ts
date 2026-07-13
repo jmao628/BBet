@@ -845,7 +845,7 @@ export function buildFocus(
 // Focus name ADVANCES if its strongest catalyst clears the bar; names with a
 // catalyst below the bar are "watch", names fetched with none are "none", and
 // names not yet fetched are "pending" (inclusive — nothing is cut here either).
-export const CATALYST_BAR = 5; // TPMN score (0-10) to advance
+export const CATALYST_BAR = 18; // TPMN total (T+P+M+N, ~0-33) to advance
 
 export type CatalystStatus = "advance" | "watch" | "none" | "pending";
 

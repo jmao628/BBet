@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import re
 from datetime import date
@@ -54,20 +55,10 @@ CATALYST_TYPES = (
     "capital_return", "policy", "index", "mgmt", "revision", "other",
 )
 
-# How much each catalyst *type* is worth as a re-rating trigger (the T weight).
-TYPE_WEIGHT = {
-    "approval": 1.0,       # FDA / regulatory decision — binary, big
-    "m_and_a": 0.9,        # deal / strategic review
-    "order": 0.85,         # major contract / design win
-    "index": 0.75,         # index inclusion — forced buying
-    "guidance": 0.70,      # guide / analyst-day reset
-    "policy": 0.70,        # policy / regulation tailwind
-    "revision": 0.65,      # estimate-revision / upgrade cycle
-    "earnings": 0.60,      # scheduled print
-    "capital_return": 0.60,  # buyback / dividend initiation
-    "mgmt": 0.40,          # management change
-    "other": 0.50,
-}
+# Score scale (per catalyst): total = T + P + M + N.
+#   T  timing 0-25  — a peak curve on days-to-event (peaks at ~2 weeks)
+#   P  probability 0-3, M  magnitude 0-3, N  narrative 0-2  (graded by the LLM)
+# So a near-term, high-conviction, narrative-hot catalyst tops out near 33.
 
 
 def _load(path: Path) -> dict[str, dict]:
@@ -83,27 +74,36 @@ def _prompt(ticker: str, name: str, sector: str = "") -> str:
     who = f"{ticker} ({name})" if name else ticker
     ctx = f" It is in the '{sector}' sector." if sector else ""
     return (
-        f"You are an equity-research assistant. Using web search, find UPCOMING, DATED catalysts "
-        f"for the US-listed company {who} over roughly the next 6 months that could re-rate the "
-        f"stock.{ctx}\n\n"
+        f"You are an equity-research assistant. Using web search, find UPCOMING catalysts for the "
+        f"US-listed company {who} over roughly the next 6 months that could re-rate the stock.{ctx}\n\n"
         "Return ONLY a JSON object (no prose, no markdown fences) of the form:\n"
         '{"ticker":"' + ticker + '","catalysts":[{'
         '"type":"earnings|guidance|approval|order|m_and_a|capital_return|policy|index|mgmt|revision|other",'
         '"title":"short label",'
+        '"cls":"A or B",'
         '"event_date":"YYYY-MM-DD or null",'
-        '"probability":0.0,'
-        '"magnitude_pct":0.0,'
-        '"priced_in":0.0,'
+        '"window_days":null,'
+        '"P":0,"M":0,"N":0,'
         '"source_url":"https://...",'
-        '"thesis":"one line: why it matters"}]}\n\n'
+        '"thesis":"one line: why it matters",'
+        '"evidence":"one line justifying P/M/N"}]}\n\n'
+        "TIMING — classify each catalyst A or B:\n"
+        "- A (timed): there is an OBJECTIVE calendar date — earnings, an FDA/regulatory decision, an index "
+        "rebalance, a lockup expiry, an investor day. Put it in event_date; leave window_days null.\n"
+        "- B (untimed): no fixed date. Set window_days = your best estimate of the number of DAYS FROM TODAY "
+        "to the MIDPOINT of the likely window. Guidance: a downstream company that typically follows an upstream "
+        "anchor's report by ~1-2 quarters → ~45-90 days; if an analyst/author gave an expected timeframe, use it. "
+        "Leave event_date null.\n\n"
+        "GRADE each catalyst (integers, be conservative):\n"
+        "- P probability/evidence 0-3: 0 pure speculation · 1 directional evidence · 2 hard evidence in hand · "
+        "3 already announced, awaiting confirmation.\n"
+        "- M magnitude/impact 0-3: 0 noise · 1 moves one quarter · 2 moves the full year · 3 changes the narrative.\n"
+        "- N narrative fit vs today's hottest market themes 0-2: 0 unrelated · 1 tangential · 2 squarely on the "
+        "hottest theme.\n\n"
         "Rules:\n"
-        "- ONLY include a catalyst you can back with a real, specific source_url (news, IR page, filing, "
-        "earnings calendar). No credible source → omit it. Never invent dates or events.\n"
-        "- event_date = the actual scheduled/expected date if known, else null.\n"
-        "- probability (0-1) = chance the event happens AND surprises positively.\n"
-        "- magnitude_pct = rough % upside to the stock if it fires as hoped.\n"
-        "- priced_in (0-1) = 0 if the market hasn't reacted, 1 if fully expected/priced.\n"
-        "- Prefer concrete near-term events. If you find nothing credible, return an empty catalysts array."
+        "- ONLY include a catalyst backed by a real, specific source_url (news, IR page, filing, calendar). "
+        "No credible source → omit it. NEVER invent dates or events.\n"
+        "- If you find nothing credible, return an empty catalysts array."
     )
 
 
@@ -124,54 +124,47 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
-def _nearness(event_date: str | None, today: date) -> float:
-    """0-1 by how soon the dated event is (rotation-safe: sooner = higher)."""
-    if not event_date:
-        return 0.10
-    try:
-        d = date.fromisoformat(str(event_date)[:10])
-    except ValueError:
-        return 0.10
-    days = (d - today).days
-    if days < 0:
-        return 0.05            # already happened
-    if days <= 14:
-        return 1.0
-    if days <= 30:
-        return 0.85
-    if days <= 45:
-        return 0.70
-    if days <= 60:
-        return 0.58
-    if days <= 90:
-        return 0.45
-    if days <= 180:
-        return 0.25
-    return 0.12
+def _timing(days: int | None) -> float:
+    """T (0-25): a peak curve on days-to-event. Peaks at ~2 weeks; too-near
+    (<0 → 0) and too-far both decay. T = 25·exp(−((days−14)²)/(2·21²))."""
+    if days is None or days < 0:
+        return 0.0
+    return 25.0 * math.exp(-((days - 14) ** 2) / (2 * 21 * 21))
 
 
-def _clamp01(x, default=0.0) -> float:
+def _days_to(cat: dict, today: date) -> int | None:
+    """A-class: calendar date − today. B-class: estimated window midpoint days."""
+    ed = cat.get("event_date")
+    if ed:
+        try:
+            return (date.fromisoformat(str(ed)[:10]) - today).days
+        except ValueError:
+            pass
+    wd = cat.get("window_days")
     try:
-        return max(0.0, min(1.0, float(x)))
+        return int(wd) if wd is not None else None
     except (TypeError, ValueError):
-        return default
+        return None
+
+
+def _lvl(x, hi: int) -> int:
+    try:
+        return max(0, min(hi, int(round(float(x)))))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _tpmn(cat: dict, today: date) -> dict:
-    """Deterministic TPMN score (0-10) for one catalyst from its sourced facts."""
+    """Per-catalyst score: total = T(0-25) + P(0-3) + M(0-3) + N(0-2)."""
     ctype = cat.get("type") if cat.get("type") in CATALYST_TYPES else "other"
-    n = _nearness(cat.get("event_date"), today)
-    try:
-        mag = max(0.0, float(cat.get("magnitude_pct") or 0.0))
-    except (TypeError, ValueError):
-        mag = 0.0
-    m = min(mag / 50.0, 1.0)                       # 50%+ upside caps the M dimension
-    prob = _clamp01(cat.get("probability"), 0.5)
-    priced = _clamp01(cat.get("priced_in"), 0.5)
-    p = _clamp01(prob * (0.6 + 0.4 * (1.0 - priced)))  # reward not-yet-priced-in
-    t = TYPE_WEIGHT.get(ctype, 0.5)
-    score = round((0.35 * n + 0.30 * m + 0.25 * p + 0.10 * t) * 10, 1)
-    return {"T": round(t, 2), "P": round(p, 2), "M": round(m, 2), "N": round(n, 2), "score": score, "type": ctype}
+    days = _days_to(cat, today)
+    T = round(_timing(days), 1)
+    P = _lvl(cat.get("P"), 3)
+    M = _lvl(cat.get("M"), 3)
+    N = _lvl(cat.get("N"), 2)
+    score = round(T + P + M + N, 1)
+    cls = "A" if cat.get("event_date") else ("B" if cat.get("window_days") is not None else (cat.get("cls") or "B"))
+    return {"T": T, "P": P, "M": M, "N": N, "days": days, "cls": cls, "score": score, "type": ctype}
 
 
 def _clean(parsed: dict, today: date) -> list[dict]:
@@ -183,27 +176,26 @@ def _clean(parsed: dict, today: date) -> list[dict]:
         url = (c.get("source_url") or "").strip()
         if not url.startswith("http"):
             continue  # no citation → drop (guards against hallucinated events)
+        tpmn = _tpmn(c, today)
+        wd = c.get("window_days")
+        try:
+            wd = int(wd) if wd is not None else None
+        except (TypeError, ValueError):
+            wd = None
         cat = {
-            "type": c.get("type") if c.get("type") in CATALYST_TYPES else "other",
+            "type": tpmn["type"],
             "title": (c.get("title") or "").strip()[:160],
+            "cls": tpmn["cls"],
             "event_date": (str(c.get("event_date"))[:10] if c.get("event_date") else None),
-            "probability": _clamp01(c.get("probability"), 0.5),
-            "magnitude_pct": _safe_float(c.get("magnitude_pct")),
-            "priced_in": _clamp01(c.get("priced_in"), 0.5),
+            "window_days": wd,
             "source_url": url,
             "thesis": (c.get("thesis") or "").strip()[:280],
+            "evidence": (c.get("evidence") or "").strip()[:200],
+            "tpmn": tpmn,
         }
-        cat["tpmn"] = _tpmn(cat, today)
         out.append(cat)
     out.sort(key=lambda x: x["tpmn"]["score"], reverse=True)
     return out[:MAX_CATALYSTS]
-
-
-def _safe_float(x) -> float:
-    try:
-        return round(float(x), 1)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _complete(client, model: str, prompt: str) -> str:
