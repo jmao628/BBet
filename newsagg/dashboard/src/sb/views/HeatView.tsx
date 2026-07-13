@@ -76,6 +76,9 @@ export function HeatView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
   const [filter, setFilter] = useState<string | null>(null);
+  // The Strong-Buy section has its OWN sector filter so clicking it doesn't
+  // re-filter (and reflow) the ranking board above it, which made the page jump.
+  const [sbFilter, setSbFilter] = useState<string | null>(null);
 
   const openDetail = useStore((s) => s.openDetail);
   const cmap = useMemo(() => companyMap(data), [data]);
@@ -255,7 +258,7 @@ export function HeatView() {
       })()}
 
       {(() => {
-        const sbRows = filter ? bundle.strongBuys.filter((s) => s.sector === filter) : bundle.strongBuys;
+        const sbRows = sbFilter ? bundle.strongBuys.filter((s) => s.sector === sbFilter) : bundle.strongBuys;
         const sbSectors = (() => {
           const c = new Map<string, number>();
           for (const s of bundle.strongBuys) if (s.sector) c.set(s.sector, (c.get(s.sector) ?? 0) + 1);
@@ -275,16 +278,16 @@ export function HeatView() {
                 <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-[18px] py-2.5">
                   <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
                   <button
-                    onClick={() => setFilter(null)}
-                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${filter === null ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
+                    onClick={() => setSbFilter(null)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${sbFilter === null ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
                   >
                     {t("All", "全部")} {bundle.strongBuys.length}
                   </button>
                   {sbSectors.map(([sec, n]) => (
                     <button
                       key={sec}
-                      onClick={() => setFilter(filter === sec ? null : sec)}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${filter === sec ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
+                      onClick={() => setSbFilter(sbFilter === sec ? null : sec)}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${sbFilter === sec ? "border-gold/50 bg-gold/10 text-gold" : "border-line text-muted hover:text-text"}`}
                     >
                       {sectorLabel(sec, lang)} {n}
                     </button>

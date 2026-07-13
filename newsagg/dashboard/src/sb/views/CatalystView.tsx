@@ -214,14 +214,14 @@ function Runway({
                           }
                           const PW = 252;
                           const PH = 340;
-                          setPop({
-                            x: Math.min(e.clientX + 8, window.innerWidth - PW - 12),
-                            y: Math.min(e.clientY + 8, window.innerHeight - PH - 12),
-                            type,
-                            days: Math.round(c.midDays),
-                            color: c.color,
-                            items: c.items,
-                          });
+                          // Anchor to the bubble itself, not the cursor: sit just
+                          // to its right (flip left near the edge), top-aligned.
+                          const r = e.currentTarget.getBoundingClientRect();
+                          let x = r.right + 10;
+                          if (x + PW > window.innerWidth - 8) x = r.left - PW - 10;
+                          x = Math.max(8, x);
+                          const y = Math.max(8, Math.min(r.top - 6, window.innerHeight - PH - 12));
+                          setPop({ x, y, type, days: Math.round(c.midDays), color: c.color, items: c.items });
                         }}
                         title={`${catalystTypeLabel(type, lang)} · ${Math.round(c.midDays)}d · ${c.count} · ${c.names}`}
                         className="cat-cell absolute grid cursor-pointer place-items-center rounded-full font-mono font-semibold transition-[filter] hover:z-10 hover:brightness-125"
