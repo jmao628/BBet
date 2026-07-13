@@ -35,6 +35,91 @@ function timing(c: Catalyst, t: (en: string, zh: string) => string): { label: st
 
 // Four thin segments — T/P/M/N, each scaled to its own max. Single accent so it
 // reads as one clean meter rather than a rainbow.
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// Recent price trend — quick context on whether the catalyst sits on a rising or
+// falling stock.
+function Spark({ data, up }: { data: number[]; up: boolean }) {
+  const W = 52,
+    H = 16;
+  if (!data || data.length < 2) return <span className="inline-block flex-none" style={{ width: W, height: H }} />;
+  const min = Math.min(...data),
+    max = Math.max(...data),
+    rng = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * W},${H - 2 - ((v - min) / rng) * (H - 4)}`).join(" ");
+  return (
+    <svg width={W} height={H} className="flex-none overflow-visible" aria-hidden>
+      <polyline points={pts} fill="none" stroke={up ? "#48c78e" : "#ff6b6b"} strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// A 90-day "runway" of dated catalysts — see at a glance what's coming when and
+// how strong. Each dot: position = days out, size = score, colour = status.
+function Runway({
+  rows,
+  onOpen,
+  lang,
+  t,
+}: {
+  rows: CatalystRow[];
+  onOpen: (t: string) => void;
+  lang: "en" | "zh";
+  t: (en: string, zh: string) => string;
+}) {
+  const MAXD = 90;
+  const items = rows
+    .filter((r) => r.best && r.best.tpmn.days != null && r.best.tpmn.days >= 0 && r.best.tpmn.days <= MAXD && r.status !== "pending")
+    .map((r) => ({ r, days: r.best!.tpmn.days as number }))
+    .sort((a, b) => a.days - b.days);
+  if (items.length === 0) return null;
+  const marks = [0, 14, 30, 60, 90];
+  return (
+    <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 pb-6 pt-3">
+      <div className="mb-1 flex items-center justify-between text-[11px]">
+        <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
+        <span className="font-mono text-muted2">{items.length} {t("dated", "个有日期")}</span>
+      </div>
+      <div className="relative h-16">
+        <div className="absolute inset-x-0 top-[42%] h-px bg-line2" />
+        {marks.map((m) => (
+          <div key={m} className="absolute bottom-0 flex -translate-x-1/2 flex-col items-center" style={{ left: `${(m / MAXD) * 100}%` }}>
+            <span className="font-mono text-[9px] text-muted2">{m === 0 ? t("today", "今") : `${m}d`}</span>
+          </div>
+        ))}
+        {items.map(({ r, days }) => {
+          const x = (Math.min(days, MAXD) / MAXD) * 100;
+          const jitter = ((hashStr(r.ticker) % 100) / 100 - 0.5) * 26;
+          const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
+          const size = 7 + (r.catScore / 10) * 7;
+          return (
+            <button
+              key={r.ticker}
+              onClick={() => onOpen(r.ticker)}
+              title={`${r.ticker} · ${catalystTypeLabel(r.best!.type, lang)} · ${days}d · ${r.catScore.toFixed(1)}/10`}
+              className="absolute rounded-full transition-transform hover:z-10 hover:scale-150"
+              style={{
+                left: `${x}%`,
+                top: `calc(42% + ${jitter}px)`,
+                width: size,
+                height: size,
+                marginLeft: -size / 2,
+                marginTop: -size / 2,
+                background: color,
+                boxShadow: `0 0 8px ${color}99`,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TpmnMini({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
   const dims: [string, number, number][] = [
     ["T", tpmn.T, 25],
@@ -83,11 +168,11 @@ function CatalystLine({ c, lang, t }: { c: Catalyst; lang: "en" | "zh"; t: (en: 
   const cd = timing(c, t);
   return (
     <div className="rounded-lg bg-white/[0.02] px-3 py-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
         <TypeChip type={c.type} lang={lang} />
-        <span className="min-w-0 flex-1 truncate text-[12px] text-text">{c.title}</span>
         <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>
       </div>
+      <div className="mt-1 text-[12px] leading-snug text-text">{c.title}</div>
       {c.summary && <div className="mt-1.5 text-[11px] leading-relaxed text-muted2">{c.summary}</div>}
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <TpmnMini tpmn={c.tpmn} />
@@ -153,19 +238,28 @@ function Row({
           )}
         </span>
       </button>
-      <div className="truncate px-4 pb-2.5 pt-0.5 text-[10px] text-muted2">
-        {r.company || "—"} · {capLabel(r.cap, lang)}
-        {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
+      <div className="flex items-center gap-2 px-4 pb-2.5 pt-0.5">
+        <span className="min-w-0 flex-1 truncate text-[10px] text-muted2">
+          {r.company || "—"} · {capLabel(r.cap, lang)}
+          {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
+        </span>
+        <Spark data={r.spark} up={(r.changePct ?? 0) >= 0} />
+        {r.changePct != null && (
+          <span className="flex-none font-mono text-[10px] font-semibold" style={{ color: r.changePct >= 0 ? "#48c78e" : "#ff6b6b" }}>
+            {r.changePct >= 0 ? "+" : ""}
+            {r.changePct.toFixed(1)}%
+          </span>
+        )}
       </div>
 
-      {/* primary catalyst — always compact (no summary here) */}
+      {/* primary catalyst — always compact; full title (wraps, no truncation) */}
       {best && cd && (
         <div className="mx-2.5 mb-2.5 rounded-lg bg-white/[0.025] px-3 py-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2">
             <TypeChip type={best.type} lang={lang} />
-            <span className="min-w-0 flex-1 truncate text-[12px] text-text">{best.title}</span>
             <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>
           </div>
+          <div className="mt-1.5 text-[12px] leading-snug text-text">{best.title}</div>
           <div className="mt-2 flex items-center justify-between gap-2">
             <TpmnMini tpmn={best.tpmn} />
             <Src url={best.source_url} t={t} />
@@ -309,6 +403,8 @@ export function CatalystView() {
                 </button>
               ))}
           </div>
+
+          <Runway rows={shown} onOpen={openDetail} lang={lang} t={t} />
 
           {shown.length === 0 ? (
             <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-8 text-center text-[13px] text-muted">

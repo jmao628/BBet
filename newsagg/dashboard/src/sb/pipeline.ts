@@ -845,6 +845,8 @@ export interface CatalystRow {
   catScore: number; // best catalyst TPMN score, or -1 if pending
   best: Catalyst | null; // strongest catalyst
   status: CatalystStatus;
+  spark: number[]; // recent close series, for a price sparkline
+  changePct: number | null;
 }
 
 export function buildCatalystRows(
@@ -876,6 +878,8 @@ export function buildCatalystRows(
       catScore,
       best,
       status,
+      spark: f.spark,
+      changePct: f.changePct,
     };
   });
   // Advancing (highest catalyst) first, then by catalyst score, then Focus score.
