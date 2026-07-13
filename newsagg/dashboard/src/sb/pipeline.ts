@@ -829,7 +829,28 @@ export function catScore10(tpmn: CatalystTPMN): number {
   const total = tpmn.T + tpmn.P + tpmn.M + tpmn.N;
   return Math.round((total / 33) * 100) / 10;
 }
-export const CATALYST_BAR = 5.5; // 0-10 (≈18/33) to advance
+
+// A ticker's catalyst score: the STRONGEST catalyst is the base, and additional
+// catalysts add a depth bonus weighted by THEIR OWN strength (which already
+// encodes P/M/N importance) with diminishing returns — so more strong catalysts
+// lift the score toward 10, weak ones barely move it, and it never just sums.
+// Returns -1 if not fetched, 0 if fetched with no catalysts.
+export function catDepthBonus(scoresDesc: number[]): number {
+  let depth = 0;
+  for (let i = 1; i < scoresDesc.length; i++) depth += (scoresDesc[i] / 10) * Math.pow(0.5, i - 1);
+  const factor = Math.min(depth * 0.5, 1); // 0-1 of the remaining headroom to 10
+  return factor;
+}
+export function catTickerScore(cat: CatalystTicker | null): number {
+  if (!cat) return -1;
+  if (!cat.catalysts.length) return 0;
+  const scores = cat.catalysts.map((c) => catScore10(c.tpmn)).sort((a, b) => b - a);
+  const best = scores[0];
+  const score = best + (10 - best) * catDepthBonus(scores);
+  return Math.round(score * 10) / 10;
+}
+
+export const CATALYST_BAR = 5.5; // 0-10 to advance
 
 export type CatalystStatus = "advance" | "watch" | "none" | "pending";
 
@@ -856,9 +877,10 @@ export function buildCatalystRows(
   const rows: CatalystRow[] = focus.map((f) => {
     const cat = catalyst?.[f.ticker] ?? null;
     const best = cat?.catalysts?.[0] ?? null;
-    // Recompute the 0-10 score from the raw T/P/M/N so old and new cache entries
-    // display on one scale (the stored `score` may be the older 0-33 total).
-    const catScore = !cat ? -1 : best ? catScore10(best.tpmn) : 0;
+    // Depth-weighted 0-10 score: strongest catalyst + a diminishing bonus from
+    // the rest (weighted by their own strength). Recomputed here so old and new
+    // cache entries share one scale.
+    const catScore = catTickerScore(cat);
     const status: CatalystStatus = !cat
       ? "pending"
       : !best

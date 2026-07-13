@@ -58,8 +58,9 @@ function Spark({ data, up }: { data: number[]; up: boolean }) {
   );
 }
 
-// A 90-day "runway" of dated catalysts — see at a glance what's coming when and
-// how strong. Each dot: position = days out, size = score, colour = status.
+// A 90-day "runway" of dated catalysts, CLASSIFIED into one lane per catalyst
+// type. Each dot: position = days out, size = score, colour = status. Hover to
+// read it, click to open.
 function Runway({
   rows,
   onOpen,
@@ -72,49 +73,69 @@ function Runway({
   t: (en: string, zh: string) => string;
 }) {
   const MAXD = 90;
-  const items = rows
-    .filter((r) => r.best && r.best.tpmn.days != null && r.best.tpmn.days >= 0 && r.best.tpmn.days <= MAXD && r.status !== "pending")
-    .map((r) => ({ r, days: r.best!.tpmn.days as number }))
-    .sort((a, b) => a.days - b.days);
-  if (items.length === 0) return null;
+  const dated = rows.filter(
+    (r) => r.best && r.best.tpmn.days != null && r.best.tpmn.days >= 0 && r.best.tpmn.days <= MAXD && r.status !== "pending",
+  );
+  if (dated.length === 0) return null;
+
+  const byType = new Map<string, { r: CatalystRow; days: number }[]>();
+  for (const r of dated) {
+    const type = r.best!.type;
+    const arr = byType.get(type) ?? [];
+    arr.push({ r, days: r.best!.tpmn.days as number });
+    byType.set(type, arr);
+  }
+  const lanes = [...byType.entries()].sort((a, b) => b[1].length - a[1].length);
   const marks = [0, 14, 30, 60, 90];
+
   return (
-    <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 pb-6 pt-3">
-      <div className="mb-1 flex items-center justify-between text-[11px]">
+    <div className="mb-4 rounded-xl border border-line bg-panel2 px-4 py-3">
+      <div className="mb-2.5 flex items-center justify-between text-[11px]">
         <span className="font-semibold text-muted">{t("Catalyst runway · next 90 days", "催化剂时间线 · 未来 90 天")}</span>
-        <span className="font-mono text-muted2">{items.length} {t("dated", "个有日期")}</span>
+        <span className="flex items-center gap-3 font-mono text-[10px] text-muted2">
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-ok" />{t("advancing", "过闸")}</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-warn" />{t("watch", "观察")}</span>
+        </span>
       </div>
-      <div className="relative h-16">
-        <div className="absolute inset-x-0 top-[42%] h-px bg-line2" />
-        {marks.map((m) => (
-          <div key={m} className="absolute bottom-0 flex -translate-x-1/2 flex-col items-center" style={{ left: `${(m / MAXD) * 100}%` }}>
-            <span className="font-mono text-[9px] text-muted2">{m === 0 ? t("today", "今") : `${m}d`}</span>
+      <div className="space-y-1">
+        {lanes.map(([type, arr]) => (
+          <div key={type} className="flex items-center gap-3">
+            <span className="w-20 flex-none truncate text-right text-[10px] text-muted2">{catalystTypeLabel(type, lang)}</span>
+            <div className="relative h-5 flex-1">
+              <div className="absolute inset-x-0 top-1/2 h-px bg-line/70" />
+              {arr.map(({ r, days }) => {
+                const x = (Math.min(days, MAXD) / MAXD) * 100;
+                const jx = ((hashStr(r.ticker) % 100) / 100 - 0.5) * 4;
+                const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
+                const size = 6 + (r.catScore / 10) * 6;
+                return (
+                  <button
+                    key={r.ticker}
+                    onClick={() => onOpen(r.ticker)}
+                    title={`${r.ticker} · ${days}d · ${r.catScore.toFixed(1)}/10`}
+                    className="absolute top-1/2 rounded-full transition-transform hover:z-10 hover:scale-150"
+                    style={{
+                      left: `calc(${x}% + ${jx}px)`,
+                      width: size,
+                      height: size,
+                      marginLeft: -size / 2,
+                      marginTop: -size / 2,
+                      background: color,
+                      boxShadow: `0 0 6px ${color}88`,
+                    }}
+                  />
+                );
+              })}
+            </div>
           </div>
         ))}
-        {items.map(({ r, days }) => {
-          const x = (Math.min(days, MAXD) / MAXD) * 100;
-          const jitter = ((hashStr(r.ticker) % 100) / 100 - 0.5) * 26;
-          const color = r.status === "advance" ? "#48c78e" : "#e9c46a";
-          const size = 7 + (r.catScore / 10) * 7;
-          return (
-            <button
-              key={r.ticker}
-              onClick={() => onOpen(r.ticker)}
-              title={`${r.ticker} · ${catalystTypeLabel(r.best!.type, lang)} · ${days}d · ${r.catScore.toFixed(1)}/10`}
-              className="absolute rounded-full transition-transform hover:z-10 hover:scale-150"
-              style={{
-                left: `${x}%`,
-                top: `calc(42% + ${jitter}px)`,
-                width: size,
-                height: size,
-                marginLeft: -size / 2,
-                marginTop: -size / 2,
-                background: color,
-                boxShadow: `0 0 8px ${color}99`,
-              }}
-            />
-          );
-        })}
+      </div>
+      <div className="relative ml-[92px] mt-1.5 h-3">
+        {marks.map((m) => (
+          <span key={m} className="absolute -translate-x-1/2 font-mono text-[9px] text-muted2" style={{ left: `${(m / MAXD) * 100}%` }}>
+            {m === 0 ? t("today", "今") : `${m}d`}
+          </span>
+        ))}
       </div>
     </div>
   );

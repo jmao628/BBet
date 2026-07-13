@@ -10,9 +10,13 @@ import {
   passesHeatGate,
   sectorLabel,
   capLabel,
+  catScore10,
+  catTickerScore,
+  catalystTypeLabel,
+  CATALYST_BAR,
   type FocusItem,
 } from "../pipeline";
-import type { SupplyEdge, SupplyMap, TechTicker } from "../../types";
+import type { CatalystTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
 
 // Human labels for the ranking lenses a name advanced in (Heat Ignition).
 const LENS_LABEL: Record<string, { en: string; zh: string }> = {
@@ -100,6 +104,67 @@ function ScoreBreakdown({
           {advBy.map((k) => (LENS_LABEL[k] ? (lang === "zh" ? LENS_LABEL[k].zh : LENS_LABEL[k].en) : k)).join(" · ")}
         </div>
       )}
+    </div>
+  );
+}
+
+// Transparent catalyst-score breakdown: the strongest catalyst's T/P/M/N, then
+// the depth bonus the other catalysts add (weighted by their own strength).
+function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
+  const primary = cat.catalysts[0];
+  const primScore = catScore10(primary.tpmn);
+  const total = catTickerScore(cat);
+  const depth = Math.round((total - primScore) * 10) / 10;
+  const secs = cat.catalysts.slice(1);
+  const dims: [string, number, number, string][] = [
+    ["T", primary.tpmn.T, 25, "#9b8cf0"],
+    ["P", primary.tpmn.P, 3, "#5fb0e8"],
+    ["M", primary.tpmn.M, 3, "#e9c46a"],
+    ["N", primary.tpmn.N, 2, "#48c78e"],
+  ];
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Catalyst score — how it's built", "催化剂打分 · 拆解")}</div>
+        <span className="font-mono text-[15px] font-semibold" style={{ color: total >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
+          {total.toFixed(1)}
+          <span className="text-[10px] text-muted2">/10</span>
+        </span>
+      </div>
+      <div className="rounded-lg bg-white/[0.02] px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="flex-none rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase text-muted">{catalystTypeLabel(primary.type, lang)}</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-text">{primary.title}</span>
+          <span className="flex-none font-mono text-[12px] font-semibold text-signal">{primScore.toFixed(1)}</span>
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          {dims.map(([k, v, max, c]) => (
+            <div key={k} className="flex items-center gap-1" title={`${k} ${k === "T" ? v.toFixed(1) : v}/${max}`}>
+              <span className="font-mono text-[9px] text-muted2">{k}</span>
+              <span className="h-1.5 w-8 overflow-hidden rounded-full bg-inset">
+                <span className="block h-full rounded-full" style={{ width: `${Math.max(6, (v / max) * 100)}%`, background: c }} />
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[11.5px]">
+        <span className="min-w-0 flex-1 text-muted">
+          {secs.length > 0
+            ? t(
+                `+ depth from ${secs.length} more (${secs.map((s) => catScore10(s.tpmn).toFixed(1)).join(", ")})`,
+                `+ ${secs.length} 条次要催化剂加权 (${secs.map((s) => catScore10(s.tpmn).toFixed(1)).join(", ")})`,
+              )
+            : t("single catalyst — no depth bonus", "仅一条催化剂,无深度加成")}
+        </span>
+        <span className="flex-none font-mono text-ok">{depth > 0 ? `+${depth.toFixed(1)}` : "+0.0"}</span>
+      </div>
+      <div className="mt-2 border-t border-line pt-2 text-[10.5px] leading-relaxed text-muted2">
+        {t(
+          "Base = the strongest catalyst; extra catalysts fill the remaining headroom to 10, weighted by their own strength (P/M/N) with diminishing returns.",
+          "基准 = 最强那条催化剂;其余催化剂按各自强度(P/M/N)递减加权,填补到 10 分的余量。",
+        )}
+      </div>
     </div>
   );
 }
@@ -497,6 +562,7 @@ export function StockDetail() {
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
+  const catalyst = useStore((s) => s.catalyst);
   const marketCaps = useStore((s) => s.marketCaps);
   const lang = useStore((s) => s.lang);
   const t = useT();
@@ -683,6 +749,10 @@ export function StockDetail() {
           </div>
 
           {focusItem && <ScoreBreakdown item={focusItem} advBy={advBy} lang={lang} t={t} />}
+
+          {catalyst?.[ticker] && catalyst[ticker].catalysts.length > 0 && (
+            <CatBreakdown cat={catalyst[ticker]} lang={lang} t={t} />
+          )}
 
           {!tech && (
             <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-5 text-center text-[13px] text-muted">
