@@ -158,6 +158,39 @@ body {
   }
 }
 
+/* Ignition strip nodes — staggered fade-in + a pulsing halo on breakouts. */
+@keyframes ignite-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ignite-in {
+  animation: ignite-in 0.45s ease both;
+}
+@keyframes ignite-halo {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+  }
+}
+.ignite-halo {
+  animation: ignite-halo 1.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ignite-in,
+  .ignite-halo {
+    animation: none;
+  }
+}
+
 /* Catalyst runway bucket popover — a quick, soft pop-in from the click point. */
 @keyframes cat-pop-in {
   from {
