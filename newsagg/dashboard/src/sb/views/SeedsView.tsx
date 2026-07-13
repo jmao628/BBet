@@ -1,18 +1,17 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildSeeds, noDataSet, unratedSmallCap, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
+import { buildSeeds, noDataSet, unratedForRank, CATALYST_CN, CATALYST_EN, ROLE_CN, ROLE_EN, sectorLabel } from "../pipeline";
 import { ViewHead, Card, Chip } from "../ui";
 
 export function SeedsView() {
   const data = useStore((s) => s.data);
   const technical = useStore((s) => s.technical);
   const sectors = useStore((s) => s.sectors);
-  const marketCaps = useStore((s) => s.marketCaps);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
   const allSeeds = useMemo(() => buildSeeds(data), [data]);
-  const unrated = useMemo(() => unratedSmallCap(data, marketCaps), [data, marketCaps]);
+  const unrated = useMemo(() => unratedForRank(data), [data]);
 
   const hasData = (t: string) => !!technical?.tickers?.[t];
   const sectorOf = (t: string) => sectors?.[t]?.sector ?? "";
@@ -27,9 +26,9 @@ export function SeedsView() {
   const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
   const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
 
-  // "All" drops unrated small-caps — < $2B names with only a text list "BUY"
-  // (no quant score, no analyst rating), e.g. PERF. Small-caps that carry a
-  // quant score or an analyst thesis stay, as do all mid/large caps.
+  // "All" = names with a numeric SA quant score. Names with only a text rating
+  // (an analyst "BUY" or a "Top X" list "BUY", quant "—") are dropped from All;
+  // the analyst-written ones surface under ★ Analyst thesis.
   const thesisPool = useMemo(() => seeds.filter((r) => r.hasThesis), [seeds]);
   const mainSeeds = useMemo(() => seeds.filter((r) => !unrated.has(r.ticker)), [seeds, unrated]);
   const unratedCount = seeds.length - mainSeeds.length;
@@ -131,12 +130,12 @@ export function SeedsView() {
         </div>
       )}
 
-      {/* unrated small-caps dropped from the ranked universe */}
+      {/* names with no numeric quant score — held out of "All" */}
       {unratedCount > 0 && !thesisOnly && (
         <div className="mb-2 text-[11px] text-muted2">
           {t(
-            `${unratedCount} unrated small-caps (< $2B, only a text list rating — no quant score or analyst thesis) were dropped from the ranked universe.`,
-            `${unratedCount} 只「小盘(<$20亿)、只有文字榜单评级、无 quant 分或分析师评分」的票已移出排名池。`,
+            `${unratedCount} names with no numeric SA quant score (only a text "BUY") were held out of All — analyst-written ones are under ★ Analyst thesis.`,
+            `${unratedCount} 只「无数字 quant 评分、只有文字 BUY」的票未计入 All —— 其中有分析师论点的可在 ★ 有分析师论点 里查看。`,
           )}
         </div>
       )}

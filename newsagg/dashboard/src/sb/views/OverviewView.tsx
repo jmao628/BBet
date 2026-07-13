@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, companyMap, noDataSet, unratedSmallCap, sectorLabel } from "../pipeline";
+import { buildFocus, companyMap, noDataSet, unratedForRank, sectorLabel } from "../pipeline";
 
 // Landing page: one interactive globe PER sector. Each node is a strong-buy name;
 // size encodes a switchable signal (move / attention / rvol), rings flag Focus-
@@ -500,7 +500,7 @@ export function OverviewView() {
   // Unrated small-caps (< $2B with only a text list "BUY", no quant, no analyst
   // — e.g. the $195M penny stock PERF) are kept off the leaderboard, matching
   // the rest of the funnel.
-  const unrated = useMemo(() => unratedSmallCap(data, marketCaps), [data, marketCaps]);
+  const unrated = useMemo(() => unratedForRank(data), [data]);
 
   const movers = useMemo<Mover[]>(() => {
     const noData = noDataSet(technical);

@@ -236,29 +236,17 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
 
-// Below this we treat a name as a "small-cap" for the unrated-junk filter.
-export const SMALL_CAP_MAX = 2e9; // < $2B
-
-// Seeds to hold out of the ranked universe: a SMALL-CAP (< $2B) with NO real
-// rating. A "real rating" is a numeric SA quant score OR an analyst rating
-// (a written thesis) OR a sector/relative grade — anything genuine. A bare text
-// "BUY" / "STRONG BUY" from a curated "Top Technology"-style list does NOT count
-// (that's how the $1.92 penny stock PERF slips in: "Top Technology · BUY", no
-// quant, no analyst). Mid / large / mega caps (>= $2B) always stay; small-caps
-// that carry a quant score or an analyst rating stay too. Analyst theses also
-// keep appearing in the Seeds "★ Analyst thesis" list either way.
-export function unratedSmallCap(
-  data: SAData | null,
-  marketCaps: MarketCaps | null,
-): Set<string> {
+// Seeds held out of the ranked universe: any name with NO numeric SA quant
+// score. A numeric quant score is the single source of truth for "SA-rated".
+// Whatever else a row carries — a text "BUY" / "STRONG BUY" from a curated
+// "Top X" list, or an analyst's own article rating — is not an SA quant rating
+// (e.g. the $1.92 penny stock PERF: "Top Technology · BUY", no quant; or a
+// thesis name like GOOGL that we only scraped via its write-up, quant "—").
+// These are kept out of the funnel ("All", Heat, Screen, Focus, the leaderboard)
+// and surface only in the Seeds "★ Analyst thesis" list.
+export function unratedForRank(data: SAData | null): Set<string> {
   const out = new Set<string>();
-  for (const s of buildSeeds(data)) {
-    const mc = marketCaps?.[s.ticker];
-    if (mc != null && mc >= SMALL_CAP_MAX) continue; // mid / large / mega → keep
-    if (s.quant != null) continue; // numeric SA quant score → real rating
-    if (s.hasThesis) continue; // analyst rating (written thesis) → real rating
-    out.add(s.ticker); // small-cap with only a text list rating → drop
-  }
+  for (const s of buildSeeds(data)) if (s.quant == null) out.add(s.ticker);
   return out;
 }
 
@@ -372,7 +360,7 @@ export function buildRankings(
   // Rated seeds, minus confirmed no-data OTC/foreign ADRs (newly-added seeds
   // pending their first fetch still count — they're not confirmed no-data).
   const noData = noDataSet(technical);
-  const unrated = unratedSmallCap(data, marketCaps);
+  const unrated = unratedForRank(data);
   const uni = buildUniverse(data).filter(
     (u) => u.rated && !noData.has(u.ticker) && !unrated.has(u.ticker),
   );
@@ -543,7 +531,7 @@ export function buildScreen(
   const uniCaps = new Map(buildUniverse(data).map((u) => [u.ticker, u.caps]));
   const { advancing, advancingBy } = buildRankings(data, heat, technical, marketCaps);
   const noData = noDataSet(technical);
-  const unrated = unratedSmallCap(data, marketCaps);
+  const unrated = unratedForRank(data);
   const candidates: ScreenRow[] = [];
   let passedHeat = 0;
 
@@ -763,7 +751,7 @@ export function buildFocus(
   const eco = buildEcoAdjacency(supplychain, marketCaps);
   const { advancing } = buildRankings(data, heat, technical, marketCaps);
   const quality = new Set(buildScreen(data, heat, marketCaps, technical).candidates.map((c) => c.ticker));
-  const unrated = unratedSmallCap(data, marketCaps);
+  const unrated = unratedForRank(data);
 
   const rated = uni.filter((u) => u.rated && !unrated.has(u.ticker));
   const items: FocusItem[] = [];
