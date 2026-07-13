@@ -2,11 +2,11 @@ import { memo, useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
 import { buildFocus, companyMap, noDataSet, belowMinCap, sectorLabel } from "../pipeline";
 
-// Landing page: one "Ignition Map" per sector — a momentum × volume scatter that
-// makes position MEAN something. X = today's move %, Y = relative volume (RVOL),
-// bubble size = attention (how much money is watching), rings/glow flag
-// 52w-high / breakout, ★ = Focus. The top-right corner = "moving up on real
-// volume" = exactly what the funnel hunts. Hover pins a card; click opens.
+// Landing page: one "Ignition Strip" per sector — a single move-% axis. Every
+// strong-buy name is a faint tick (the sector's spread at a glance); only the
+// names that matter — breakouts, new 52w highs, top movers — rise above as
+// glowing, labelled dots (size = attention). Minimal by design, so the eye lands
+// on what's igniting instead of a 28-dot blob. Hover pins a card; click opens.
 
 interface Mover {
   ticker: string;
@@ -40,28 +40,22 @@ function hexToRgb(h: string): string {
   const n = parseInt(h.slice(1), 16);
   return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
-// ── Ignition Map — momentum × volume scatter ─────────────────────────────────
-// Position encodes the signal: x = today's move %, y = relative volume (RVOL).
-const X_MIN = -4,
+// ── Ignition Strip — one clean move-% axis ───────────────────────────────────
+// Every name is a faint tick on the axis (the sector's distribution at a
+// glance); only the names that MATTER — breakouts, new 52w highs, top movers —
+// rise above as glowing, labelled dots. Minimal, and it points the eye straight
+// at what's igniting instead of a 28-dot blob.
+const X_MIN = -3,
   X_MAX = 8; // move % domain (clamped)
-// RVOL on a LOG axis so the normal band (~1.0) sits mid-height and the common
-// 0.8–1.6 range spreads out, instead of everything piling at the bottom.
-const LN_MIN = Math.log(0.5),
-  LN_MAX = Math.log(3);
 function xPct(move: number): number {
   const c = Math.max(X_MIN, Math.min(X_MAX, move));
-  return 5 + ((c - X_MIN) / (X_MAX - X_MIN)) * 90; // 5%..95%
+  return 7 + ((c - X_MIN) / (X_MAX - X_MIN)) * 86; // 7%..93%
 }
-function yPct(rvol: number | null): number {
-  const v = Math.max(0.5, Math.min(3, rvol ?? 1));
-  const f = (Math.log(v) - LN_MIN) / (LN_MAX - LN_MIN);
-  return 12 + (1 - f) * 74; // 12%(top)..86%(bottom); RVOL 1.0 ≈ mid
-}
-function bubbleR(m: Mover): number {
-  return 3.5 + Math.min(m.attnScore / 100, 1) * 5; // 3.5..8.5px radius by attention
+function dotR(m: Mover): number {
+  return 4 + Math.min(m.attnScore / 100, 1) * 4; // 4..8px by attention
 }
 
-const SectorScatter = memo(function SectorScatter({
+const SectorStrip = memo(function SectorStrip({
   rows,
   color,
   focusSpot,
@@ -76,75 +70,101 @@ const SectorScatter = memo(function SectorScatter({
 }) {
   const [hover, setHover] = useState(-1);
   const rgb = hexToRgb(color);
+  const BASE = 70; // axis baseline (% from top)
+  const DOT_TOP = 42; // notable dots sit here
 
-  // Draw order: big bubbles behind, breakouts on top.
-  const order = useMemo(
-    () =>
-      rows
-        .map((_, i) => i)
-        .sort((a, b) => {
-          if (rows[a].breakout !== rows[b].breakout) return rows[a].breakout ? 1 : -1;
-          return bubbleR(rows[b]) - bubbleR(rows[a]);
-        }),
-    [rows],
-  );
+  // Notable = breakout / new 52w high / a top-3 mover. These get a labelled dot.
+  const placed = useMemo(() => {
+    const top = new Set(
+      [...rows].sort((a, b) => b.changePct - a.changePct).slice(0, 3).map((r) => r.ticker),
+    );
+    const idx = rows
+      .map((_, i) => i)
+      .filter((i) => rows[i].breakout || rows[i].newHigh || top.has(rows[i].ticker))
+      .sort((a, b) => rows[a].changePct - rows[b].changePct)
+      .slice(0, 8);
+    // greedy label anti-overlap
+    const labels: number[] = [];
+    const MINGAP = 11;
+    return idx.map((i) => {
+      const dotX = xPct(rows[i].changePct);
+      let lx = dotX;
+      const last = labels.length ? labels[labels.length - 1] : -100;
+      if (lx - last < MINGAP) lx = last + MINGAP;
+      lx = Math.min(lx, 95);
+      labels.push(lx);
+      return { i, dotX, labelX: lx };
+    });
+  }, [rows]);
 
-  const hv = hover >= 0 ? rows[hover] : null;
-  const surgeTop = yPct(1.5);
   const zeroLeft = xPct(0);
+  const hv = hover >= 0 ? rows[hover] : null;
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      {/* reference grid — 0% move (vertical) · 1.5× surge (horizontal) */}
-      <div className="pointer-events-none absolute inset-y-3 w-px bg-white/[0.07]" style={{ left: `${zeroLeft}%` }} />
-      <div className="pointer-events-none absolute inset-x-3 border-t border-dashed border-white/[0.08]" style={{ top: `${surgeTop}%` }} />
-
-      {/* axis + quadrant hints */}
-      <span className="pointer-events-none absolute left-2 top-1.5 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted2/70">RVOL ↑</span>
-      <span className="pointer-events-none absolute bottom-1 right-2 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted2/70">move % →</span>
-      <span
-        className="pointer-events-none absolute right-2.5 font-mono text-[8px] text-ok/50"
-        style={{ top: `${surgeTop}%`, transform: "translateY(-125%)" }}
-      >
-        1.5× surge
+      {/* 0% reference + axis baseline */}
+      <div className="pointer-events-none absolute w-px bg-white/[0.08]" style={{ left: `${zeroLeft}%`, top: "26%", bottom: "24%" }} />
+      <div className="pointer-events-none absolute inset-x-3 border-t border-white/[0.07]" style={{ top: `${BASE}%` }} />
+      <span className="pointer-events-none absolute font-mono text-[8px] text-muted2/70" style={{ left: `${zeroLeft}%`, top: `${BASE + 4}%`, transform: "translateX(-50%)" }}>
+        0
       </span>
+      <span className="pointer-events-none absolute bottom-1 right-2 font-mono text-[8.5px] uppercase tracking-[0.12em] text-muted2/70">move % →</span>
 
-      {/* bubbles */}
-      {order.map((i) => {
-        const m = rows[i];
-        const r = bubbleR(m);
-        const isHover = hover === i;
-        const dim = focusSpot && !m.onFocus ? 0.14 : 1;
+      {/* faint ticks — the full distribution */}
+      {rows.map((m, i) => {
+        const dim = focusSpot && !m.onFocus ? 0.25 : 1;
         return (
           <button
-            key={m.ticker}
+            key={`t${m.ticker}`}
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
             onClick={() => onPick(m.ticker)}
-            className="absolute rounded-full transition-transform duration-150"
-            title={`${m.ticker} · ${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(1)}% · RVOL ${m.rvol?.toFixed(1) ?? "—"}×`}
-            style={{
-              left: `${xPct(m.changePct)}%`,
-              top: `${yPct(m.rvol)}%`,
-              width: r * 2,
-              height: r * 2,
-              marginLeft: -r,
-              marginTop: -r,
-              opacity: dim,
-              zIndex: isHover ? 30 : m.breakout ? 20 : 10,
-              transform: isHover ? "scale(1.5)" : "scale(1)",
-              // A thin dark rim separates overlapping bubbles; only breakouts glow
-              // (so dense clusters read cleanly instead of blooming into a blob).
-              background: `radial-gradient(circle at 36% 32%, rgba(${rgb},0.92), rgba(${rgb},0.48))`,
-              boxShadow: m.breakout ? `0 0 9px rgba(${rgb},0.8)` : undefined,
-              border: m.newHigh
-                ? "1.5px solid rgba(255,255,255,0.9)"
-                : m.breakout
-                  ? `1.5px solid rgba(${rgb},1)`
-                  : "1px solid rgba(9,13,19,0.6)",
-              cursor: "pointer",
-            }}
-          />
+            className="absolute -translate-x-1/2"
+            style={{ left: `${xPct(m.changePct)}%`, top: `${BASE - 5}%`, height: "10%", width: 7, opacity: dim, cursor: "pointer" }}
+            title={`${m.ticker} · ${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(1)}%`}
+          >
+            <span className="mx-auto block h-full w-px" style={{ background: `rgba(${rgb},0.5)` }} />
+          </button>
+        );
+      })}
+
+      {/* notable — glowing labelled dots above the axis, with a connector down */}
+      {placed.map(({ i, dotX, labelX }) => {
+        const m = rows[i];
+        const r = dotR(m);
+        const isHover = hover === i;
+        const dim = focusSpot && !m.onFocus ? 0.2 : 1;
+        return (
+          <div key={`n${m.ticker}`} style={{ opacity: dim }}>
+            <div
+              className="pointer-events-none absolute w-px"
+              style={{ left: `${dotX}%`, top: `${DOT_TOP}%`, height: `${BASE - DOT_TOP}%`, background: `rgba(${rgb},0.3)` }}
+            />
+            <span
+              className="pointer-events-none absolute -translate-x-1/2 font-mono text-[9px] font-semibold"
+              style={{ left: `${labelX}%`, top: "15%", color: `rgb(${rgb})`, textShadow: "0 0 4px rgba(0,0,0,0.7)" }}
+            >
+              {m.ticker}
+            </span>
+            <button
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover((h) => (h === i ? -1 : h))}
+              onClick={() => onPick(m.ticker)}
+              className="absolute rounded-full transition-transform duration-150"
+              style={{
+                left: `${dotX}%`,
+                top: `${DOT_TOP}%`,
+                width: r * 2,
+                height: r * 2,
+                transform: isHover ? "translate(-50%,-50%) scale(1.45)" : "translate(-50%,-50%)",
+                background: `radial-gradient(circle at 35% 32%, rgba(${rgb},0.95), rgba(${rgb},0.5))`,
+                boxShadow: `0 0 8px rgba(${rgb},0.75)`,
+                border: m.newHigh ? "1.5px solid rgba(255,255,255,0.9)" : `1px solid rgba(${rgb},1)`,
+                zIndex: isHover ? 30 : 20,
+                cursor: "pointer",
+              }}
+            />
+          </div>
         );
       })}
 
@@ -163,10 +183,6 @@ const SectorScatter = memo(function SectorScatter({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[10.5px] text-muted2">
             <span>RVOL {hv.rvol != null ? `${hv.rvol.toFixed(1)}×` : "—"}</span>
             <span>attn {Math.round(hv.attnScore)}</span>
-            <span>
-              {hv.buyStreak}
-              {t2(lang, "d streak", "天连买")}
-            </span>
             {hv.onFocus && <span className="text-gold">★ {t2(lang, "Focus", "重点")}</span>}
             {hv.newHigh && <span className="text-signal">52w {t2(lang, "high", "新高")}</span>}
             {hv.breakout && <span className="text-ignite">{t2(lang, "breakout", "突破")}</span>}
@@ -323,7 +339,7 @@ export function OverviewView() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
             </span>
-            {t("live · one ignition map per sector · move × volume", "实时 · 每板块一张点火图 · 涨跌 × 放量")}
+            {t("live · one ignition strip per sector · ranked by today's move", "实时 · 每板块一条点火轴 · 按当日涨跌排名")}
           </p>
         </div>
 
@@ -343,22 +359,14 @@ export function OverviewView() {
 
       {/* legend */}
       <div className="-mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-muted2">
-        <span className="font-medium text-muted">{t("→ move %  ·  ↑ RVOL  ·  top-right = igniting", "→ 涨跌 %  ·  ↑ 放量  ·  右上 = 点火")}</span>
-        <span className="flex items-center gap-1.5">
-          <span className="flex items-end gap-1">
-            {[3, 5, 8].map((d, i) => (
-              <span key={d} className="ramp-dot rounded-full bg-signal" style={{ width: d, height: d, animationDelay: `${i * 0.3}s` }} />
-            ))}
-          </span>
-          {t("size = attention", "大小 = 注意力")}
-        </span>
+        <span className="font-medium text-muted">{t("→ move % axis · ticks = every name · labelled dots = igniting / top movers", "→ 涨跌 % 轴 · 竖线 = 全部票 · 带名标注点 = 点火/领涨")}</span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/70" /> 52w {t("high", "新高")}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full ring-2 ring-gold" /> {t("breakout", "突破")}
+          <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#3dd6c4", boxShadow: "0 0 6px #3dd6c4" }} /> {t("breakout", "突破")}
         </span>
-        <span>{t("★ Focus · hover to inspect · click to open", "★ 重点 · 悬停查看 · 点击进入")}</span>
+        <span>{t("size = attention · hover to inspect · click to open", "大小 = 注意力 · 悬停查看 · 点击进入")}</span>
       </div>
 
       {movers.length === 0 ? (
@@ -379,8 +387,8 @@ export function OverviewView() {
                   </span>
                   <span className="font-mono text-[11px] text-muted2">{rows.length}</span>
                 </header>
-                <div className="relative h-[172px] w-full border-b border-line/60">
-                  <SectorScatter rows={rows} color={color} focusSpot={focusSpot} onPick={openDetail} lang={lang} />
+                <div className="relative h-[132px] w-full border-b border-line/60">
+                  <SectorStrip rows={rows} color={color} focusSpot={focusSpot} onPick={openDetail} lang={lang} />
                 </div>
                 <div className="max-h-[300px] overflow-y-auto p-1.5">
                   {rows.map((m, i) => (
