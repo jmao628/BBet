@@ -1,4 +1,4 @@
-"""LLM-derived supply-chain map (upstream / downstream / peers) per rated seed
+"""LLM-derived supply-chain map (upstream / downstream / peers) per seed
 ticker, so the dashboard can draw a radial ecosystem graph on a stock's detail
 page — who feeds it, who it feeds, and who it competes with.
 
@@ -301,7 +301,7 @@ def fetch_missing(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Map upstream/downstream/peers per rated seed ticker (LLM, cached)")
+    ap = argparse.ArgumentParser(description="Map upstream/downstream/peers per seed ticker (full universe, LLM, cached)")
     ap.add_argument("--config", default=None)
     ap.add_argument("--tickers", default=None, help="comma-separated override")
     ap.add_argument("--refresh", action="store_true", help="re-map the requested names (or the full rated universe), KEEPING every other cached map")
@@ -319,9 +319,14 @@ def main() -> int:
     if args.tickers:
         names = {t.strip().upper(): "" for t in args.tickers.split(",") if t.strip()}
     else:
-        names = rated_seed_tickers(settings.output_dir)
+        # Map the FULL seed universe the dashboard shows — home-widget rows AND
+        # the followed-analyst feed (e.g. JPM) — not just rows carrying a rating,
+        # so no ticker is shown in the UI without a supply-chain map.
+        from newsagg.marketcap import seed_names
+
+        names = seed_names(settings.output_dir)
     if not names:
-        logger.warning("no rated tickers (run the SA scrape first, or pass --tickers)")
+        logger.warning("no seed tickers (run the SA scrape first, or pass --tickers)")
         return 1
 
     # Skip tiny / illiquid names — not worth an API call, and their supply-chain

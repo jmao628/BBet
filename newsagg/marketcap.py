@@ -21,23 +21,37 @@ logger = logging.getLogger("newsagg.marketcap")
 MARKETCAP_FILE = "marketcaps.json"
 
 
-def seed_tickers(output_dir: Path) -> list[str]:
-    """All tickers currently in the SA seed snapshot."""
+def seed_names(output_dir: Path) -> dict[str, str]:
+    """Every seed ticker → company name — the FULL universe the dashboard shows:
+    all home-widget rows (rated or not) PLUS the followed-analyst Buy/Strong-Buy
+    feed (my_analyst_picks, e.g. JPM). This is the single source of truth so every
+    enrichment job (caps, technical, sectors, supply chain) covers the SAME names
+    the UI does — no ticker gets skipped by one job and shown by another.
+    """
     path = output_dir / "seekingalpha_latest.json"
     if not path.exists():
-        return []
+        return {}
     try:
         data = json.loads(path.read_text())
     except ValueError:
-        return []
-    tickers: set[str] = set()
+        return {}
+    out: dict[str, str] = {}
     for w in data.get("home_widgets", []):
         for g in w.get("groups", []):
             for r in g.get("rows", []):
                 t = (r.get("ticker") or "").strip().upper()
                 if t:
-                    tickers.add(t)
-    return sorted(tickers)
+                    out.setdefault(t, (r.get("company") or "").strip())
+    for p in data.get("my_analyst_picks", []):
+        t = (p.get("ticker") or "").strip().upper()
+        if t:
+            out.setdefault(t, "")
+    return out
+
+
+def seed_tickers(output_dir: Path) -> list[str]:
+    """All tickers in the seed universe (see seed_names)."""
+    return sorted(seed_names(output_dir))
 
 
 def _market_cap(tk) -> int | None:
