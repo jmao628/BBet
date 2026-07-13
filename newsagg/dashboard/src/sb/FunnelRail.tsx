@@ -38,9 +38,9 @@ function useCounts(): Record<string, number | null> {
     ? buildCatalystRows(focus, catalyst).filter((r) => r.status === "advance").length
     : null;
 
-  // Shortlist = Focus names landing top-N in ≥2 of the three lenses.
+  // Shortlist = Tier 1 + Tier 2 (names meeting ≥2 of the three conditions).
   const shortlistCount =
-    technical || supplychain ? buildShortlist(focus, catalyst).filter((r) => r.breadth >= 2).length : null;
+    technical || supplychain ? buildShortlist(focus, catalyst).filter((r) => r.tier <= 2).length : null;
 
   return {
     seeds: seeds.length,

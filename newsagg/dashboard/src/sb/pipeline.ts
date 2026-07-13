@@ -964,86 +964,58 @@ export function buildCatalystRows(
   return rows;
 }
 
-// ── Shortlist — podium breadth across the three lenses ───────────────────────
-// The catalyst score compresses at the top, so no single lens cleanly separates
-// names. Instead RANK each Focus name in THREE independent lenses — Focus score
-// (buy × ecosystem), Attention (price-volume 0-100), Catalyst (TPMN) — and count
-// how many of them it lands in the top-N of ("podium breadth"). Ranks are immune
-// to score clustering, so names strong across 2-3 lenses surface as the clearest
-// basket. Composite (avg percentile) breaks ties within a breadth tier.
-export interface ShortlistRow {
+// ── Shortlist — three tiered leaderboards ────────────────────────────────────
+// Three conditions on each Focus name: (1) it's on the FOCUS LIST (always true
+// here), (2) it's CORE (buy × ecosystem both fire), (3) its CATALYST clears 6.
+//   Tier 1 (gold)   = all three
+//   Tier 2 (silver) = two (focus + exactly one of core / catalyst>6)
+//   Tier 3 (bronze) = one  (focus only)
+// Within each tier, names rank by a weighted STRENGTH composite:
+//   Catalyst 0.45 · Core/Focus 0.45 · Attention 0.10  (each normalised 0-1).
+export const SHORTLIST_CAT_BAR = 6; // catalyst score must exceed this
+export const SHORTLIST_W = { cat: 0.45, focus: 0.45, attn: 0.1 };
+
+export interface LeaderRow {
   ticker: string;
   company: string;
   sector: string;
   cap: CapSize;
-  focusScore: number;
-  attnScore: number;
-  catScore: number; // -1 if not catalyst-fetched
-  focusRank: number;
-  attnRank: number;
-  catRank: number; // Infinity if no catalyst
-  focusTop: boolean;
-  attnTop: boolean;
-  catTop: boolean;
-  breadth: number; // 0-3 podium finishes
-  composite: number; // 0-100 average percentile
+  focusScore: number; // 0-10
+  attnScore: number; // 0-100
+  catScore: number; // 0-10, -1 if not catalyst-fetched
+  core: boolean;
+  catHot: boolean; // catScore > SHORTLIST_CAT_BAR
+  tier: 1 | 2 | 3; // 1 = all three conditions … 3 = focus only
+  composite: number; // 0-100 weighted strength
 }
 
-export function buildShortlist(
-  focus: FocusItem[],
-  catalyst: CatalystData | null,
-  topN = 15,
-): ShortlistRow[] {
+export function buildShortlist(focus: FocusItem[], catalyst: CatalystData | null): LeaderRow[] {
   if (!focus.length) return [];
-  const base = focus.map((f) => ({
-    ticker: f.ticker,
-    company: f.company,
-    sector: f.sector,
-    cap: f.cap,
-    focusScore: f.score,
-    attnScore: f.attnScore ?? 0,
-    catScore: catTickerScore(catalyst?.[f.ticker] ?? null),
-  }));
-  const N = base.length;
-  // rank map (1 = best); optional filter for lenses that don't cover everyone
-  const rankMap = (key: "focusScore" | "attnScore" | "catScore", ok?: (r: (typeof base)[number]) => boolean) => {
-    const arr = (ok ? base.filter(ok) : base).slice().sort((a, b) => b[key] - a[key]);
-    const m = new Map<string, number>();
-    arr.forEach((r, i) => m.set(r.ticker, i + 1));
-    return m;
-  };
-  const fR = rankMap("focusScore");
-  const aR = rankMap("attnScore");
-  const cR = rankMap("catScore", (r) => r.catScore >= 0);
-  const catTotal = base.filter((r) => r.catScore >= 0).length;
-  const pct = (rank: number, total: number) =>
-    total > 1 ? Math.round((1 - (rank - 1) / (total - 1)) * 100) : 100;
-
-  const rows: ShortlistRow[] = base.map((r) => {
-    const focusRank = fR.get(r.ticker) ?? N;
-    const attnRank = aR.get(r.ticker) ?? N;
-    const catRank = cR.get(r.ticker) ?? Infinity;
-    const focusTop = focusRank <= topN;
-    const attnTop = attnRank <= topN;
-    const catTop = catRank <= topN;
-    const parts = [pct(focusRank, N), pct(attnRank, N)];
-    if (r.catScore >= 0) parts.push(pct(catRank, catTotal));
-    const composite = Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+  const rows: LeaderRow[] = focus.map((f) => {
+    const catScore = catTickerScore(catalyst?.[f.ticker] ?? null);
+    const cat01 = catScore >= 0 ? catScore / 10 : 0;
+    const focus01 = f.score / 10;
+    const attn01 = (f.attnScore ?? 0) / 100;
+    const composite =
+      Math.round((SHORTLIST_W.cat * cat01 + SHORTLIST_W.focus * focus01 + SHORTLIST_W.attn * attn01) * 1000) / 10;
+    const core = f.core;
+    const catHot = catScore > SHORTLIST_CAT_BAR;
+    const conditions = 1 + Number(core) + Number(catHot); // in-focus is always true
     return {
-      ...r,
-      focusRank,
-      attnRank,
-      catRank,
-      focusTop,
-      attnTop,
-      catTop,
-      breadth: Number(focusTop) + Number(attnTop) + Number(catTop),
+      ticker: f.ticker,
+      company: f.company,
+      sector: f.sector,
+      cap: f.cap,
+      focusScore: f.score,
+      attnScore: f.attnScore ?? 0,
+      catScore,
+      core,
+      catHot,
+      tier: (4 - conditions) as 1 | 2 | 3, // 3 cond → tier 1, 2 → 2, 1 → 3
       composite,
     };
   });
-  rows.sort(
-    (a, b) => b.breadth - a.breadth || b.composite - a.composite || a.ticker.localeCompare(b.ticker),
-  );
+  rows.sort((a, b) => a.tier - b.tier || b.composite - a.composite || a.ticker.localeCompare(b.ticker));
   return rows;
 }
 

@@ -1,107 +1,161 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, buildShortlist, capLabel, sectorLabel, type ShortlistRow } from "../pipeline";
+import {
+  buildFocus,
+  buildShortlist,
+  capLabel,
+  sectorLabel,
+  SHORTLIST_CAT_BAR,
+  SHORTLIST_W,
+  type LeaderRow,
+} from "../pipeline";
 import { ViewHead, StatStrip } from "../ui";
 
-const TOP_OPTS = [10, 15, 20, 25];
+const TIER_META: Record<1 | 2 | 3, { color: string; glow: string; medal: string; en: string; zh: string; cond: { en: string; zh: string } }> = {
+  1: { color: "#f0c862", glow: "#f0c862", medal: "1st", en: "First — all three", zh: "第一名榜单 · 三条全中", cond: { en: "Focus · Core · Catalyst > 6", zh: "在名单 · 核心 · 催化剂 > 6" } },
+  2: { color: "#cdd6e2", glow: "#cdd6e2", medal: "2nd", en: "Second — two of three", zh: "第二名榜单 · 满足两条", cond: { en: "Focus + one of Core / Catalyst > 6", zh: "在名单 + 核心/催化剂>6 其一" } },
+  3: { color: "#cd8b5e", glow: "#cd8b5e", medal: "3rd", en: "Third — focus only", zh: "第三名榜单 · 仅在名单", cond: { en: "on the Focus List", zh: "仅在重点名单里" } },
+};
+const LENS = { cat: "#48c78e", focus: "#3dd6c4", attn: "#5fb0e8" } as const;
 
-// Per-lens accent colours.
-const LENS = {
-  focus: "#3dd6c4",
-  attn: "#5fb0e8",
-  cat: "#48c78e",
-} as const;
-
-function breadthColor(b: number): string {
-  return b >= 3 ? "#e9c46a" : b === 2 ? "#3dd6c4" : b === 1 ? "#8aa0b4" : "#4a5a6a";
+// Animated strength meter — fills from 0 → value on mount.
+function Strength({ v, color, mounted, delay }: { v: number; color: string; mounted: boolean; delay: number }) {
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-full bg-inset">
+      <div
+        className="h-full rounded-full"
+        style={{
+          width: mounted ? `${Math.max(2, v)}%` : "0%",
+          background: `linear-gradient(90deg, ${color}77, ${color})`,
+          boxShadow: `0 0 8px ${color}88`,
+          transition: `width 0.9s cubic-bezier(0.22,0.61,0.36,1) ${delay}ms`,
+        }}
+      />
+    </div>
+  );
 }
 
-// One lens cell: rank (# — green when top-N) over the raw value.
-function Lens({
-  label,
-  rank,
-  value,
-  top,
-  color,
-  na,
-}: {
-  label: string;
-  rank: number;
-  value: string;
-  top: boolean;
-  color: string;
-  na?: boolean;
-}) {
+// A compact lens value with its own tiny bar.
+function Lens({ label, value, pct, color, on }: { label: string; value: string; pct: number; color: string; on?: boolean }) {
   return (
-    <div
-      className="flex-1 rounded-lg border px-2.5 py-1.5 text-center transition-colors"
+    <div className="min-w-0 flex-1">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[8.5px] uppercase tracking-wide text-muted2">{label}</span>
+        <span className="font-mono text-[11px] font-semibold" style={{ color: on ? color : "#c7d2dc" }}>{value}</span>
+      </div>
+      <div className="mt-0.5 h-[3px] w-full overflow-hidden rounded-full bg-white/[0.06]">
+        <span className="block h-full rounded-full" style={{ width: `${Math.max(4, pct)}%`, background: color, opacity: on ? 1 : 0.5 }} />
+      </div>
+    </div>
+  );
+}
+
+function CondPill({ on, color, label }: { on: boolean; color: string; label: string }) {
+  return (
+    <span
+      className="rounded px-1.5 py-[1px] text-[8.5px] font-semibold uppercase tracking-wide transition-colors"
       style={{
-        borderColor: top ? `${color}66` : "var(--line,#22303c)",
-        background: top ? `${color}14` : "transparent",
+        color: on ? "#0b0f14" : "#5a6a7c",
+        background: on ? color : "transparent",
+        border: on ? "none" : "1px solid var(--line,#22303c)",
       }}
     >
-      <div className="text-[9px] uppercase tracking-wide text-muted2">{label}</div>
-      {na ? (
-        <div className="mt-0.5 font-mono text-[13px] font-semibold text-muted2">—</div>
-      ) : (
-        <>
-          <div className="mt-0.5 font-mono text-[13px] font-semibold" style={{ color: top ? color : "#c7d2dc" }}>
-            #{rank}
+      {label}
+    </span>
+  );
+}
+
+function Row({ r, rank, idx, mounted, lang, onOpen, t }: { r: LeaderRow; rank: number; idx: number; mounted: boolean; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+  const meta = TIER_META[r.tier];
+  const top = rank === 1;
+  return (
+    <div
+      onClick={() => onOpen(r.ticker)}
+      className="ignite-in group flex cursor-pointer items-center gap-3 rounded-xl border bg-panel2 px-3 py-2.5 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5"
+      style={{
+        borderColor: top ? `${meta.color}66` : "var(--line,#22303c)",
+        boxShadow: top ? `0 0 18px ${meta.glow}33` : undefined,
+        animationDelay: `${Math.min(idx * 30, 500)}ms`,
+      }}
+    >
+      {/* rank badge */}
+      <span
+        className="grid h-8 w-8 flex-none place-items-center rounded-lg font-disp text-[14px] font-bold tabular-nums"
+        style={{ color: "#0b0f14", background: meta.color, boxShadow: top ? `0 0 12px ${meta.glow}88` : undefined }}
+      >
+        {rank}
+      </span>
+
+      {/* name + condition pills */}
+      <div className="min-w-0 flex-[1.5]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-disp text-[15px] font-bold tracking-tight text-text transition-colors group-hover:text-signal">{r.ticker}</span>
+          {top && <span className="text-[11px]" style={{ color: meta.color }} title={t("tier leader", "本榜第一")}>♛</span>}
+          <CondPill on={r.core} color="#f0c862" label={t("Core", "核心")} />
+          <CondPill on={r.catHot} color={LENS.cat} label={r.catScore >= 0 ? `CAT ${r.catScore.toFixed(1)}` : t("no cat", "无催化")} />
+        </div>
+        <div className="mt-0.5 truncate text-[10.5px] text-muted2">
+          {r.company || "—"} · {capLabel(r.cap, lang)}
+          {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
+        </div>
+      </div>
+
+      {/* three lenses */}
+      <div className="hidden w-[240px] flex-none items-stretch gap-2.5 md:flex">
+        <Lens label={t("Catalyst", "催化剂")} value={r.catScore >= 0 ? r.catScore.toFixed(1) : "—"} pct={r.catScore >= 0 ? r.catScore * 10 : 0} color={LENS.cat} on={r.catHot} />
+        <Lens label={t("Core", "核心")} value={r.focusScore.toFixed(1)} pct={r.focusScore * 10} color={LENS.focus} on={r.core} />
+        <Lens label={t("Attn", "注意力")} value={Math.round(r.attnScore).toString()} pct={r.attnScore} color={LENS.attn} />
+      </div>
+
+      {/* composite strength */}
+      <div className="w-[124px] flex-none">
+        <div className="mb-1 flex items-baseline justify-between">
+          <span className="text-[8.5px] uppercase tracking-wide text-muted2">{t("strength", "强度")}</span>
+          <span className="font-disp text-[16px] font-semibold leading-none" style={{ color: meta.color }}>{r.composite.toFixed(0)}</span>
+        </div>
+        <Strength v={r.composite} color={meta.color} mounted={mounted} delay={Math.min(idx * 25, 400)} />
+      </div>
+    </div>
+  );
+}
+
+function TierBlock({ tier, rows, mounted, lang, onOpen, t }: { tier: 1 | 2 | 3; rows: LeaderRow[]; mounted: boolean; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+  const [open, setOpen] = useState(true);
+  const meta = TIER_META[tier];
+  return (
+    <div className="mb-5 overflow-hidden rounded-2xl border bg-panel" style={{ borderColor: `${meta.color}33` }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
+        style={{ background: `linear-gradient(90deg, ${meta.color}12, transparent)` }}
+      >
+        <span
+          className="grid h-8 w-8 flex-none place-items-center rounded-lg font-mono text-[10px] font-bold"
+          style={{ color: "#0b0f14", background: meta.color, boxShadow: `0 0 12px ${meta.glow}66` }}
+        >
+          {meta.medal}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: meta.color }}>
+            {lang === "zh" ? meta.zh : meta.en}
           </div>
-          <div className="font-mono text-[9.5px] text-muted2">{value}</div>
-        </>
+          <div className="text-[10.5px] text-muted2">{lang === "zh" ? meta.cond.zh : meta.cond.en}</div>
+        </div>
+        <span className="font-disp text-[20px] font-bold tabular-nums" style={{ color: meta.color }}>{rows.length}</span>
+        <span className={`ml-1 text-[12px] text-muted2 transition-transform duration-200 ${open ? "rotate-180" : ""}`}>⌄</span>
+      </button>
+      {open && (
+        <div className="space-y-2 px-3 pb-3 pt-1">
+          {rows.length === 0 ? (
+            <div className="py-4 text-center text-[12px] text-muted2">{t("— empty —", "— 暂无 —")}</div>
+          ) : (
+            rows.map((r, i) => <Row key={r.ticker} r={r} rank={i + 1} idx={i} mounted={mounted} lang={lang} onOpen={onOpen} t={t} />)
+          )}
+        </div>
       )}
     </div>
   );
 }
-
-function Row({ r, rank, lang, onOpen, t }: { r: ShortlistRow; rank: number; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
-  const bc = breadthColor(r.breadth);
-  return (
-    <div
-      className="flex items-center gap-3 rounded-xl border bg-panel2 px-3 py-2.5 transition-[transform,border-color] duration-150 hover:-translate-y-0.5"
-      style={{ borderColor: r.breadth >= 3 ? `${bc}55` : "var(--line,#22303c)" }}
-    >
-      <span className="w-6 flex-none text-right font-mono text-[11px] tabular-nums text-muted2">{rank}</span>
-
-      {/* podium breadth badge */}
-      <span
-        className="grid h-9 w-9 flex-none place-items-center rounded-lg font-disp text-[15px] font-bold"
-        style={{ color: r.breadth >= 1 ? "#0b0f14" : "#7b8da0", background: r.breadth >= 1 ? bc : "transparent", boxShadow: r.breadth >= 3 ? `0 0 10px ${bc}77` : undefined, border: r.breadth === 0 ? "1px solid var(--line,#22303c)" : "none" }}
-        title={t(`top-N in ${r.breadth} of 3 lenses`, `三维中 ${r.breadth}/3 进前列`)}
-      >
-        {r.breadth}
-      </span>
-
-      {/* name */}
-      <button onClick={() => onOpen(r.ticker)} className="min-w-0 flex-[1.4] text-left">
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[14px] font-bold tracking-tight text-text transition-colors hover:text-signal">{r.ticker}</span>
-          {r.breadth >= 3 && <span className="text-[10px] text-gold" title={t("top across all three lenses", "三维全进前列")}>★</span>}
-        </div>
-        <div className="truncate text-[10.5px] text-muted2">
-          {r.company || "—"} · {capLabel(r.cap, lang)}
-          {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
-        </div>
-      </button>
-
-      {/* three lenses */}
-      <div className="flex flex-[2] items-stretch gap-1.5">
-        <Lens label={t("Focus", "重点")} rank={r.focusRank} value={r.focusScore.toFixed(1)} top={r.focusTop} color={LENS.focus} />
-        <Lens label={t("Attention", "注意力")} rank={r.attnRank} value={Math.round(r.attnScore).toString()} top={r.attnTop} color={LENS.attn} />
-        <Lens label={t("Catalyst", "催化剂")} rank={r.catRank} value={r.catScore >= 0 ? r.catScore.toFixed(1) : "—"} top={r.catTop} color={LENS.cat} na={r.catScore < 0} />
-      </div>
-
-      {/* composite */}
-      <div className="w-16 flex-none text-right">
-        <div className="font-disp text-[16px] font-semibold" style={{ color: bc }}>{r.composite}</div>
-        <div className="text-[8.5px] uppercase tracking-wide text-muted2">{t("composite", "综合")}</div>
-      </div>
-    </div>
-  );
-}
-
-type Filter = "all" | "podium" | "two";
 
 export function ShortlistView() {
   const data = useStore((s) => s.data);
@@ -115,49 +169,39 @@ export function ShortlistView() {
   const lang = useStore((s) => s.lang);
   const t = useT();
 
-  const [topN, setTopN] = useState(15);
-  const [filter, setFilter] = useState<Filter>("two");
   const [sector, setSector] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setMounted(true), 80);
+    return () => clearTimeout(id);
+  }, []);
 
   const focus = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
     [data, heat, technical, marketCaps, sectors, supplychain],
   );
-  const rows = useMemo(() => buildShortlist(focus, catalyst, topN), [focus, catalyst, topN]);
+  const rows = useMemo(() => buildShortlist(focus, catalyst), [focus, catalyst]);
 
-  const podium = rows.filter((r) => r.breadth >= 3).length;
-  const two = rows.filter((r) => r.breadth >= 2).length;
-  const one = rows.filter((r) => r.breadth >= 1).length;
+  const shown = useMemo(() => (sector ? rows.filter((r) => r.sector === sector) : rows), [rows, sector]);
+  const tier = (n: 1 | 2 | 3) => shown.filter((r) => r.tier === n);
+  const t1 = tier(1);
+  const t2 = tier(2);
+  const t3 = tier(3);
 
   const sectorCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of rows) if (r.sector && r.breadth >= 1) m.set(r.sector, (m.get(r.sector) ?? 0) + 1);
+    for (const r of rows) if (r.sector) m.set(r.sector, (m.get(r.sector) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [rows]);
-
-  const shown = useMemo(() => {
-    let list = rows;
-    if (filter === "podium") list = list.filter((r) => r.breadth >= 3);
-    else if (filter === "two") list = list.filter((r) => r.breadth >= 2);
-    else list = list.filter((r) => r.breadth >= 1); // "all" = anything that placed
-    if (sector) list = list.filter((r) => r.sector === sector);
-    return list;
-  }, [rows, filter, sector]);
-
-  const FILTERS: { k: Filter; label: string; n: number }[] = [
-    { k: "podium", label: t("★ Podium 3/3", "★ 三维全中"), n: podium },
-    { k: "two", label: t("2+ lenses", "≥2 维"), n: two },
-    { k: "all", label: t("Placed (≥1)", "上榜(≥1)"), n: one },
-  ];
 
   return (
     <div className="view-in">
       <ViewHead
         eyebrow={t("Stage 4 · Shortlist", "Stage 4 · 登顶广度")}
-        title={t("Shortlist · Podium Breadth", "登顶广度 · 三维交集")}
+        title={t("Shortlist · Three Leaderboards", "登顶榜单 · 三级")}
         desc={t(
-          `The catalyst score compresses at the top, so no single lens cleanly separates names. Instead each Focus name is RANKED in three independent lenses — Focus (buy × ecosystem) · Attention (price-volume) · Catalyst (TPMN) — and scored by how many it lands in the top ${topN} of. Names on the podium of 2-3 lenses are the clearest basket to carry into Conviction.`,
-          `催化剂分在顶部太挤,单一维度分不开。于是每只 Focus 票在三个独立维度里各排一次名——重点(买入×生态) · 注意力(量价) · 催化剂(TPMN)——按"进了几个前 ${topN}"给广度分。三维里进 2-3 个前列的,就是带进管理层语气(Conviction)最明确的一篮。`,
+          `Three conditions per Focus name — on the FOCUS LIST · CORE (buy × ecosystem) · CATALYST > ${SHORTLIST_CAT_BAR}. Tier 1 meets all three, Tier 2 meets two, Tier 3 only the first. Within each tier, names rank by weighted strength: Catalyst ${SHORTLIST_W.cat} · Core ${SHORTLIST_W.focus} · Attention ${SHORTLIST_W.attn}.`,
+          `每只 Focus 票三条件——在重点名单 · 核心(买入×生态) · 催化剂 > ${SHORTLIST_CAT_BAR}。第一名榜单三条全中,第二名满足两条,第三名仅第一条。每个榜单内按加权强度排名:催化剂 ${SHORTLIST_W.cat} · 核心 ${SHORTLIST_W.focus} · 注意力 ${SHORTLIST_W.attn}。`,
         )}
       />
 
@@ -169,66 +213,36 @@ export function ShortlistView() {
         <>
           <StatStrip
             stats={[
-              { k: t("★ Podium 3/3", "★ 三维全中"), v: podium, d: t("top in all three lenses", "三维都进前列"), color: "#e9c46a" },
-              { k: t("2+ lenses", "≥2 维"), v: two, d: t("the clear basket", "明确的一篮"), color: "#3dd6c4" },
-              { k: t("Placed ≥1", "上榜 ≥1"), v: one, d: t(`top-${topN} in a lens`, `某维进前 ${topN}`) },
+              { k: t("① First", "① 第一名榜单"), v: t1.length, d: t("all three conditions", "三条全中"), color: TIER_META[1].color },
+              { k: t("② Second", "② 第二名榜单"), v: t2.length, d: t("two of three", "满足两条"), color: TIER_META[2].color },
+              { k: t("③ Third", "③ 第三名榜单"), v: t3.length, d: t("focus only", "仅在名单"), color: TIER_META[3].color },
               { k: t("Catalyst cover", "催化剂覆盖"), v: `${rows.filter((r) => r.catScore >= 0).length}/${rows.length}` },
             ]}
           />
 
-          {/* controls */}
-          <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {FILTERS.map((f) => (
-                <button
-                  key={f.k}
-                  onClick={() => setFilter(f.k)}
-                  className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${
-                    filter === f.k ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"
-                  }`}
-                >
-                  {f.label} <span className="font-mono text-[11px] opacity-70">{f.n}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10.5px] uppercase tracking-wide text-muted2">{t("top", "前")}</span>
-              {TOP_OPTS.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setTopN(n)}
-                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] transition-colors ${
-                    topN === n ? "bg-signal/15 text-signal" : "text-muted2 hover:text-text"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-            {sector && (
-              <button onClick={() => setSector(null)} className="rounded-full border border-signal/50 bg-signal/10 px-2.5 py-0.5 text-[12px] text-signal">
-                {sectorLabel(sector, lang)} ✕
+          {/* sector filter */}
+          <div className="mb-4 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+            <button
+              onClick={() => setSector(null)}
+              className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+            >
+              {t("All", "全部")} {rows.length}
+            </button>
+            {sectorCounts.slice(0, 9).map(([sec, n]) => (
+              <button
+                key={sec}
+                onClick={() => setSector(sector === sec ? null : sec)}
+                className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+              >
+                {sectorLabel(sec, lang)} {n}
               </button>
-            )}
-            {!sector &&
-              sectorCounts.slice(0, 7).map(([sec, n]) => (
-                <button key={sec} onClick={() => setSector(sec)} className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-text">
-                  {sectorLabel(sec, lang)} {n}
-                </button>
-              ))}
+            ))}
           </div>
 
-          {shown.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-8 text-center text-[13px] text-muted">
-              {t("No names match this filter.", "该筛选下没有匹配的票。")}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {shown.map((r, i) => (
-                <Row key={r.ticker} r={r} rank={i + 1} lang={lang} onOpen={openDetail} t={t} />
-              ))}
-            </div>
-          )}
+          <TierBlock tier={1} rows={t1} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
+          <TierBlock tier={2} rows={t2} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
+          <TierBlock tier={3} rows={t3} mounted={mounted} lang={lang} onOpen={openDetail} t={t} />
         </>
       )}
     </div>
