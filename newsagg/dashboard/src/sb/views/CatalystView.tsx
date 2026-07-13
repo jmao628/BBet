@@ -73,7 +73,9 @@ function CatalystLine({ c, lang, t }: { c: Catalyst; lang: "en" | "zh"; t: (en: 
           </span>
         </span>
       </div>
-      {c.thesis && <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted">{c.thesis}</div>}
+      {(c.summary || c.thesis) && (
+        <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted">{c.summary || c.thesis}</div>
+      )}
       {c.evidence && <div className="mt-1 text-[10.5px] italic text-muted2">P/M/N · {c.evidence}</div>}
       <div className="mt-2 flex items-center justify-between gap-2">
         <Tpmn tpmn={c.tpmn} />

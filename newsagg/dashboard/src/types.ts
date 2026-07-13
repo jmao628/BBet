@@ -170,8 +170,9 @@ export interface Catalyst {
   event_date: string | null;
   window_days: number | null;
   source_url: string;
-  thesis: string;
-  evidence: string;
+  summary: string; // 2-3 sentence write-up of the catalyst
+  thesis: string; // short headline clause
+  evidence: string; // P/M/N justification
   tpmn: CatalystTPMN;
 }
 export interface CatalystTicker {

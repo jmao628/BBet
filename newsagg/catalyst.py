@@ -61,7 +61,7 @@ CATALYST_TYPES = (
 # So a near-term, high-conviction, narrative-hot catalyst tops out near 33.
 
 
-def _load(path: Path) -> dict[str, dict]:
+def _load(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
@@ -70,39 +70,159 @@ def _load(path: Path) -> dict[str, dict]:
         return {}
 
 
+BYPASS_CAP = 100e9  # ecosystem "anchor" = mega cap (matches the dashboard)
+
+
+def _seed_info(output_dir: Path) -> dict[str, dict]:
+    """{ticker: {company, rated, has_thesis}} from the SA snapshot."""
+    data = _load(output_dir / "seekingalpha_latest.json")
+    out: dict[str, dict] = {}
+    for w in (data.get("home_widgets") or []):
+        for g in w.get("groups", []):
+            for r in g.get("rows", []):
+                t = (r.get("ticker") or "").strip().upper()
+                if not t:
+                    continue
+                cur = out.setdefault(t, {"company": "", "rated": False, "has_thesis": False})
+                if not cur["company"] and r.get("company"):
+                    cur["company"] = (r.get("company") or "").strip()
+                if (r.get("rating") or "").strip():
+                    cur["rated"] = True
+                if r.get("analyst") or r.get("article"):
+                    cur["has_thesis"] = True
+    for p in (data.get("my_analyst_picks") or []):
+        t = (p.get("ticker") or "").strip().upper()
+        if t:
+            out.setdefault(t, {"company": "", "rated": False, "has_thesis": False})["has_thesis"] = True
+    return out
+
+
+def _eco_neighbors(output_dir: Path) -> dict[str, list[dict]]:
+    """Symmetrized supply-chain adjacency: ticker -> [{ticker, importance}]."""
+    sc = _load(output_dir / "supplychain.json")
+    adj: dict[str, dict[str, int]] = {}
+
+    def add(a: str, b: str, imp: int) -> None:
+        if not a or not b or a == b:
+            return
+        m = adj.setdefault(a, {})
+        if b not in m or imp > m[b]:
+            m[b] = imp
+
+    for t, rec in sc.items():
+        if not isinstance(rec, dict):
+            continue
+        for kind in ("upstream", "downstream", "peers"):
+            for e in (rec.get(kind) or []):
+                b = (e.get("ticker") or "").strip().upper()
+                if not b:
+                    continue
+                try:
+                    imp = min(3, max(1, int(e.get("importance", 2) or 2)))
+                except (TypeError, ValueError):
+                    imp = 2
+                add(t.upper(), b, imp)
+                add(b, t.upper(), imp)
+    return {t: [{"ticker": b, "importance": i} for b, i in m.items()] for t, m in adj.items()}
+
+
+def focus_ranked(output_dir: Path) -> list[tuple[str, str, float]]:
+    """Port of the dashboard's Focus-List priority so catalysts are fetched
+    highest-value first: rank rated names by a buy + ecosystem + thesis composite
+    (attention was dropped from the score, matching the UI). Returns ordered
+    [(ticker, company, score)] for names actually on the Focus List."""
+    seeds = _seed_info(output_dir)
+    tech = _load(output_dir / "technical_latest.json")
+    ticks = tech.get("tickers") or {}
+    no_data = set(tech.get("no_data") or [])
+    caps = _load(output_dir / "marketcaps.json")
+    eco = _eco_neighbors(output_dir)
+
+    rated = {t for t, s in seeds.items() if s.get("rated")}
+
+    def is_anchor(tk: str) -> bool:
+        c = caps.get(tk)
+        return isinstance(c, (int, float)) and c >= BYPASS_CAP
+
+    out: list[tuple[str, str, float]] = []
+    for t in rated:
+        if t in no_data:
+            continue
+        tt = ticks.get(t) or {}
+        strong = ((tt.get("gauge") or {}).get("summary")) == "strong_buy"
+        streak = int(tt.get("buy_streak") or 0)
+        neigh = [n for n in eco.get(t, []) if n["ticker"] in rated and n["ticker"] != t]
+        links = len(neigh)
+        anchors = sum(1 for n in neigh if is_anchor(n["ticker"]))
+        eco_w = sum((6 if is_anchor(n["ticker"]) else 2) * (n["importance"] / 2) for n in neigh)
+        g_buy = strong or streak >= 5
+        g_eco = anchors >= 1 or links >= 3
+        g_thesis = bool(seeds[t].get("has_thesis"))
+        gates = int(g_buy) + int(g_eco) + int(g_thesis)
+        if gates == 0 and links == 0 and streak < 3:
+            continue  # not on the Focus List
+        buy_part = (2.5 if strong else (1.3 if g_buy else 0.0)) + min(streak, 5) / 5 * 1.5
+        eco_part = min(eco_w / 16.0, 1.0) * 4.5
+        thesis_part = 1.0 if g_thesis else 0.0
+        out.append((t, seeds[t].get("company", ""), round(buy_part + eco_part + thesis_part, 2)))
+    out.sort(key=lambda x: x[2], reverse=True)
+    return out
+
+
 def _prompt(ticker: str, name: str, sector: str = "") -> str:
     who = f"{ticker} ({name})" if name else ticker
-    ctx = f" It is in the '{sector}' sector." if sector else ""
+    ctx = f" It is classified in the '{sector}' sector." if sector else ""
+    today = date.today().isoformat()
     return (
-        f"You are an equity-research assistant. Using web search, find UPCOMING catalysts for the "
-        f"US-listed company {who} over roughly the next 6 months that could re-rate the stock.{ctx}\n\n"
-        "Return ONLY a JSON object (no prose, no markdown fences) of the form:\n"
+        f"You are a buy-side equity-research analyst. Today is {today}. Using web search, identify the "
+        f"UPCOMING catalysts over roughly the next 6 months that could RE-RATE the US-listed company "
+        f"{who}.{ctx} A catalyst is a specific, identifiable future event or process — not a vague hope. "
+        "Cross-check with primary sources (company IR / press releases, SEC filings, the FDA/regulatory "
+        "calendar, official earnings-date calendars, exchange index-rebalance schedules) and reputable "
+        "financial press. Prefer PRIMARY, DATED sources.\n\n"
+        "Catalyst types (pick the closest):\n"
+        "- earnings: the next scheduled quarterly print.\n"
+        "- guidance: a guide raise/cut, pre-announcement, analyst/investor day, capacity or price update.\n"
+        "- approval: an FDA PDUFA / CHMP / other regulatory decision, or a major product launch/certification.\n"
+        "- order: a large contract, design win, backlog award, or a customer/partner announcement.\n"
+        "- m_and_a: a deal, strategic review, activist stake, spin-off, or take-private.\n"
+        "- capital_return: buyback authorization, dividend initiation/raise, or special dividend.\n"
+        "- policy: a law, tariff, subsidy, or regulatory change that materially helps this company.\n"
+        "- index: addition to / promotion within a major index (forced buying).\n"
+        "- mgmt: a CEO/CFO change or key hire.\n"
+        "- revision: an estimate-revision / upgrade cycle already underway.\n\n"
+        "Return ONLY a JSON object (no prose, no markdown fences):\n"
         '{"ticker":"' + ticker + '","catalysts":[{'
-        '"type":"earnings|guidance|approval|order|m_and_a|capital_return|policy|index|mgmt|revision|other",'
-        '"title":"short label",'
+        '"type":"...",'
+        '"title":"short headline label",'
         '"cls":"A or B",'
         '"event_date":"YYYY-MM-DD or null",'
         '"window_days":null,'
         '"P":0,"M":0,"N":0,'
-        '"source_url":"https://...",'
-        '"thesis":"one line: why it matters",'
-        '"evidence":"one line justifying P/M/N"}]}\n\n'
-        "TIMING — classify each catalyst A or B:\n"
-        "- A (timed): there is an OBJECTIVE calendar date — earnings, an FDA/regulatory decision, an index "
-        "rebalance, a lockup expiry, an investor day. Put it in event_date; leave window_days null.\n"
-        "- B (untimed): no fixed date. Set window_days = your best estimate of the number of DAYS FROM TODAY "
-        "to the MIDPOINT of the likely window. Guidance: a downstream company that typically follows an upstream "
-        "anchor's report by ~1-2 quarters → ~45-90 days; if an analyst/author gave an expected timeframe, use it. "
-        "Leave event_date null.\n\n"
-        "GRADE each catalyst (integers, be conservative):\n"
-        "- P probability/evidence 0-3: 0 pure speculation · 1 directional evidence · 2 hard evidence in hand · "
-        "3 already announced, awaiting confirmation.\n"
-        "- M magnitude/impact 0-3: 0 noise · 1 moves one quarter · 2 moves the full year · 3 changes the narrative.\n"
-        "- N narrative fit vs today's hottest market themes 0-2: 0 unrelated · 1 tangential · 2 squarely on the "
-        "hottest theme.\n\n"
+        '"summary":"2-3 sentences: WHAT the event is, WHY it could re-rate the stock, and WHAT to watch for",'
+        '"thesis":"one short headline clause",'
+        '"evidence":"one line justifying the P/M/N grades",'
+        '"source_url":"https://..."}]}\n\n'
+        "TIMING — classify each catalyst A or B and give the days accordingly:\n"
+        "- A (timed): there IS an objective calendar date (earnings, a regulatory decision date, an index "
+        "rebalance, a lockup expiry, a dated investor day). Put the ISO date in event_date; leave window_days null.\n"
+        "- B (untimed): no fixed date. Set window_days = your best estimate of the number of DAYS FROM TODAY to "
+        "the MIDPOINT of the likely window. Anchoring guidance: a downstream/supplier company that typically "
+        "follows an upstream ANCHOR's report by ~1-2 quarters → ~45-90 days (take the midpoint); a deal or "
+        "regulatory process with a rough expected close → its midpoint; if an analyst/author stated an expected "
+        "timeframe, use theirs. Leave event_date null.\n\n"
+        "GRADE each catalyst (integers only, be conservative — when unsure, grade LOWER):\n"
+        "- P probability / evidence strength 0-3: 0 = pure speculation · 1 = directional evidence (channel checks, "
+        "management hints) · 2 = hard evidence in hand (bookings, data readouts, filings) · 3 = already announced, "
+        "only the confirmation/close remains.\n"
+        "- M magnitude / financial impact if it fires 0-3: 0 = noise · 1 = moves one quarter · 2 = moves the full "
+        "year's numbers · 3 = changes the multi-year narrative / TAM.\n"
+        "- N narrative fit vs today's hottest market themes 0-2: 0 = unrelated · 1 = tangential · 2 = squarely on "
+        "the single hottest theme right now.\n\n"
         "Rules:\n"
-        "- ONLY include a catalyst backed by a real, specific source_url (news, IR page, filing, calendar). "
-        "No credible source → omit it. NEVER invent dates or events.\n"
+        "- EVERY catalyst MUST have a real, specific source_url (a page that actually documents the event/date). "
+        "No credible source → omit it. NEVER invent dates, events, or URLs.\n"
+        "- List the strongest, most concrete catalysts first; skip generic 'could beat earnings' filler.\n"
         "- If you find nothing credible, return an empty catalysts array."
     )
 
@@ -189,7 +309,8 @@ def _clean(parsed: dict, today: date) -> list[dict]:
             "event_date": (str(c.get("event_date"))[:10] if c.get("event_date") else None),
             "window_days": wd,
             "source_url": url,
-            "thesis": (c.get("thesis") or "").strip()[:280],
+            "summary": (c.get("summary") or "").strip()[:600],
+            "thesis": (c.get("thesis") or "").strip()[:200],
             "evidence": (c.get("evidence") or "").strip()[:200],
             "tpmn": tpmn,
         }
@@ -299,7 +420,15 @@ def main() -> int:
     if args.tickers:
         names = {t.strip().upper(): "" for t in args.tickers.split(",") if t.strip()}
     else:
-        names = rated_seed_tickers(settings.output_dir)
+        # Fetch highest Focus-List score first, so the limited daily budget goes
+        # to the most promising names. Falls back to rated seeds if the Focus
+        # inputs (technical / supplychain) aren't there yet.
+        ranked = focus_ranked(settings.output_dir)
+        if ranked:
+            logger.info("focus-ranked %d names (top: %s)", len(ranked), ", ".join(t for t, _, _ in ranked[:5]))
+            names = {t: c for t, c, _ in ranked}
+        else:
+            names = rated_seed_tickers(settings.output_dir)
     if not names:
         logger.warning("no tickers (run the SA scrape first, or pass --tickers)")
         return 1
