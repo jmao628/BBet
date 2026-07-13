@@ -18,8 +18,9 @@ export const FUNNEL: NavStage[] = [
   { key: "heat", step: 2, en: "Heat Ignition", zh: "热度点火", hint: { en: "attention · vol+social", zh: "被关注 · 量价+社交" } },
   { key: "screen", step: 2, en: "Screen", zh: "发现筛选", hint: { en: "quality · rating+thesis", zh: "质量 · 评分+论点" } },
   { key: "catalyst", step: 3, en: "Catalyst TPMN", zh: "催化剂 TPMN" },
-  { key: "conviction", step: 4, en: "Conviction", zh: "管理层语气" },
-  { key: "technical", step: 5, en: "Bollinger", zh: "Boll 技术" },
+  { key: "shortlist", step: 4, en: "Shortlist", zh: "登顶广度", hint: { en: "top across 3 lenses", zh: "三维登顶 · 交集精选" } },
+  { key: "conviction", step: 5, en: "Conviction", zh: "管理层语气" },
+  { key: "technical", step: 6, en: "Bollinger", zh: "Boll 技术" },
 ];
 
 // The synthesized output of step 2 — strong-buy × ecosystem, the shortlist that

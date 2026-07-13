@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, noDataSet, belowMinCap } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, noDataSet, belowMinCap } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -38,12 +38,17 @@ function useCounts(): Record<string, number | null> {
     ? buildCatalystRows(focus, catalyst).filter((r) => r.status === "advance").length
     : null;
 
+  // Shortlist = Focus names landing top-N in ≥2 of the three lenses.
+  const shortlistCount =
+    technical || supplychain ? buildShortlist(focus, catalyst).filter((r) => r.breadth >= 2).length : null;
+
   return {
     seeds: seeds.length,
     heat: heatCount,
     screen: screenCount,
     focus: focusCount,
     catalyst: catalystCount,
+    shortlist: shortlistCount,
     conviction: null,
     technical: null,
     candidates: null,

@@ -152,7 +152,8 @@ export interface RankRow {
 }
 
 // Stage 3 — catalyst discovery (TPMN). Written by newsagg.catalyst.
-// Per catalyst: total = T(0-25) + P(0-3) + M(0-3) + N(0-2), max ~33.
+// Per catalyst: score is MULTIPLICATIVE — (M/3)·(0.4+0.6·P/3)·(0.2+0.8·T/25)·
+// (0.7+0.3·N/2)·10, so magnitude leads and scores actually spread (see pipeline).
 export interface CatalystTPMN {
   T: number; // timing 0-25 (peak curve on days-to-event, peaks ~2 weeks)
   P: number; // probability / evidence strength 0-3
@@ -160,7 +161,7 @@ export interface CatalystTPMN {
   N: number; // narrative fit 0-2
   days: number | null; // days to the event (A) or window midpoint (B)
   cls: string; // "A" timed / "B" untimed
-  score: number; // T+P+M+N
+  score: number; // 0-10 multiplicative strength (see comment above)
   type: string;
 }
 export interface Catalyst {

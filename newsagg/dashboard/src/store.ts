@@ -11,6 +11,7 @@ export type ViewKey =
   | "screen"
   | "focus"
   | "catalyst"
+  | "shortlist"
   | "conviction"
   | "technical"
   | "candidates";

@@ -9,6 +9,7 @@ import { HeatView } from "./sb/views/HeatView";
 import { ScreenView } from "./sb/views/ScreenView";
 import { FocusView } from "./sb/views/FocusView";
 import { CatalystView } from "./sb/views/CatalystView";
+import { ShortlistView } from "./sb/views/ShortlistView";
 import { StockDetail } from "./sb/views/StockDetail";
 import {
   ConvictionView,
@@ -23,6 +24,7 @@ const VIEWS = {
   screen: ScreenView,
   focus: FocusView,
   catalyst: CatalystView,
+  shortlist: ShortlistView,
   conviction: ConvictionView,
   technical: TechnicalView,
   candidates: CandidatesView,

@@ -964,6 +964,89 @@ export function buildCatalystRows(
   return rows;
 }
 
+// ── Shortlist — podium breadth across the three lenses ───────────────────────
+// The catalyst score compresses at the top, so no single lens cleanly separates
+// names. Instead RANK each Focus name in THREE independent lenses — Focus score
+// (buy × ecosystem), Attention (price-volume 0-100), Catalyst (TPMN) — and count
+// how many of them it lands in the top-N of ("podium breadth"). Ranks are immune
+// to score clustering, so names strong across 2-3 lenses surface as the clearest
+// basket. Composite (avg percentile) breaks ties within a breadth tier.
+export interface ShortlistRow {
+  ticker: string;
+  company: string;
+  sector: string;
+  cap: CapSize;
+  focusScore: number;
+  attnScore: number;
+  catScore: number; // -1 if not catalyst-fetched
+  focusRank: number;
+  attnRank: number;
+  catRank: number; // Infinity if no catalyst
+  focusTop: boolean;
+  attnTop: boolean;
+  catTop: boolean;
+  breadth: number; // 0-3 podium finishes
+  composite: number; // 0-100 average percentile
+}
+
+export function buildShortlist(
+  focus: FocusItem[],
+  catalyst: CatalystData | null,
+  topN = 15,
+): ShortlistRow[] {
+  if (!focus.length) return [];
+  const base = focus.map((f) => ({
+    ticker: f.ticker,
+    company: f.company,
+    sector: f.sector,
+    cap: f.cap,
+    focusScore: f.score,
+    attnScore: f.attnScore ?? 0,
+    catScore: catTickerScore(catalyst?.[f.ticker] ?? null),
+  }));
+  const N = base.length;
+  // rank map (1 = best); optional filter for lenses that don't cover everyone
+  const rankMap = (key: "focusScore" | "attnScore" | "catScore", ok?: (r: (typeof base)[number]) => boolean) => {
+    const arr = (ok ? base.filter(ok) : base).slice().sort((a, b) => b[key] - a[key]);
+    const m = new Map<string, number>();
+    arr.forEach((r, i) => m.set(r.ticker, i + 1));
+    return m;
+  };
+  const fR = rankMap("focusScore");
+  const aR = rankMap("attnScore");
+  const cR = rankMap("catScore", (r) => r.catScore >= 0);
+  const catTotal = base.filter((r) => r.catScore >= 0).length;
+  const pct = (rank: number, total: number) =>
+    total > 1 ? Math.round((1 - (rank - 1) / (total - 1)) * 100) : 100;
+
+  const rows: ShortlistRow[] = base.map((r) => {
+    const focusRank = fR.get(r.ticker) ?? N;
+    const attnRank = aR.get(r.ticker) ?? N;
+    const catRank = cR.get(r.ticker) ?? Infinity;
+    const focusTop = focusRank <= topN;
+    const attnTop = attnRank <= topN;
+    const catTop = catRank <= topN;
+    const parts = [pct(focusRank, N), pct(attnRank, N)];
+    if (r.catScore >= 0) parts.push(pct(catRank, catTotal));
+    const composite = Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+    return {
+      ...r,
+      focusRank,
+      attnRank,
+      catRank,
+      focusTop,
+      attnTop,
+      catTop,
+      breadth: Number(focusTop) + Number(attnTop) + Number(catTop),
+      composite,
+    };
+  });
+  rows.sort(
+    (a, b) => b.breadth - a.breadth || b.composite - a.composite || a.ticker.localeCompare(b.ticker),
+  );
+  return rows;
+}
+
 export const CATALYST_TYPE_LABEL: Record<string, { en: string; zh: string }> = {
   earnings: { en: "Earnings", zh: "财报" },
   guidance: { en: "Guidance", zh: "指引" },
