@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { Catalyst, CatalystData, CatalystTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
+import type { Catalyst, CatalystData, CatalystTPMN, CatalystTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
 
 // yfinance GICS sectors → short Chinese labels.
 export const SECTOR_CN: Record<string, string> = {
@@ -823,7 +823,13 @@ export function buildFocus(
 // Focus name ADVANCES if its strongest catalyst clears the bar; names with a
 // catalyst below the bar are "watch", names fetched with none are "none", and
 // names not yet fetched are "pending" (inclusive — nothing is cut here either).
-export const CATALYST_BAR = 18; // TPMN total (T+P+M+N, ~0-33) to advance
+// TPMN is graded on T(0-25)+P(0-3)+M(0-3)+N(0-2), max 33 — normalize to 0-10
+// for display so the whole app speaks one 10-point scale.
+export function catScore10(tpmn: CatalystTPMN): number {
+  const total = tpmn.T + tpmn.P + tpmn.M + tpmn.N;
+  return Math.round((total / 33) * 100) / 10;
+}
+export const CATALYST_BAR = 5.5; // 0-10 (≈18/33) to advance
 
 export type CatalystStatus = "advance" | "watch" | "none" | "pending";
 
@@ -848,7 +854,9 @@ export function buildCatalystRows(
   const rows: CatalystRow[] = focus.map((f) => {
     const cat = catalyst?.[f.ticker] ?? null;
     const best = cat?.catalysts?.[0] ?? null;
-    const catScore = cat ? cat.score : -1;
+    // Recompute the 0-10 score from the raw T/P/M/N so old and new cache entries
+    // display on one scale (the stored `score` may be the older 0-33 total).
+    const catScore = !cat ? -1 : best ? catScore10(best.tpmn) : 0;
     const status: CatalystStatus = !cat
       ? "pending"
       : !best

@@ -282,7 +282,8 @@ def _tpmn(cat: dict, today: date) -> dict:
     P = _lvl(cat.get("P"), 3)
     M = _lvl(cat.get("M"), 3)
     N = _lvl(cat.get("N"), 2)
-    score = round(T + P + M + N, 1)
+    # Normalize T(0-25)+P(0-3)+M(0-3)+N(0-2) (max 33) to a 0-10 score.
+    score = round((T + P + M + N) / 33 * 10, 1)
     cls = "A" if cat.get("event_date") else ("B" if cat.get("window_days") is not None else (cat.get("cls") or "B"))
     return {"T": T, "P": P, "M": M, "N": N, "days": days, "cls": cls, "score": score, "type": ctype}
 

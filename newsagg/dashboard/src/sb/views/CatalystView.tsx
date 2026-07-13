@@ -33,21 +33,22 @@ function timing(c: Catalyst, t: (en: string, zh: string) => string): { label: st
   return { label: t(`in ${days}d`, `${days} 天后`), near: days <= 30 };
 }
 
-function Tpmn({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
-  // Each dimension scaled by its own max: T 0-25, P 0-3, M 0-3, N 0-2.
-  const dims: [string, number, number, string][] = [
-    ["T", tpmn.T, 25, "#9b8cf0"],
-    ["P", tpmn.P, 3, "#5fb0e8"],
-    ["M", tpmn.M, 3, "#e9c46a"],
-    ["N", tpmn.N, 2, "#48c78e"],
+// Four thin segments — T/P/M/N, each scaled to its own max. Single accent so it
+// reads as one clean meter rather than a rainbow.
+function TpmnMini({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
+  const dims: [string, number, number][] = [
+    ["T", tpmn.T, 25],
+    ["P", tpmn.P, 3],
+    ["M", tpmn.M, 3],
+    ["N", tpmn.N, 2],
   ];
   return (
-    <div className="flex items-center gap-2.5">
-      {dims.map(([k, v, max, c]) => (
+    <div className="flex items-center gap-2">
+      {dims.map(([k, v, max]) => (
         <div key={k} className="flex items-center gap-1" title={`${k} ${k === "T" ? v.toFixed(1) : v}/${max}`}>
-          <span className="font-mono text-[9.5px] text-muted2">{k}</span>
-          <span className="h-1.5 w-8 overflow-hidden rounded-full bg-inset">
-            <span className="block h-full rounded-full" style={{ width: `${Math.max(4, (v / max) * 100)}%`, background: c }} />
+          <span className="font-mono text-[8px] uppercase tracking-wide text-muted2">{k}</span>
+          <span className="h-[3px] w-5 overflow-hidden rounded-full bg-white/[0.07]">
+            <span className="block h-full rounded-full bg-signal/70" style={{ width: `${Math.max(8, (v / max) * 100)}%` }} />
           </span>
         </div>
       ))}
@@ -55,34 +56,42 @@ function Tpmn({ tpmn }: { tpmn: Catalyst["tpmn"] }) {
   );
 }
 
+function TypeChip({ type, lang }: { type: string; lang: "en" | "zh" }) {
+  return (
+    <span className="flex-none rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted">
+      {catalystTypeLabel(type, lang)}
+    </span>
+  );
+}
+
+function Src({ url, t }: { url: string; t: (en: string, zh: string) => string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="flex-none font-mono text-[9.5px] text-signal/80 hover:text-signal hover:underline"
+    >
+      {t("source", "来源")} ↗
+    </a>
+  );
+}
+
+// A secondary catalyst inside the expanded detail — compact, with its summary.
 function CatalystLine({ c, lang, t }: { c: Catalyst; lang: "en" | "zh"; t: (en: string, zh: string) => string }) {
   const cd = timing(c, t);
   return (
-    <div className="rounded-lg border border-line bg-inset/40 p-2.5">
+    <div className="rounded-lg bg-white/[0.02] px-3 py-2">
       <div className="flex items-center gap-2">
-        <span className="rounded-full border border-signal/40 bg-signal/10 px-1.5 py-0.5 text-[10px] font-medium text-signal">
-          {catalystTypeLabel(c.type, lang)}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-text">{c.title}</span>
-        <span className={`flex-none font-mono text-[11px] ${cd.near ? "text-ok" : "text-muted2"}`}>⏳ {cd.label}</span>
-        <span className="flex-none font-mono text-[13px] font-semibold" style={{ color: c.tpmn.score >= CATALYST_BAR ? "#48c78e" : "#c7d2dc" }}>
-          {c.tpmn.score.toFixed(1)}
-        </span>
+        <TypeChip type={c.type} lang={lang} />
+        <span className="min-w-0 flex-1 truncate text-[12px] text-text">{c.title}</span>
+        <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>
       </div>
-      {(c.summary || c.thesis) && (
-        <div className="mt-1.5 line-clamp-2 text-[11.5px] leading-snug text-muted">{c.summary || c.thesis}</div>
-      )}
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <Tpmn tpmn={c.tpmn} />
-        <a
-          href={c.source_url}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="flex-none font-mono text-[10.5px] text-signal hover:underline"
-        >
-          {t("source", "来源")} ↗
-        </a>
+      {c.summary && <div className="mt-1.5 text-[11px] leading-relaxed text-muted2">{c.summary}</div>}
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <TpmnMini tpmn={c.tpmn} />
+        <Src url={c.source_url} t={t} />
       </div>
     </div>
   );
@@ -103,60 +112,78 @@ function Row({
 }) {
   const [open, setOpen] = useState(false);
   const meta = STATUS_META[r.status];
+  const best = r.best;
   const more = r.cat ? r.cat.catalysts.length - 1 : 0;
+  const cd = best ? timing(best, t) : null;
+  const hasDetail = !!best && (!!best.summary || more > 0);
   return (
     <div
-      className="overflow-hidden rounded-2xl border bg-panel2"
-      style={{ borderColor: r.status === "advance" ? "#48c78e44" : "var(--line,#22303c)" }}
+      className="group relative overflow-hidden rounded-xl border bg-panel2 transition-[transform,border-color] duration-200 hover:-translate-y-0.5"
+      style={{ borderColor: r.status === "advance" ? `${meta.color}3a` : "var(--line,#22303c)" }}
     >
-      <button onClick={() => onOpen(r.ticker)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03]">
-        <span className="w-7 flex-none font-mono text-[11px] text-muted2">#{rank}</span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="font-mono text-[15px] font-bold text-signal">{r.ticker}</span>
-            {r.core && <span className="text-[10px] text-gold" title="Focus Core">★</span>}
-            <span
-              className="rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold"
-              style={{ color: meta.color, background: `${meta.color}1f`, border: `1px solid ${meta.color}55` }}
-            >
-              {lang === "zh" ? meta.zh : meta.en}
-            </span>
-          </span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted2">
-            {r.company || "—"} · {capLabel(r.cap, lang)}
-            {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
-          </span>
-        </span>
-        {r.catScore >= 0 ? (
-          <span className="flex-none text-right">
-            <span className="font-disp text-[22px] font-semibold" style={{ color: r.status === "advance" ? "#48c78e" : "#c7d2dc" }}>
-              {r.catScore.toFixed(1)}
-            </span>
-            <span className="text-[10px] text-muted2">{t("pts", "分")}</span>
-          </span>
-        ) : (
-          <span className="flex-none text-[11px] text-muted2">{t("not fetched", "未抓取")}</span>
-        )}
-      </button>
+      <span className="absolute inset-y-0 left-0 w-[3px]" style={{ background: meta.color, opacity: r.status === "advance" ? 0.9 : 0.3 }} />
 
-      {r.best && (
-        <div className="border-t border-line/60 px-4 py-3">
-          <CatalystLine c={r.best} lang={lang} t={t} />
-          {more > 0 && (
-            <button
-              onClick={() => setOpen((v) => !v)}
-              className="mt-2 text-[11px] text-muted hover:text-text"
-            >
-              {open ? t("hide", "收起") : t(`+${more} more catalyst${more > 1 ? "s" : ""}`, `+${more} 条催化剂`)}
-            </button>
+      {/* header — click opens the ticker */}
+      <button onClick={() => onOpen(r.ticker)} className="flex w-full items-center gap-2 px-4 pt-3 text-left">
+        <span className="font-mono text-[10px] tabular-nums text-muted2">{rank}</span>
+        <span className="font-mono text-[15px] font-bold tracking-tight text-text transition-colors group-hover:text-signal">
+          {r.ticker}
+        </span>
+        {r.core && <span className="text-[10px] text-gold" title="Focus Core">★</span>}
+        <span className="ml-auto flex items-baseline gap-0.5">
+          {r.catScore >= 0 ? (
+            <>
+              <span className="font-disp text-[20px] font-semibold leading-none" style={{ color: r.status === "advance" ? meta.color : "#c7d2dc" }}>
+                {r.catScore.toFixed(1)}
+              </span>
+              <span className="text-[9px] text-muted2">/10</span>
+            </>
+          ) : (
+            <span className="text-[10px] text-muted2">{t("pending", "待抓")}</span>
           )}
-          {open && (
-            <div className="mt-2 space-y-2">
-              {r.cat!.catalysts.slice(1).map((c, i) => (
-                <CatalystLine key={i} c={c} lang={lang} t={t} />
-              ))}
-            </div>
+        </span>
+      </button>
+      <div className="truncate px-4 pb-2.5 pt-0.5 text-[10px] text-muted2">
+        {r.company || "—"} · {capLabel(r.cap, lang)}
+        {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}
+      </div>
+
+      {/* primary catalyst — one clean line */}
+      {best && cd && (
+        <div className="mx-2.5 mb-1 rounded-lg bg-white/[0.025] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <TypeChip type={best.type} lang={lang} />
+            <span className="min-w-0 flex-1 truncate text-[12px] text-text">{best.title}</span>
+            <span className={`flex-none font-mono text-[10px] ${cd.near ? "text-ok" : "text-muted2"}`}>{cd.label}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <TpmnMini tpmn={best.tpmn} />
+            <Src url={best.source_url} t={t} />
+          </div>
+          {open && best.summary && (
+            <p className="mt-2.5 border-t border-white/[0.06] pt-2 text-[11px] leading-relaxed text-muted">{best.summary}</p>
           )}
+        </div>
+      )}
+
+      {/* expand toggle — reveals summaries + the rest of the catalysts */}
+      {hasDetail ? (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-1 px-4 pb-3 pt-1 text-[10px] text-muted2 transition-colors hover:text-text"
+        >
+          <span className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+          {open ? t("hide", "收起") : more > 0 ? t(`details · +${more}`, `详情 · +${more}`) : t("details", "详情")}
+        </button>
+      ) : (
+        <div className="pb-3" />
+      )}
+
+      {open && more > 0 && (
+        <div className="space-y-2 px-2.5 pb-3">
+          {r.cat!.catalysts.slice(1).map((c, i) => (
+            <CatalystLine key={i} c={c} lang={lang} t={t} />
+          ))}
         </div>
       )}
     </div>
