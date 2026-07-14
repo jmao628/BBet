@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useStore, useT } from "../../store";
 import {
   buildConviction,
@@ -62,14 +62,14 @@ function ConvBar({ v }: { v: number }) {
 
 // A four-axis radar of the full profile (context — conviction is the ranking key,
 // but the shortlist strength that put it in its tier still shows here).
-function Radar({ r, size = 128 }: { r: RankingRow; size?: number }) {
+function Radar({ r, lang, size = 132 }: { r: RankingRow; lang: "en" | "zh"; size?: number }) {
   const c = size / 2;
-  const R = size / 2 - 20;
+  const R = size / 2 - 24;
   const vals = [
-    { v: r.conviction / 10, a: -90, color: RANK_COLORS.conv, lab: "语" },
-    { v: Math.max(0, r.catScore) / 10, a: 0, color: RANK_COLORS.cat, lab: "催" },
-    { v: r.focusScore / 10, a: 90, color: RANK_COLORS.core, lab: "核" },
-    { v: (r.attnScore ?? 0) / 100, a: 180, color: RANK_COLORS.attn, lab: "注" },
+    { v: r.conviction / 10, a: -90, color: RANK_COLORS.conv, lab: lang === "zh" ? "语气" : "Conv" },
+    { v: Math.max(0, r.catScore) / 10, a: 0, color: RANK_COLORS.cat, lab: lang === "zh" ? "催化" : "Cat" },
+    { v: r.focusScore / 10, a: 90, color: RANK_COLORS.core, lab: lang === "zh" ? "核心" : "Core" },
+    { v: (r.attnScore ?? 0) / 100, a: 180, color: RANK_COLORS.attn, lab: lang === "zh" ? "注意力" : "Attn" },
   ];
   const pt = (v: number, a: number, rad = R) => {
     const t = (a * Math.PI) / 180;
@@ -88,11 +88,11 @@ function Radar({ r, size = 128 }: { r: RankingRow; size?: number }) {
       <polygon points={poly} fill="rgba(61,214,196,0.16)" stroke={RANK_COLORS.core} strokeWidth="1.5" />
       {vals.map((x) => {
         const [px, py] = pt(x.v, x.a);
-        const [lx, ly] = pt(1.24, x.a);
+        const [lx, ly] = pt(1.32, x.a);
         return (
           <g key={x.lab}>
             <circle cx={px} cy={py} r="3" fill={x.color} />
-            <text x={lx} y={ly + 3} textAnchor="middle" fontSize="9" fill="var(--muted2,#5f7183)">{x.lab}</text>
+            <text x={lx} y={ly + 3} textAnchor="middle" fontSize="8.5" fill="var(--muted2,#5f7183)">{x.lab}</text>
           </g>
         );
       })}
@@ -100,7 +100,7 @@ function Radar({ r, size = 128 }: { r: RankingRow; size?: number }) {
   );
 }
 
-function PodiumCard({ r, rank, onOpen, t }: { r: RankingRow; rank: number; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+function PodiumCard({ r, rank, showTier, onOpen, t }: { r: RankingRow; rank: number; showTier: boolean; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
   const col = medalColor(rank);
   const lifted = rank === 1;
   return (
@@ -111,7 +111,12 @@ function PodiumCard({ r, rank, onOpen, t }: { r: RankingRow; rank: number; onOpe
     >
       <span className="mb-2 grid h-9 w-9 place-items-center rounded-xl font-disp text-[16px] font-bold" style={{ color: "#0b0f14", background: col, boxShadow: `0 0 16px ${col}88` }}>{rank}</span>
       {lifted && <span className="absolute -top-3 text-[16px]" style={{ color: col }}>♛</span>}
-      <span className="font-disp text-[19px] font-bold tracking-tight text-text transition-colors group-hover:text-signal">{r.ticker}</span>
+      <div className="flex items-center gap-1.5">
+        <span className="font-disp text-[19px] font-bold tracking-tight text-text transition-colors group-hover:text-signal">{r.ticker}</span>
+        {showTier && (
+          <span className="rounded px-1 py-[1px] font-mono text-[8.5px] font-bold uppercase" style={{ color: "#0b0f14", background: TIER_COLOR[r.tier] }}>T{r.tier}</span>
+        )}
+      </div>
       <span className="mt-0.5 max-w-full truncate text-[10px] text-muted2">{r.company || "—"}</span>
       <span className="mt-2 font-disp text-[30px] font-bold leading-none tabular-nums" style={{ color: convColor(r.conviction) }}>{r.conviction.toFixed(1)}</span>
       <span className="text-[9px] uppercase tracking-wide text-muted2">{t("conviction", "语气分")}</span>
@@ -159,6 +164,10 @@ function RankRow({
                 {t(`T${r.tier}`, `${r.tier === 1 ? "金" : "银"}`)}
               </span>
             )}
+            {/* shortlist strength — the tie-break when convictions match */}
+            <span className="font-mono text-[9.5px] text-muted2" title={t("Shortlist strength — breaks ties at equal conviction", "登顶强度 —— 语气分打平时的次级排序")}>
+              SL {r.shortlistComposite.toFixed(0)}
+            </span>
           </div>
           <div className="truncate text-[10.5px] text-muted2">{r.company || "—"} · {capLabel(r.cap, lang)}{r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}</div>
         </div>
@@ -173,7 +182,7 @@ function RankRow({
       {open && (
         <div className="view-in grid gap-4 border-t border-line px-4 py-4 sm:grid-cols-[auto_1fr]">
           <div className="flex flex-col items-center">
-            <Radar r={r} />
+            <Radar r={r} lang={lang} />
             <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
               {DIMS.map((d) => (
                 <div key={d.key} className="flex items-center gap-1.5 text-[10px] text-muted2">
@@ -206,42 +215,29 @@ function RankRow({
   );
 }
 
-// One tier's leaderboard: a colored header, a podium for the top 3, then the rest.
-function TierBoard({ tier, rows, open, setOpen, onOpen, lang, t }: { tier: 1 | 2; rows: RankingRow[]; open: string | null; setOpen: (x: string | null) => void; onOpen: (x: string) => void; lang: "en" | "zh"; t: (en: string, zh: string) => string }) {
+// A leaderboard: a header, a podium for the top 3, then the ranked rest. Used
+// both per tier and per sector (same display), so `showTier` toggles the badges.
+function Board({ header, rows, showTier, open, setOpen, onOpen, lang, t }: { header: ReactNode; rows: RankingRow[]; showTier: boolean; open: string | null; setOpen: (x: string | null) => void; onOpen: (x: string) => void; lang: "en" | "zh"; t: (en: string, zh: string) => string }) {
   if (!rows.length) return null;
-  const col = TIER_COLOR[tier];
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
+  const row = (r: RankingRow, rank: number) => (
+    <RankRow key={r.ticker} r={r} rank={rank} showTier={showTier} open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} onOpen={onOpen} lang={lang} t={t} />
+  );
   return (
     <section className="mb-8">
-      <div className="mb-3 flex items-center gap-2.5 border-b pb-2" style={{ borderColor: `${col}44` }}>
-        <span className="grid h-6 w-6 place-items-center rounded-md font-mono text-[10px] font-bold" style={{ color: "#0b0f14", background: col }}>{tier}</span>
-        <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: col }}>
-          {tier === 1 ? t("Tier 1 · Gold", "第一名榜 · 金档") : t("Tier 2 · Silver", "第二名榜 · 银档")}
-        </h3>
-        <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{rows.length}</span>
-        <span className="ml-auto text-[10px] text-muted2">{t("ranked by conviction", "按语气分排名")}</span>
-      </div>
-      {podium.length >= 2 && (
+      {header}
+      {podium.length >= 2 ? (
         <div className="mb-4 flex items-end gap-3">
-          {podium.length === 3 && <PodiumCard r={podium[1]} rank={2} onOpen={onOpen} t={t} />}
-          <PodiumCard r={podium[0]} rank={1} onOpen={onOpen} t={t} />
-          {podium[2] && <PodiumCard r={podium[2]} rank={3} onOpen={onOpen} t={t} />}
+          {podium.length === 3 && <PodiumCard r={podium[1]} rank={2} showTier={showTier} onOpen={onOpen} t={t} />}
+          <PodiumCard r={podium[0]} rank={1} showTier={showTier} onOpen={onOpen} t={t} />
+          {podium[2] && <PodiumCard r={podium[2]} rank={3} showTier={showTier} onOpen={onOpen} t={t} />}
           {podium.length === 2 && <div className="flex-1" />}
         </div>
+      ) : (
+        <div className="mb-2 space-y-2">{podium.map((r, i) => row(r, i + 1))}</div>
       )}
-      {podium.length < 2 && (
-        <div className="mb-2 space-y-2">
-          {podium.map((r, i) => (
-            <RankRow key={r.ticker} r={r} rank={i + 1} showTier={false} open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} onOpen={onOpen} lang={lang} t={t} />
-          ))}
-        </div>
-      )}
-      <div className="space-y-2">
-        {rest.map((r, i) => (
-          <RankRow key={r.ticker} r={r} rank={i + 4} showTier={false} open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} onOpen={onOpen} lang={lang} t={t} />
-        ))}
-      </div>
+      <div className="space-y-2">{rest.map((r, i) => row(r, i + 4))}</div>
     </section>
   );
 }
@@ -314,32 +310,56 @@ export function RankingView() {
             </div>
           </div>
 
-          {mode === "tier" ? (
-            <>
-              <TierBoard tier={1} rows={t1} open={open} setOpen={setOpen} onOpen={openDetail} lang={lang} t={t} />
-              <TierBoard tier={2} rows={t2} open={open} setOpen={setOpen} onOpen={openDetail} lang={lang} t={t} />
-            </>
-          ) : (
-            <div className="space-y-7">
-              {bySector.map(([sec, secRows]) => {
+          {mode === "tier"
+            ? ([1, 2] as const).map((tier) => {
+                const col = TIER_COLOR[tier];
+                const tRows = tier === 1 ? t1 : t2;
+                return (
+                  <Board
+                    key={tier}
+                    rows={tRows}
+                    showTier={false}
+                    open={open}
+                    setOpen={setOpen}
+                    onOpen={openDetail}
+                    lang={lang}
+                    t={t}
+                    header={
+                      <div className="mb-3 flex items-center gap-2.5 border-b pb-2" style={{ borderColor: `${col}44` }}>
+                        <span className="grid h-6 w-6 place-items-center rounded-md font-mono text-[10px] font-bold" style={{ color: "#0b0f14", background: col }}>{tier}</span>
+                        <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: col }}>
+                          {tier === 1 ? t("Tier 1 · Gold", "第一名榜 · 金档") : t("Tier 2 · Silver", "第二名榜 · 银档")}
+                        </h3>
+                        <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{tRows.length}</span>
+                        <span className="ml-auto text-[10px] text-muted2">{t("ranked by conviction", "按语气分排名")}</span>
+                      </div>
+                    }
+                  />
+                );
+              })
+            : bySector.map(([sec, secRows]) => {
                 const hue = sec === "__none" ? "#8aa0b2" : sectorHue(sec);
                 return (
-                  <section key={sec}>
-                    <div className="mb-3 flex items-center gap-2.5 border-b border-line pb-2">
-                      <span className="h-3.5 w-1 flex-none rounded-full" style={{ background: hue, boxShadow: `0 0 8px ${hue}88` }} />
-                      <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: hue }}>{sec === "__none" ? t("Unclassified", "未分类") : sectorLabel(sec, lang)}</h3>
-                      <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{secRows.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {secRows.map((r, i) => (
-                        <RankRow key={r.ticker} r={r} rank={i + 1} showTier open={open === r.ticker} onToggle={() => setOpen(open === r.ticker ? null : r.ticker)} onOpen={openDetail} lang={lang} t={t} />
-                      ))}
-                    </div>
-                  </section>
+                  <Board
+                    key={sec}
+                    rows={secRows}
+                    showTier
+                    open={open}
+                    setOpen={setOpen}
+                    onOpen={openDetail}
+                    lang={lang}
+                    t={t}
+                    header={
+                      <div className="mb-3 flex items-center gap-2.5 border-b pb-2" style={{ borderColor: `${hue}44` }}>
+                        <span className="h-3.5 w-1 flex-none rounded-full" style={{ background: hue, boxShadow: `0 0 8px ${hue}88` }} />
+                        <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: hue }}>{sec === "__none" ? t("Unclassified", "未分类") : sectorLabel(sec, lang)}</h3>
+                        <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{secRows.length}</span>
+                        <span className="ml-auto text-[10px] text-muted2">{t("ranked by conviction", "按语气分排名")}</span>
+                      </div>
+                    }
+                  />
                 );
               })}
-            </div>
-          )}
 
           <p className="mt-4 text-[11px] leading-relaxed text-muted2">
             {t(
