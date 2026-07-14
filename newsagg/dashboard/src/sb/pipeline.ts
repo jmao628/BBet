@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { Catalyst, CatalystData, CatalystTPMN, CatalystTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
+import type { Catalyst, CatalystData, CatalystTPMN, CatalystTicker, ConvictionData, ConvictionTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
 
 // yfinance GICS sectors → short Chinese labels.
 export const SECTOR_CN: Record<string, string> = {
@@ -1017,6 +1017,69 @@ export function buildShortlist(focus: FocusItem[], catalyst: CatalystData | null
   });
   rows.sort((a, b) => a.tier - b.tier || b.composite - a.composite || a.ticker.localeCompare(b.ticker));
   return rows;
+}
+
+// ── Stage 5 — Conviction (management tone) ───────────────────────────────────
+// Joins the Shortlist survivors to conviction.json (four-layer LLM tone read).
+// The universe is the Shortlist Tier 1 + Tier 2 (names meeting ≥2 of the three
+// shortlist conditions) — the survivors a management-tone read actually earns
+// its keep on. A name that isn't fetched yet is "pending"; a fetched name with
+// no citable call is "unsourced" (kept, low-confidence, so it never masquerades
+// as a real read). The 0-10 total is L1+L2+L3+L4, computed in Python.
+export const CONVICTION_BAR = 6; // 0-10 total to "advance" (backs the thesis)
+export const CONVICTION_SHORTLIST_TIER = 2; // read Tier ≤ this (1 + 2)
+
+export type ConvictionStatus = "advance" | "watch" | "unsourced" | "pending";
+
+export interface ConvictionRow {
+  ticker: string;
+  company: string;
+  sector: string;
+  cap: CapSize;
+  tier: 1 | 2 | 3; // shortlist tier
+  catScore: number; // shortlist catalyst 0-10 (-1 pending)
+  focusScore: number; // 0-10
+  conv: ConvictionTicker | null; // null = not fetched
+  total: number; // 0-10 (-1 if pending)
+  confidence: number; // 0-1
+  status: ConvictionStatus;
+}
+
+export function buildConviction(rows: LeaderRow[], conviction: ConvictionData | null): ConvictionRow[] {
+  const survivors = rows.filter((r) => r.tier <= CONVICTION_SHORTLIST_TIER);
+  const out: ConvictionRow[] = survivors.map((r) => {
+    const conv = conviction?.[r.ticker] ?? null;
+    const total = conv ? conv.total : -1;
+    const status: ConvictionStatus = !conv
+      ? "pending"
+      : !conv.ok
+        ? "unsourced"
+        : total >= CONVICTION_BAR
+          ? "advance"
+          : "watch";
+    return {
+      ticker: r.ticker,
+      company: r.company,
+      sector: r.sector,
+      cap: r.cap,
+      tier: r.tier,
+      catScore: r.catScore,
+      focusScore: r.focusScore,
+      conv,
+      total,
+      confidence: conv?.confidence ?? 0,
+      status,
+    };
+  });
+  const rank: Record<ConvictionStatus, number> = { advance: 0, watch: 1, unsourced: 2, pending: 3 };
+  out.sort(
+    (a, b) =>
+      rank[a.status] - rank[b.status] ||
+      b.total - a.total ||
+      b.confidence - a.confidence ||
+      a.ticker.localeCompare(b.ticker),
+  );
+  return out;
 }
 
 export const CATALYST_TYPE_LABEL: Record<string, { en: string; zh: string }> = {

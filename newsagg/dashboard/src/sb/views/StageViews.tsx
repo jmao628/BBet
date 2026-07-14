@@ -23,37 +23,6 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function ConvictionView() {
-  const t = useT();
-  return (
-    <div className="view-in">
-      <ViewHead
-        eyebrow={t("Stage 4 · Conviction", "Stage 4 · Conviction")}
-        title={t("Management Conviction · Four Tones", "管理层 Conviction · 四层语气")}
-        desc={t(
-          "Score management tone from calls/filings, out of 10 (L1+L2+L3+L4), each layer with source-text evidence + confidence, noting whether it's the ticker's own or an upstream anchor's call.",
-          "从电话会/公告的管理层语气打分，满分 10（L1+L2+L3+L4），每层附原文证据 + 置信度，注明用自身还是上游锚的电话会。",
-        )}
-      />
-      <div className="grid gap-4">
-        <Pending
-          title={t("Pending: call transcripts + LLM tone analysis", "待接入：电话会文本 + LLM 语气分析")}
-          needs={t(
-            "Text source: the ticker's own or an upstream anchor's call/filing|LLM scores the four layers + extracts evidence + confidence|Anchor note: own vs upstream-anchor call",
-            "文本源：自身或上游锚公司的电话会/公告（Schwab 字幕、SA 正文等）|LLM 按四层打分 + 抽原文证据 + 置信度|锚标注：用的是自身还是上游锚的电话会",
-          ).split("|")}
-        />
-        <Ref>
-          <Row k="L1" v={t("Tone baseline 0-2: downgrade 0 / flat 1 / clear upgrade 2", "语气基线 0-2：降级0 / 持平1 / 明显升级2")} />
-          <Row k="L2" v={t("Evasion 0-3: dodges 0 / vague 1 / occasional 2 / straight numbers 3", "回避闪躲 0-3：反复回避0 / 避重就轻1 / 偶有闪躲2 / 直球给数3")} />
-          <Row k="L3" v={t("Hard vs soft 0-3: all soft 0 / mostly soft 1 / mixed 2 / hard commitments 3", "硬话软话 0-3：全软0 / 软多硬少1 / 软硬掺半2 / 大量硬承诺3")} />
-          <Row k="L4" v={t("Walk the talk 0-2: talks up but sells 0 / no signal 1 / bullish & buying 2", "言行一致 0-2：嘴热手减持0 / 无信号1 / 看多且增持回购2")} />
-        </Ref>
-      </div>
-    </div>
-  );
-}
-
 export function TechnicalView() {
   const t = useT();
   return (

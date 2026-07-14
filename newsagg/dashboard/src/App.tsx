@@ -10,9 +10,9 @@ import { ScreenView } from "./sb/views/ScreenView";
 import { FocusView } from "./sb/views/FocusView";
 import { CatalystView } from "./sb/views/CatalystView";
 import { ShortlistView } from "./sb/views/ShortlistView";
+import { ConvictionView } from "./sb/views/ConvictionView";
 import { StockDetail } from "./sb/views/StockDetail";
 import {
-  ConvictionView,
   TechnicalView,
   CandidatesView,
 } from "./sb/views/StageViews";

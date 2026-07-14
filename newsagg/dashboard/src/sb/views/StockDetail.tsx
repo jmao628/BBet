@@ -18,7 +18,7 @@ import {
   CATALYST_BAR,
   type FocusItem,
 } from "../pipeline";
-import type { Catalyst, CatalystTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
+import type { Catalyst, CatalystTicker, ConvictionTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
 
 // Human labels for the ranking lenses a name advanced in (Heat Ignition).
 const LENS_LABEL: Record<string, { en: string; zh: string }> = {
@@ -316,6 +316,73 @@ const SOCIAL: Record<string, L> = {
   ultralow: { en: "Ultra-low", zh: "超低覆盖", color: "#5a6a7c" },
   warming: { en: "Warming", zh: "积累中", color: "#3dd6c4" },
 };
+
+// Stage 5 — the four-layer management-tone read for this ticker (conviction.py).
+const CONV_LAYERS: { key: "L1" | "L2" | "L3" | "L4"; color: string; en: string; zh: string }[] = [
+  { key: "L1", color: "#5fb0e8", en: "Tone", zh: "语气" },
+  { key: "L2", color: "#3dd6c4", en: "Directness", zh: "直白" },
+  { key: "L3", color: "#48c78e", en: "Hard vs soft", zh: "硬软" },
+  { key: "L4", color: "#f0c862", en: "Walk the talk", zh: "言行" },
+];
+function convColor(total: number): string {
+  if (total >= 7.5) return "#48c78e";
+  if (total >= 6) return "#7bd88f";
+  if (total >= 4) return "#f0c862";
+  return "#e0785a";
+}
+function ConvBreakdown({ conv, lang, t }: { conv: ConvictionTicker; lang: Lang; t: (en: string, zh: string) => string }) {
+  const col = convColor(conv.total);
+  const anchor = conv.source === "upstream_anchor";
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold">{t("Management Conviction", "管理层语气")}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted2">
+            <span
+              className="rounded px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide"
+              style={{ color: anchor ? "#e0b45a" : "#7bd88f", background: anchor ? "#e0b45a1a" : "#7bd88f1a" }}
+            >
+              {anchor ? `⇡ ${t("anchor", "上游锚")}${conv.anchor_ticker ? " · " + conv.anchor_ticker : ""}` : `● ${t("own call", "自身")}`}
+            </span>
+            <span className="truncate">{conv.call_ref || t("call", "电话会")}{conv.call_date ? ` · ${conv.call_date}` : ""}</span>
+          </div>
+        </div>
+        <div className="flex-none text-right">
+          <div className="font-disp text-[24px] font-bold leading-none tabular-nums" style={{ color: col }}>
+            {conv.total.toFixed(0)}<span className="text-[12px] text-muted2">/10</span>
+          </div>
+          <div className="text-[9px] uppercase tracking-wide text-muted2">{t("conf", "置信")} {Math.round(conv.confidence * 100)}%</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+        {CONV_LAYERS.map((l) => {
+          const d = conv.layers[l.key];
+          return (
+            <div key={l.key} className="min-w-0">
+              <div className="mb-1 flex items-baseline justify-between">
+                <span className="text-[10px] uppercase tracking-wide text-muted2">{lang === "zh" ? l.zh : l.en}</span>
+                <span className="font-mono text-[10.5px] font-semibold" style={{ color: l.color }}>{d.score}<span className="text-muted2">/{d.max}</span></span>
+              </div>
+              <div className="flex gap-1">
+                {Array.from({ length: d.max }).map((_, i) => (
+                  <span key={i} className="h-1.5 flex-1 rounded-full" style={{ background: i < d.score ? l.color : "rgba(255,255,255,0.07)" }} />
+                ))}
+              </div>
+              {d.evidence && <p className="mt-1 line-clamp-2 text-[10.5px] leading-snug text-muted">“{d.evidence}”</p>}
+            </div>
+          );
+        })}
+      </div>
+      {conv.summary && <p className="mt-3 text-[11.5px] leading-relaxed text-muted">{conv.summary}</p>}
+      {conv.source_url && (
+        <a href={conv.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[11px] text-signal hover:underline">
+          {t("source ↗", "原文 ↗")}
+        </a>
+      )}
+    </div>
+  );
+}
 
 function Flag({ on, children }: { on: boolean; children: React.ReactNode }) {
   return (
@@ -684,6 +751,7 @@ export function StockDetail() {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const catalyst = useStore((s) => s.catalyst);
+  const conviction = useStore((s) => s.conviction);
   const marketCaps = useStore((s) => s.marketCaps);
   const lang = useStore((s) => s.lang);
   const t = useT();
@@ -885,6 +953,10 @@ export function StockDetail() {
 
           {catalyst?.[ticker] && catalyst[ticker].catalysts.length > 0 && (
             <CatBreakdown cat={catalyst[ticker]} lang={lang} t={t} />
+          )}
+
+          {conviction?.[ticker] && conviction[ticker].ok && (
+            <ConvBreakdown conv={conviction[ticker]} lang={lang} t={t} />
           )}
 
           {!tech && (

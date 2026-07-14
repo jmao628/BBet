@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, noDataSet, belowMinCap } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, noDataSet, belowMinCap } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -11,6 +11,7 @@ function useCounts(): Record<string, number | null> {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const catalyst = useStore((s) => s.catalyst);
+  const conviction = useStore((s) => s.conviction);
   const marketCaps = useStore((s) => s.marketCaps);
   // Exclude CONFIRMED no-data OTC/foreign ADRs (pending new seeds still count)
   // and micro-caps below the market-cap floor (e.g. PERF).
@@ -39,8 +40,12 @@ function useCounts(): Record<string, number | null> {
     : null;
 
   // Shortlist = Tier 1 + Tier 2 (names meeting ≥2 of the three conditions).
-  const shortlistCount =
-    technical || supplychain ? buildShortlist(focus, catalyst).filter((r) => r.tier <= 2).length : null;
+  const shortlist =
+    technical || supplychain ? buildShortlist(focus, catalyst) : [];
+  const shortlistCount = technical || supplychain ? shortlist.filter((r) => r.tier <= 2).length : null;
+
+  // Conviction = Shortlist survivors whose management-tone read backs the thesis.
+  const convictionCount = conviction ? buildConviction(shortlist, conviction).filter((r) => r.status === "advance").length : null;
 
   return {
     seeds: seeds.length,
@@ -49,7 +54,7 @@ function useCounts(): Record<string, number | null> {
     focus: focusCount,
     catalyst: catalystCount,
     shortlist: shortlistCount,
-    conviction: null,
+    conviction: convictionCount,
     technical: null,
     candidates: null,
   };

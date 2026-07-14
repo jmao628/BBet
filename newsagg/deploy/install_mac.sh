@@ -10,6 +10,7 @@
 #   com.newsagg.heat       — Ape Wisdom social heat accumulation   (:20)
 #   com.newsagg.supplychain— OpenAI upstream/downstream/peers (cached)(:25)
 #   com.newsagg.catalyst   — LLM catalyst discovery + stale re-fetch  (:30)
+#   com.newsagg.conviction — LLM management-tone read of shortlist    (:35)
 #   com.newsagg.web        — local web server on http://localhost:8000
 #
 # Re-run this any time to update the schedule. Uninstall with uninstall_mac.sh.
@@ -54,7 +55,7 @@ if [[ -n "${OPENAI_MODEL:-}" ]]; then
     <key>OPENAI_MODEL</key><string>$OPENAI_MODEL</string>"
 fi
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "WARNING: OPENAI_API_KEY not set — the catalyst/supplychain jobs will be skipped. export it, then re-run."
+  echo "WARNING: OPENAI_API_KEY not set — the catalyst/supplychain/conviction jobs will be skipped. export it, then re-run."
 elif [[ -z "${OPENAI_BASE_URL:-}" ]]; then
   echo "WARNING: OPENAI_BASE_URL not set — if you use a custom OpenAI gateway, export it before installing or the jobs will 401 against api.openai.com."
 fi
@@ -65,6 +66,13 @@ fi
 CAT_LIMIT="${CAT_LIMIT:-0}"
 CAT_MAX_AGE="${CAT_MAX_AGE:-4}"
 CAT_WORKERS="${CAT_WORKERS:-6}" # parallelism — higher finishes the no-cap run faster
+
+# Daily conviction budget: same no-cap default. Management calls are quarterly,
+# so CONV_MAX_AGE re-reads a name whose last read is older than N days (a new
+# call has likely landed). Only the shortlist survivors get read (see the module).
+CONV_LIMIT="${CONV_LIMIT:-0}"
+CONV_MAX_AGE="${CONV_MAX_AGE:-25}"
+CONV_WORKERS="${CONV_WORKERS:-6}"
 
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,6 +96,7 @@ TECH_PLIST="$LA_DIR/com.newsagg.technical.plist"
 SECTOR_PLIST="$LA_DIR/com.newsagg.sectors.plist"
 SUPPLY_PLIST="$LA_DIR/com.newsagg.supplychain.plist"
 CATALYST_PLIST="$LA_DIR/com.newsagg.catalyst.plist"
+CONVICTION_PLIST="$LA_DIR/com.newsagg.conviction.plist"
 WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
@@ -301,6 +310,41 @@ $OPENAI_LINES
 </plist>
 EOF
 
+cat > "$CONVICTION_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.newsagg.conviction</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$PY</string>
+    <string>-m</string>
+    <string>newsagg.conviction</string>
+    <string>--limit</string>
+    <string>$CONV_LIMIT</string>
+    <string>--max-age</string>
+    <string>$CONV_MAX_AGE</string>
+    <string>--workers</string>
+    <string>$CONV_WORKERS</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+$OPENAI_LINES
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>35</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$LOG_DIR/conviction.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/conviction.log</string>
+</dict>
+</plist>
+EOF
+
 cat > "$WEB_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -329,7 +373,7 @@ $PROXY_LINES
 EOF
 
 # Reload jobs (unload first if already installed; ignore errors).
-for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$CATALYST_PLIST" "$WEB_PLIST"; do
+for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$CATALYST_PLIST" "$CONVICTION_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
   launchctl load -w "$plist"
 done

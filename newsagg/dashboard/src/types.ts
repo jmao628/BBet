@@ -185,3 +185,30 @@ export interface CatalystTicker {
   generated_at: string;
 }
 export type CatalystData = Record<string, CatalystTicker>;
+
+// Stage 5 — Management Conviction (four-layer tone read). Written by
+// newsagg.conviction from an earnings call / filing (the ticker's OWN, or an
+// upstream anchor's, read through). Total = L1+L2+L3+L4 ∈ [0,10], summed in
+// Python; each layer carries source-text evidence + a 0-1 confidence.
+export interface ConvictionLayer {
+  score: number; // 0..max
+  max: number; // 2 / 3 / 3 / 2
+  evidence: string; // short quote / paraphrase from the source
+  confidence: number; // 0-1, how well the text pins this grade
+}
+export interface ConvictionTicker {
+  layers: { L1: ConvictionLayer; L2: ConvictionLayer; L3: ConvictionLayer; L4: ConvictionLayer };
+  total: number; // 0-10
+  confidence: number; // 0-1 overall (mean of layers)
+  source: "own" | "upstream_anchor";
+  anchor_ticker: string; // set when source = upstream_anchor
+  anchor_name: string;
+  call_ref: string; // e.g. "Q2 FY2026 earnings call"
+  call_date: string | null;
+  source_url: string; // the actual transcript / filing / Form 4 ("" if none found)
+  summary: string; // 3-4 sentence read on management tone
+  model: string;
+  ok: boolean; // true = a real citation was found
+  generated_at: string;
+}
+export type ConvictionData = Record<string, ConvictionTicker>;
