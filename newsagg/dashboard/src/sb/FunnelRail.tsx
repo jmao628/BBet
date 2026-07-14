@@ -1,6 +1,6 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, noDataSet, belowMinCap } from "./pipeline";
-import { OVERVIEW, FUNNEL, FOCUS, CANDIDATES, type NavStage } from "./nav";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, RANK_LENSES, noDataSet, belowMinCap } from "./pipeline";
+import { OVERVIEW, FUNNEL, FOCUS, RANKING, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
 // their computations are wired.
@@ -45,7 +45,11 @@ function useCounts(): Record<string, number | null> {
   const shortlistCount = technical || supplychain ? shortlist.filter((r) => r.tier <= 2).length : null;
 
   // Conviction = Shortlist survivors whose management-tone read backs the thesis.
-  const convictionCount = conviction ? buildConviction(shortlist, conviction).filter((r) => r.status === "advance").length : null;
+  const convRows = conviction ? buildConviction(shortlist, conviction) : [];
+  const convictionCount = conviction ? convRows.filter((r) => r.status === "advance").length : null;
+
+  // Composite Rank = Tier-1 names past Conviction 6 (the synthesis universe).
+  const rankingCount = conviction ? buildConvictionRanking(convRows, RANK_LENSES[0].w).length : null;
 
   return {
     seeds: seeds.length,
@@ -55,6 +59,7 @@ function useCounts(): Record<string, number | null> {
     catalyst: catalystCount,
     shortlist: shortlistCount,
     conviction: convictionCount,
+    ranking: rankingCount,
     technical: null,
     candidates: null,
   };
@@ -133,6 +138,12 @@ export function FunnelRail() {
           {s.key === "screen" && (
             <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
               <NavRow stage={FOCUS} count={counts.focus} />
+            </div>
+          )}
+          {/* the Conviction-gate synthesis sits right after the Conviction stage */}
+          {s.key === "conviction" && (
+            <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
+              <NavRow stage={RANKING} count={counts.ranking} />
             </div>
           )}
         </div>

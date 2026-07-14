@@ -33,6 +33,16 @@ export const FOCUS: NavStage = {
   hint: { en: "strong-buy × ecosystem", zh: "强买 × 生态 · 交集" },
 };
 
+// The synthesis at the Conviction gate — Tier-1 names past Conviction 6, ranked
+// by a weighted blend of all four deep signals. A highlighted output node.
+export const RANKING: NavStage = {
+  key: "ranking",
+  step: null,
+  en: "Composite Rank",
+  zh: "综合排行",
+  hint: { en: "Tier-1 · conviction > 6", zh: "金档 · 语气 > 6" },
+};
+
 export const CANDIDATES: NavStage = {
   key: "candidates",
   step: null,

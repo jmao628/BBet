@@ -11,6 +11,7 @@ import { FocusView } from "./sb/views/FocusView";
 import { CatalystView } from "./sb/views/CatalystView";
 import { ShortlistView } from "./sb/views/ShortlistView";
 import { ConvictionView } from "./sb/views/ConvictionView";
+import { RankingView } from "./sb/views/RankingView";
 import { StockDetail } from "./sb/views/StockDetail";
 import {
   TechnicalView,
@@ -26,6 +27,7 @@ const VIEWS = {
   catalyst: CatalystView,
   shortlist: ShortlistView,
   conviction: ConvictionView,
+  ranking: RankingView,
   technical: TechnicalView,
   candidates: CandidatesView,
 } as const;

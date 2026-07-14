@@ -13,6 +13,7 @@ export type ViewKey =
   | "catalyst"
   | "shortlist"
   | "conviction"
+  | "ranking"
   | "technical"
   | "candidates";
 
