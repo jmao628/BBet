@@ -13,7 +13,6 @@ import { ShortlistView } from "./sb/views/ShortlistView";
 import { ConvictionView } from "./sb/views/ConvictionView";
 import { RankingView } from "./sb/views/RankingView";
 import { StockDetail } from "./sb/views/StockDetail";
-import { CandidatesView } from "./sb/views/StageViews";
 
 const VIEWS = {
   overview: OverviewView,
@@ -25,7 +24,6 @@ const VIEWS = {
   shortlist: ShortlistView,
   conviction: ConvictionView,
   ranking: RankingView,
-  candidates: CandidatesView,
 } as const;
 
 export default function App() {

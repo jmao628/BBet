@@ -1,6 +1,6 @@
 import { useStore } from "../store";
 import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, noDataSet, belowMinCap } from "./pipeline";
-import { OVERVIEW, FUNNEL, FOCUS, RANKING, CANDIDATES, type NavStage } from "./nav";
+import { OVERVIEW, FUNNEL, FOCUS, RANKING, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
 // their computations are wired.
@@ -60,7 +60,6 @@ function useCounts(): Record<string, number | null> {
     shortlist: shortlistCount,
     conviction: convictionCount,
     ranking: rankingCount,
-    candidates: null,
   };
 }
 
@@ -147,11 +146,6 @@ export function FunnelRail() {
           )}
         </div>
       ))}
-
-      <div className="mx-5 my-3 border-t border-line" />
-      <div className="relative">
-        <NavRow stage={CANDIDATES} count={counts.candidates} />
-      </div>
     </aside>
   );
 }
