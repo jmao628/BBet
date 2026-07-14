@@ -14,7 +14,6 @@ export type ViewKey =
   | "shortlist"
   | "conviction"
   | "ranking"
-  | "technical"
   | "candidates";
 
 interface DashboardState {

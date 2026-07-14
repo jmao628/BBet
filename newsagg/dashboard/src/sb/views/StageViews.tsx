@@ -1,60 +1,12 @@
-import type { ReactNode } from "react";
 import { useT } from "../../store";
 import { ViewHead, Card, Pending } from "../ui";
 
-// The computed pipeline stages. Structure + the framework's method as a
-// reference; each fills with real numbers once its computation is wired.
-
-function Ref({ children }: { children: ReactNode }) {
-  const t = useT();
-  return (
-    <Card title={t("Method", "方法 · Method")}>
-      <div className="space-y-2 text-[12.5px] leading-relaxed text-muted">{children}</div>
-    </Card>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex gap-3">
-      <span className="w-32 flex-none font-mono text-[11px] uppercase tracking-wide text-muted2">{k}</span>
-      <span>{v}</span>
-    </div>
-  );
-}
-
-export function TechnicalView() {
-  const t = useT();
-  return (
-    <div className="view-in">
-      <ViewHead
-        eyebrow={t("Stage 5 · Bollinger", "Stage 5 · Boll 技术")}
-        title={t("Bollinger · Riding-the-Band Timing", "Boll 技术 · 骑轨择时")}
-        desc={t(
-          "Bollinger timing: close riding between +2σ and +3σ, SMA20 slope positive, bands expanding → entry. Overheated (≥+3σ) don't chase; unconfirmed (<+2σ) wait.",
-          "布林带择时：收盘骑在 +2σ~+3σ 之间、SMA20 斜率为正、带宽扩张，才算进场；过热(≥+3σ)不追，未确认(<+2σ)则等。",
-        )}
-      />
-      <div className="grid gap-4">
-        <Pending
-          title={t("Pending: daily close series", "待接入：日线收盘价序列")}
-          needs={t(
-            "Price source: yfinance / vendor daily close|Mid SMA20; σ = 20-period stdev; upper = +2σ; top = +3σ; width = (upper−lower)/mid|Entry: close ∈ [+2σ,+3σ] & SMA20 slope>0 & width expanding|Output: technical_ok + band position",
-            "价格源：yfinance / 数据商日线收盘|中轨 SMA20；σ=20期标准差；上轨=+2σ；最上轨=+3σ；带宽=(上−下)/中|进场：收盘∈[+2σ,+3σ] & SMA20 斜率>0 & 带宽扩张|产出：technical_ok + 所在轨位（几σ / 相对结构低点）",
-          ).split("|")}
-        />
-        <Ref>
-          <Row k={t("Cut / wait", "淘汰/等待")} v={t("close ≥+3σ overheated, don't chase; close <+2σ momentum unconfirmed, wait", "收盘≥+3σ 过热不追；收盘<+2σ 动量未确认，等")} />
-          <Row k={t("Coiled setup", "埋伏形态")} v={t("above SMA20, structure low intact, width tightening, no blow-off break", "站上 SMA20、未破结构低点、带宽收窄蓄势、无放量破位")} />
-        </Ref>
-      </div>
-    </div>
-  );
-}
+// The final output view. Structure + the framework's method as a reference;
+// fills with real numbers once every gate computes.
 
 export function CandidatesView() {
   const t = useT();
-  const GATES = [t("Heat", "热度"), t("Screen", "筛选"), t("Catalyst", "催化剂"), "Conviction", t("Technical", "技术")];
+  const GATES = [t("Heat", "热度"), t("Screen", "筛选"), t("Catalyst", "催化剂"), "Conviction"];
   return (
     <div className="view-in">
       <ViewHead

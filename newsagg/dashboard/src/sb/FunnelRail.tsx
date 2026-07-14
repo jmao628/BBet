@@ -60,7 +60,6 @@ function useCounts(): Record<string, number | null> {
     shortlist: shortlistCount,
     conviction: convictionCount,
     ranking: rankingCount,
-    technical: null,
     candidates: null,
   };
 }

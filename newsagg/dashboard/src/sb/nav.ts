@@ -20,7 +20,6 @@ export const FUNNEL: NavStage[] = [
   { key: "catalyst", step: 3, en: "Catalyst TPMN", zh: "催化剂 TPMN" },
   { key: "shortlist", step: 4, en: "Shortlist", zh: "登顶广度", hint: { en: "top across 3 lenses", zh: "三维登顶 · 交集精选" } },
   { key: "conviction", step: 5, en: "Conviction", zh: "管理层语气" },
-  { key: "technical", step: 6, en: "Bollinger", zh: "Boll 技术" },
 ];
 
 // The synthesized output of step 2 — strong-buy × ecosystem, the shortlist that
