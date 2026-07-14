@@ -17,6 +17,22 @@ import { ViewHead } from "../ui";
 const MEDAL = ["#f0c862", "#cdd6e2", "#cd8b5e"]; // gold · silver · bronze
 const medalColor = (rank: number): string => MEDAL[rank - 1] ?? "#6f7f8e";
 
+// A distinct hue per GICS sector, for the per-sector section headers.
+const SECTOR_HUE: Record<string, string> = {
+  Technology: "#5fb0e8",
+  Healthcare: "#48c78e",
+  "Financial Services": "#7bd88f",
+  "Consumer Cyclical": "#e0785a",
+  "Consumer Defensive": "#c9a86a",
+  Industrials: "#9aa7b4",
+  Energy: "#e0b45a",
+  "Basic Materials": "#b58bd6",
+  "Communication Services": "#3dd6c4",
+  Utilities: "#6f8fb0",
+  "Real Estate": "#d68b9a",
+};
+const sectorHue = (s: string): string => SECTOR_HUE[s] ?? "#8aa0b2";
+
 const DIMS = [
   { key: "conv" as const, en: "Conviction", zh: "语气", color: RANK_COLORS.conv },
   { key: "cat" as const, en: "Catalyst", zh: "催化", color: RANK_COLORS.cat },
@@ -246,6 +262,7 @@ export function RankingView() {
   const t = useT();
 
   const [lensIdx, setLensIdx] = useState(0);
+  const [mode, setMode] = useState<"overall" | "sector">("overall");
   const [open, setOpen] = useState<string | null>(null);
   const lens = RANK_LENSES[lensIdx];
 
@@ -256,8 +273,24 @@ export function RankingView() {
   }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst, conviction]);
 
   const rows = useMemo(() => buildConvictionRanking(convRows, lens.w), [convRows, lens]);
-  const orderKey = lensIdx + "|" + rows.map((r) => r.ticker).join(",");
+  // FLIP only animates the overall flat list; the sector view re-renders plainly.
+  const orderKey = mode === "overall" ? lensIdx + "|" + rows.map((r) => r.ticker).join(",") : "sector";
   const refs = useFlip(orderKey);
+
+  // Per-sector leaderboards — rows are already composite-sorted, so each sector
+  // list keeps that order; sections are ordered by size then by their leader.
+  const bySector = useMemo(() => {
+    const m = new Map<string, RankingRow[]>();
+    for (const r of rows) {
+      const k = r.sector || "__none";
+      const arr = m.get(k);
+      if (arr) arr.push(r);
+      else m.set(k, [r]);
+    }
+    return [...m.entries()].sort(
+      (a, b) => b[1].length - a[1].length || (b[1][0]?.composite ?? 0) - (a[1][0]?.composite ?? 0) || a[0].localeCompare(b[0]),
+    );
+  }, [rows]);
 
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
@@ -279,7 +312,7 @@ export function RankingView() {
         </div>
       ) : (
         <>
-          {/* lens switcher */}
+          {/* lens switcher + scope toggle */}
           <div className="mb-5 flex flex-wrap items-center gap-2">
             <span className="text-[10.5px] uppercase tracking-wide text-muted2">{t("Lens", "视角")}</span>
             <div className="flex flex-wrap gap-1.5">
@@ -293,46 +326,96 @@ export function RankingView() {
                 </button>
               ))}
             </div>
-            {/* active weights */}
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              {DIMS.map((d) => (
-                <span key={d.key} className="flex items-center gap-1 text-[10.5px] text-muted2">
-                  <span className="h-2 w-2 rounded-full" style={{ background: d.color }} />
-                  {lang === "zh" ? d.zh : d.en} <span className="font-mono text-text">{Math.round(lens.w[d.key] * 100)}%</span>
-                </span>
+            {/* overall vs by-sector */}
+            <div className="ml-auto flex rounded-full border border-line p-0.5">
+              {(["overall", "sector"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`rounded-full px-3 py-1 text-[12px] transition-colors ${mode === m ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}
+                >
+                  {m === "overall" ? t("Overall", "总榜") : t("By sector", "分板块")}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* podium */}
-          {podium.length >= 2 && (
-            <div className="mb-6 flex items-end gap-3">
-              {podium.length === 3 && <PodiumCard r={podium[1]} rank={2} onOpen={openDetail} t={t} />}
-              <PodiumCard r={podium[0]} rank={1} onOpen={openDetail} t={t} />
-              {podium[2] && <PodiumCard r={podium[2]} rank={3} onOpen={openDetail} t={t} />}
-              {podium.length === 2 && <div className="flex-1" />}
-            </div>
-          )}
-
-          {/* full ranked list */}
-          <div className="space-y-2">
-            {(rest.length ? rest : []).map((r, i) => (
-              <RankRow
-                key={r.ticker}
-                r={r}
-                rank={i + 4}
-                open={open === r.ticker}
-                onToggle={() => setOpen(open === r.ticker ? null : r.ticker)}
-                onOpen={openDetail}
-                lang={lang}
-                t={t}
-                setRef={(el) => {
-                  if (el) refs.current.set(r.ticker, el);
-                  else refs.current.delete(r.ticker);
-                }}
-              />
+          {/* active weights */}
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            {DIMS.map((d) => (
+              <span key={d.key} className="flex items-center gap-1 text-[10.5px] text-muted2">
+                <span className="h-2 w-2 rounded-full" style={{ background: d.color }} />
+                {lang === "zh" ? d.zh : d.en} <span className="font-mono text-text">{Math.round(lens.w[d.key] * 100)}%</span>
+              </span>
             ))}
           </div>
+
+          {mode === "overall" ? (
+            <>
+              {/* podium */}
+              {podium.length >= 2 && (
+                <div className="mb-6 flex items-end gap-3">
+                  {podium.length === 3 && <PodiumCard r={podium[1]} rank={2} onOpen={openDetail} t={t} />}
+                  <PodiumCard r={podium[0]} rank={1} onOpen={openDetail} t={t} />
+                  {podium[2] && <PodiumCard r={podium[2]} rank={3} onOpen={openDetail} t={t} />}
+                  {podium.length === 2 && <div className="flex-1" />}
+                </div>
+              )}
+
+              {/* full ranked list */}
+              <div className="space-y-2">
+                {rest.map((r, i) => (
+                  <RankRow
+                    key={r.ticker}
+                    r={r}
+                    rank={i + 4}
+                    open={open === r.ticker}
+                    onToggle={() => setOpen(open === r.ticker ? null : r.ticker)}
+                    onOpen={openDetail}
+                    lang={lang}
+                    t={t}
+                    setRef={(el) => {
+                      if (el) refs.current.set(r.ticker, el);
+                      else refs.current.delete(r.ticker);
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            /* per-sector leaderboards */
+            <div className="space-y-7">
+              {bySector.map(([sec, secRows]) => {
+                const hue = sec === "__none" ? "#8aa0b2" : sectorHue(sec);
+                return (
+                  <section key={sec} className="rank-rise">
+                    <div className="mb-3 flex items-center gap-2.5 border-b border-line pb-2">
+                      <span className="h-3.5 w-1 flex-none rounded-full" style={{ background: hue, boxShadow: `0 0 8px ${hue}88` }} />
+                      <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: hue }}>
+                        {sec === "__none" ? t("Unclassified", "未分类") : sectorLabel(sec, lang)}
+                      </h3>
+                      <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{secRows.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {secRows.map((r, i) => (
+                        <RankRow
+                          key={r.ticker}
+                          r={r}
+                          rank={i + 1}
+                          open={open === r.ticker}
+                          onToggle={() => setOpen(open === r.ticker ? null : r.ticker)}
+                          onOpen={openDetail}
+                          lang={lang}
+                          t={t}
+                          setRef={() => {}}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
 
           <p className="mt-5 text-[11px] leading-relaxed text-muted2">
             {t(
