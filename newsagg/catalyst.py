@@ -417,6 +417,7 @@ def fetch_missing(
     sectors: dict[str, dict] | None = None,
     out_path: Path | None = None,
     refetch: set[str] | None = None,
+    base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
     try:
         from openai import OpenAI
@@ -465,7 +466,7 @@ def fetch_missing(
                 # dashboard fills in live.
                 if out_path is not None:
                     out_path.parent.mkdir(parents=True, exist_ok=True)
-                    out_path.write_text(json.dumps({**have, **out}))
+                    out_path.write_text(json.dumps({**(base if base is not None else have), **out}))
             if i % 5 == 0 or i == len(missing):
                 logger.info("  %d/%d… (%d with catalysts so far)", i, len(missing), sum(1 for v in out.values() if v.get("catalysts")))
     return out
@@ -486,7 +487,8 @@ def main() -> int:
 
     settings = load_settings(args.config)
     out_path = settings.output_dir / CATALYST_FILE
-    have = {} if args.refresh else _load(out_path)
+    existing = _load(out_path)  # everything currently cached — NEVER dropped
+    have = dict(existing)
 
     if args.tickers:
         names = {t.strip().upper(): "" for t in args.tickers.split(",") if t.strip()}
@@ -514,6 +516,12 @@ def main() -> int:
 
     today = date.today()
 
+    # --refresh re-fetches the REQUESTED names but PRESERVES every other cached
+    # map (drop only the requested ones from `have` so they count as missing).
+    if args.refresh:
+        for t in names:
+            have.pop(t, None)
+
     # Staleness: cached names old enough (or whose dated catalysts have all
     # fired) are eligible to be re-fetched so new market catalysts get picked up.
     stale: set[str] = set()
@@ -531,8 +539,8 @@ def main() -> int:
 
     sectors = _load(settings.output_dir / "sectors.json")
 
-    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors, out_path=out_path, refetch=stale)
-    merged = {**have, **fetched}
+    fetched = fetch_missing(names, have, today, workers=args.workers, model=args.model, sectors=sectors, out_path=out_path, refetch=stale, base=existing)
+    merged = {**existing, **fetched}  # untouched maps survive; refetched overwrite
     if not merged:
         logger.warning("no catalyst data resolved (no key / API error); keeping existing file")
         return 1
