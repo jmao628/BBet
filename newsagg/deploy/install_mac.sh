@@ -42,6 +42,22 @@ OPENAI_LINES=""
 if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   OPENAI_LINES="    <key>OPENAI_API_KEY</key><string>$OPENAI_API_KEY</string>"
 fi
+# CRITICAL for a custom gateway: launchd jobs don't inherit your shell, so the
+# base URL must be baked in too — otherwise the SDK hits api.openai.com and your
+# gateway key 401s. Bake OPENAI_BASE_URL (and OPENAI_MODEL) if set at install.
+if [[ -n "${OPENAI_BASE_URL:-}" ]]; then
+  OPENAI_LINES="$OPENAI_LINES
+    <key>OPENAI_BASE_URL</key><string>$OPENAI_BASE_URL</string>"
+fi
+if [[ -n "${OPENAI_MODEL:-}" ]]; then
+  OPENAI_LINES="$OPENAI_LINES
+    <key>OPENAI_MODEL</key><string>$OPENAI_MODEL</string>"
+fi
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "WARNING: OPENAI_API_KEY not set — the catalyst/supplychain jobs will be skipped. export it, then re-run."
+elif [[ -z "${OPENAI_BASE_URL:-}" ]]; then
+  echo "WARNING: OPENAI_BASE_URL not set — if you use a custom OpenAI gateway, export it before installing or the jobs will 401 against api.openai.com."
+fi
 
 # Daily catalyst budget: CAT_LIMIT = 0 means NO cap — re-analyse every new focus
 # name and every stale one (older than CAT_MAX_AGE days, or with a catalyst that
