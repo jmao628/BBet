@@ -53,7 +53,18 @@ export function usePoller() {
       }
       try {
         const tres = await fetch(`${TECH_URL}?t=${Date.now()}`);
-        if (alive) setTechnical(tres.ok ? ((await tres.json()) as TechnicalData) : null);
+        if (tres.ok) {
+          const tjson = (await tres.json()) as TechnicalData;
+          if (alive) {
+            setTechnical(tjson);
+            // The leaderboard ranks by today's move — which lives in THIS file,
+            // not the SA snapshot. If prices are stale (yfinance/VPN failing),
+            // flag it, or the "LIVE" badge misleads while rankings sit frozen.
+            if (tjson.generated_at && Date.now() - new Date(tjson.generated_at).getTime() > STALE_MS) {
+              setStatus("stale");
+            }
+          }
+        } else if (alive) setTechnical(null);
       } catch {
         /* ignore */
       }

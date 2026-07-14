@@ -267,12 +267,27 @@ export function OverviewView() {
               <span className="pill-sheen font-mono text-[13px] font-bold">{movers.length}</span>
             </span>
           </h1>
-          <p className="caption-scan relative mt-1.5 flex w-fit items-center gap-2 text-[11.5px] text-muted2">
+          <p className="caption-scan relative mt-1.5 flex w-fit flex-wrap items-center gap-2 text-[11.5px] text-muted2">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-70" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
             </span>
-            {t("live · what's firing per sector · ranked by today's move", "实时 · 每板块今日在点火的票 · 按当日涨跌排名")}
+            {t("what's firing per sector · ranked by today's move", "每板块今日在点火的票 · 按当日涨跌排名")}
+            {(() => {
+              const g = technical?.generated_at ? new Date(technical.generated_at) : null;
+              if (!g) return null;
+              const stale = Date.now() - g.getTime() > 30 * 3600 * 1000; // prices should refresh daily
+              const d = g.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+              return (
+                <span
+                  className="rounded-full border px-2 py-[1px] font-mono text-[10px]"
+                  style={stale ? { color: "#f2a73c", borderColor: "#f2a73c66", background: "#f2a73c14" } : { color: "#6f7f8e", borderColor: "var(--line,#22303c)" }}
+                  title={stale ? t("Prices haven't refreshed — the yfinance job needs the VPN/proxy.", "价格未刷新 —— yfinance 任务需要 VPN/代理。") : ""}
+                >
+                  {stale ? t(`⚠ prices as of ${d} (stale)`, `⚠ 价格截至 ${d}(已过期)`) : t(`prices ${d}`, `价格 ${d}`)}
+                </span>
+              );
+            })()}
           </p>
         </div>
 
