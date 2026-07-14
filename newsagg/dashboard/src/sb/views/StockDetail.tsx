@@ -355,21 +355,27 @@ function ConvBreakdown({ conv, lang, t }: { conv: ConvictionTicker; lang: Lang; 
           <div className="text-[9px] uppercase tracking-wide text-muted2">{t("conf", "置信")} {Math.round(conv.confidence * 100)}%</div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+      <div className="space-y-2.5">
         {CONV_LAYERS.map((l) => {
           const d = conv.layers[l.key];
           return (
-            <div key={l.key} className="min-w-0">
-              <div className="mb-1 flex items-baseline justify-between">
-                <span className="text-[10px] uppercase tracking-wide text-muted2">{lang === "zh" ? l.zh : l.en}</span>
-                <span className="font-mono text-[10.5px] font-semibold" style={{ color: l.color }}>{d.score}<span className="text-muted2">/{d.max}</span></span>
+            <div key={l.key} className="flex gap-3 border-t border-line/60 pt-2.5 first:border-t-0 first:pt-0">
+              <div className="w-[118px] flex-none">
+                <div className="mb-1 flex items-baseline justify-between">
+                  <span className="text-[10px] uppercase tracking-wide text-muted2">{lang === "zh" ? l.zh : l.en}</span>
+                  <span className="font-mono text-[10.5px] font-semibold" style={{ color: l.color }}>{d.score}<span className="text-muted2">/{d.max}</span></span>
+                </div>
+                <div className="flex gap-1">
+                  {Array.from({ length: d.max }).map((_, i) => (
+                    <span key={i} className="h-1.5 flex-1 rounded-full" style={{ background: i < d.score ? l.color : "rgba(255,255,255,0.07)" }} />
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-1">
-                {Array.from({ length: d.max }).map((_, i) => (
-                  <span key={i} className="h-1.5 flex-1 rounded-full" style={{ background: i < d.score ? l.color : "rgba(255,255,255,0.07)" }} />
-                ))}
+              <div className="min-w-0 flex-1">
+                {d.evidence
+                  ? <p className="text-[11px] leading-relaxed text-muted">“{d.evidence}”</p>
+                  : <p className="text-[10.5px] italic text-muted2">{lang === "zh" ? "无可引用原话" : "no verbatim quote"}</p>}
               </div>
-              {d.evidence && <p className="mt-1 line-clamp-2 text-[10.5px] leading-snug text-muted">“{d.evidence}”</p>}
             </div>
           );
         })}

@@ -73,34 +73,44 @@ function LayerMeter({
   const rung = rungs[Math.min(score, rungs.length - 1)] ?? "";
   const conf = data?.confidence ?? 0;
   return (
-    <div className="min-w-0">
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-muted2">{lang === "zh" ? layer.zh : layer.en}</span>
-        <span className="font-mono text-[10.5px] font-semibold" style={{ color: layer.color }}>
-          {score}
-          <span className="text-muted2">/{max}</span>
-        </span>
+    // A full-width row: compact score block on the left, the verbatim transcript
+    // quote (the "receipt") given room to read on the right.
+    <div className="flex gap-3 border-t border-line/60 pt-2.5 first:border-t-0 first:pt-0">
+      <div className="w-[132px] flex-none">
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-wide text-muted2">{lang === "zh" ? layer.zh : layer.en}</span>
+          <span className="font-mono text-[10.5px] font-semibold" style={{ color: layer.color }}>
+            {score}
+            <span className="text-muted2">/{max}</span>
+          </span>
+        </div>
+        <div className="flex gap-1">
+          {Array.from({ length: max }).map((_, i) => (
+            <span
+              key={i}
+              className="h-1.5 flex-1 rounded-full transition-colors"
+              style={{
+                background: i < score ? layer.color : "rgba(255,255,255,0.07)",
+                boxShadow: i < score ? `0 0 6px ${layer.color}66` : undefined,
+              }}
+            />
+          ))}
+        </div>
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="truncate text-[10.5px]" style={{ color: score > 0 ? "#c7d2dc" : "#5a6a7c" }}>
+            {rung}
+          </span>
+          {/* per-layer confidence — a subtle dot, brighter = better-sourced grade */}
+          {data && <span className="h-1 w-1 flex-none rounded-full bg-signal" style={{ opacity: 0.25 + conf * 0.75 }} title={`confidence ${(conf * 100).toFixed(0)}%`} />}
+        </div>
       </div>
-      <div className="flex gap-1">
-        {Array.from({ length: max }).map((_, i) => (
-          <span
-            key={i}
-            className="h-1.5 flex-1 rounded-full transition-colors"
-            style={{
-              background: i < score ? layer.color : "rgba(255,255,255,0.07)",
-              boxShadow: i < score ? `0 0 6px ${layer.color}66` : undefined,
-            }}
-          />
-        ))}
+      <div className="min-w-0 flex-1">
+        {data?.evidence ? (
+          <p className="text-[11.5px] leading-relaxed text-muted">“{data.evidence}”</p>
+        ) : (
+          <p className="text-[11px] italic text-muted2">{lang === "zh" ? "无可引用原话" : "no verbatim quote"}</p>
+        )}
       </div>
-      <div className="mt-1 flex items-center gap-1.5">
-        <span className="truncate text-[10.5px]" style={{ color: score > 0 ? "#c7d2dc" : "#5a6a7c" }}>
-          {rung}
-        </span>
-        {/* per-layer confidence — a subtle dot, brighter = better-sourced grade */}
-        {data && <span className="h-1 w-1 flex-none rounded-full bg-signal" style={{ opacity: 0.25 + conf * 0.75 }} title={`confidence ${(conf * 100).toFixed(0)}%`} />}
-      </div>
-      {data?.evidence && <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted">“{data.evidence}”</p>}
     </div>
   );
 }
@@ -177,8 +187,8 @@ function ConvCard({ r, idx, lang, onOpen, t }: { r: ConvictionRow; idx: number; 
         </div>
       ) : (
         <>
-          {/* four layers */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {/* four layers — each a full-width row so the verbatim quote reads */}
+          <div className="space-y-2.5">
             {LAYERS.map((l) => (
               <LayerMeter key={l.key} layer={l} data={conv?.layers[l.key]} lang={lang} />
             ))}

@@ -97,14 +97,20 @@ def _prompt(ticker: str, name: str, sector: str, anchor_ticker: str, anchor_name
         )
     today = date.today().isoformat()
     return (
-        f"You are a buy-side analyst reading MANAGEMENT TONE. Today is {today}. Using web search, find the "
-        f"MOST RECENT management commentary for the US-listed company {who}{ctx} — its latest quarterly "
-        "earnings-call transcript (prepared remarks AND Q&A), or, if no transcript, its latest 10-Q/10-K "
-        "MD&A, guidance press release, or investor-day remarks. Prefer PRIMARY sources (company IR, the "
-        f"transcript, SEC filings)." + anchor_line + "\n\n"
-        "Read how much the tone actually BACKS the bull thesis, and grade FOUR layers from the source text. "
-        "Grade ONLY from what management actually said/did — quote or tightly paraphrase real language. Be "
-        "conservative: when the text doesn't clearly support a higher grade, grade LOWER.\n\n"
+        f"You are a buy-side analyst reading MANAGEMENT TONE line by line. Today is {today}. Using web search, "
+        f"find and READ the FULL TEXT of the MOST RECENT quarterly earnings-call TRANSCRIPT for the US-listed "
+        f"company {who}{ctx} — BOTH the prepared remarks AND the analyst Q&A. Good transcript sources include "
+        "Motley Fool, Seeking Alpha, Roic.ai, Quartr, TIKR, the company's own IR site, and the 8-K exhibit on "
+        "SEC EDGAR. If truly no transcript exists, fall back to the latest 10-Q/10-K MD&A or guidance press "
+        "release. Read the actual words management used — do not judge from a headline or a summary article."
+        + anchor_line + "\n\n"
+        "Then grade FOUR layers, and for EACH layer support the grade with a DIRECT VERBATIM QUOTE — the exact "
+        "words from the transcript, copied character-for-character inside double quotes — prefixed with WHO said "
+        "it and WHERE, e.g. `CFO, Q&A: \"...\"` or `CEO, prepared remarks: \"...\"`. Quote the single most "
+        "telling line (or two) for that layer. Do NOT paraphrase, summarize, or clean up the wording; if you "
+        "cannot find a real verbatim line to quote for a layer, lower that layer's confidence rather than "
+        "inventing one. Grade ONLY from what management actually said/did; when the words don't clearly support "
+        "a higher grade, grade LOWER.\n\n"
         "LAYERS (integers only):\n"
         "- L1 Tone baseline 0-2 — the DIRECTION of guidance/outlook vs the prior quarter: "
         "0 = a cut / downgrade / lowered outlook · 1 = flat / reiterated / unchanged · 2 = a clear raise / upgrade.\n"
@@ -124,17 +130,23 @@ def _prompt(ticker: str, name: str, sector: str, anchor_ticker: str, anchor_name
         '"anchor_name":"",'
         '"call_ref":"e.g. Q2 FY2026 earnings call",'
         '"call_date":"YYYY-MM-DD or null",'
-        '"source_url":"https://... (the actual transcript/filing/Form 4)",'
+        '"source_url":"https://... (the actual transcript page you read)",'
         '"summary":"3-4 sentences: the overall read on management tone and whether it backs the thesis",'
-        '"L1":{"score":0,"evidence":"short quote/paraphrase from the source","confidence":0.0},'
+        '"L1":{"score":0,"evidence":"speaker, segment: \\"exact verbatim quote from the transcript\\"","confidence":0.0},'
         '"L2":{"score":0,"evidence":"...","confidence":0.0},'
         '"L3":{"score":0,"evidence":"...","confidence":0.0},'
         '"L4":{"score":0,"evidence":"...","confidence":0.0}}\n\n'
         "Rules:\n"
-        "- source_url MUST be a real, specific page (the transcript / filing / Form 4). NEVER invent URLs or quotes.\n"
-        "- confidence 0.0-1.0 per layer = how well the source text pins that grade (low if you had to infer).\n"
-        "- If you cannot find ANY citable recent call/filing for the company OR its anchor, set every score to 0, "
-        "every confidence to 0, source_url to '' and say so in summary. Do NOT fabricate a call."
+        "- Each layer's `evidence` MUST contain a VERBATIM quote copied from the transcript (exact wording, in "
+        "double quotes), attributed to the speaker. This is the whole point — the quote is the receipt for the grade.\n"
+        "- source_url MUST be the real transcript/filing page you actually read. NEVER invent URLs or quotes; a "
+        "fabricated quote is worse than a low grade.\n"
+        "- confidence 0.0-1.0 per layer = how directly the quoted words pin that grade (low if you had to infer "
+        "beyond what was literally said).\n"
+        "- L4: the quote may instead cite a specific Form 4 / buyback disclosure (e.g. 'CEO sold 40,000 sh on "
+        "2026-05-03 per Form 4', '$300M repurchased in Q1 per the release') — still a concrete, sourced fact.\n"
+        "- If you cannot find ANY citable recent transcript/filing for the company OR its anchor, set every score "
+        "to 0, every confidence to 0, source_url to '' and say so in summary. Do NOT fabricate a call."
     )
 
 
@@ -164,7 +176,9 @@ def _clean(parsed: dict, ticker: str, anchor_ticker: str, anchor_name: str, mode
         layers[k] = {
             "score": score,
             "max": hi,
-            "evidence": (raw.get("evidence") or "").strip()[:400],
+            # Roomy — the evidence is a verbatim transcript quote (with speaker),
+            # so it must not be clipped mid-sentence.
+            "evidence": (raw.get("evidence") or "").strip()[:700],
             "confidence": conf,
         }
     total = sum(layers[k]["score"] for k in _LAYER_MAX)  # 0-10
@@ -189,7 +203,7 @@ def _clean(parsed: dict, ticker: str, anchor_ticker: str, anchor_name: str, mode
         "call_ref": (parsed.get("call_ref") or "").strip()[:120],
         "call_date": (str(parsed.get("call_date"))[:10] if parsed.get("call_date") else None),
         "source_url": url,
-        "summary": (parsed.get("summary") or "").strip()[:700],
+        "summary": (parsed.get("summary") or "").strip()[:900],
         "model": model,
         "ok": bool(url),  # a real citation → trustworthy; else low-confidence placeholder
         "generated_at": today.isoformat(),
