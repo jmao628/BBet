@@ -237,17 +237,28 @@ export function ConvictionView() {
   const rows = useMemo(() => buildConviction(shortlist, conviction), [shortlist, conviction]);
 
   const [filter, setFilter] = useState<"all" | "read" | "advance">("all");
-  const shown = useMemo(() => {
-    if (filter === "read") return rows.filter((r) => r.status === "advance" || r.status === "watch");
-    if (filter === "advance") return rows.filter((r) => r.status === "advance");
-    return rows;
-  }, [rows, filter]);
+  const [sector, setSector] = useState<string | null>(null);
 
-  const nRead = rows.filter((r) => r.status === "advance" || r.status === "watch").length;
-  const nAdvance = rows.filter((r) => r.status === "advance").length;
+  // Sector chips — counts over the whole survivor set (independent of the
+  // status filter, so switching status never hides a sector you're browsing).
+  const sectorCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) if (r.sector) m.set(r.sector, (m.get(r.sector) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rows]);
+
+  const bySector = useMemo(() => (sector ? rows.filter((r) => r.sector === sector) : rows), [rows, sector]);
+  const shown = useMemo(() => {
+    if (filter === "read") return bySector.filter((r) => r.status === "advance" || r.status === "watch");
+    if (filter === "advance") return bySector.filter((r) => r.status === "advance");
+    return bySector;
+  }, [bySector, filter]);
+
+  const nRead = bySector.filter((r) => r.status === "advance" || r.status === "watch").length;
+  const nAdvance = bySector.filter((r) => r.status === "advance").length;
 
   const FILTERS: { key: "all" | "read" | "advance"; label: string; n: number }[] = [
-    { key: "all", label: t("All survivors", "全部入围"), n: rows.length },
+    { key: "all", label: t("All survivors", "全部入围"), n: bySector.length },
     { key: "read", label: t("Read", "已读"), n: nRead },
     { key: "advance", label: t(`Backs thesis · ≥ ${CONVICTION_BAR}`, `撑起论点 · ≥ ${CONVICTION_BAR}`), n: nAdvance },
   ];
@@ -269,6 +280,27 @@ export function ConvictionView() {
         </div>
       ) : (
         <>
+          {/* sector filter */}
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+            <button
+              onClick={() => setSector(null)}
+              className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+            >
+              {t("All", "全部")} {rows.length}
+            </button>
+            {sectorCounts.slice(0, 9).map(([sec, n]) => (
+              <button
+                key={sec}
+                onClick={() => setSector(sector === sec ? null : sec)}
+                className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+              >
+                {sectorLabel(sec, lang)} {n}
+              </button>
+            ))}
+          </div>
+
+          {/* status filter */}
           <div className="mb-4 flex flex-wrap items-center gap-1.5">
             {FILTERS.map((f) => (
               <button
