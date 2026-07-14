@@ -442,6 +442,13 @@ def fetch_missing(
 
     sectors = sectors or {}
     client = OpenAI()
+    base = str(getattr(client, "base_url", "") or "")
+    logger.info("OpenAI endpoint: %s", base)
+    if "api.openai.com" in base:
+        logger.warning(
+            "hitting the DEFAULT api.openai.com — a custom-gateway key will 401 here. "
+            "Set OPENAI_BASE_URL (and re-run install_mac.sh so the launchd job has it baked in)."
+        )
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {
