@@ -311,6 +311,13 @@ def _clean(parsed: dict, today: date) -> list[dict]:
         if not url.startswith("http"):
             continue  # no citation → drop (guards against hallucinated events)
         tpmn = _tpmn(c, today)
+        # Store only forward-looking dated catalysts. An A-class event already in
+        # the past at fetch time is spent — and if we kept it, the "a catalyst
+        # fired" staleness test would re-trigger every run and never converge.
+        # (Events that pass BETWEEN fetches are handled by the live decay + the
+        # re-analysis below.)
+        if tpmn["cls"] == "A" and tpmn["days"] is not None and tpmn["days"] < 0:
+            continue
         wd = c.get("window_days")
         try:
             wd = int(wd) if wd is not None else None
@@ -376,8 +383,10 @@ def _is_stale(entry: dict, today: date, max_age_days: float) -> bool:
     """A cached ticker worth re-fetching. Two triggers:
     1. the record is older than ``max_age_days`` (fresh market catalysts may
        have appeared since), or
-    2. every dated catalyst it holds has already fired — its forward-looking
-       view is spent, so re-scan for what's next.
+    2. ANY dated catalyst it holds has already fired. A fired event (an earnings
+       print, an approval, an up/down-stream read-through) is exactly when NEW
+       catalysts appear — fresh guidance, estimate revisions, follow-on deals —
+       so the whole ticker must be re-analysed, not just when the LAST one fires.
     """
     ga = entry.get("generated_at")
     if not ga:
@@ -388,13 +397,14 @@ def _is_stale(entry: dict, today: date, max_age_days: float) -> bool:
         return True  # unparseable stamp — refresh it
     if age >= max_age_days:
         return True
-    dated = [c.get("event_date") for c in (entry.get("catalysts") or []) if c.get("cls") == "A" and c.get("event_date")]
-    if dated:
+    for c in entry.get("catalysts") or []:
+        if c.get("cls") != "A" or not c.get("event_date"):
+            continue
         try:
-            if max(date.fromisoformat(d) for d in dated) < today:
-                return True
+            if date.fromisoformat(c["event_date"]) < today:
+                return True  # a dated catalyst has fired → re-scan for what's next
         except ValueError:
-            pass
+            continue
     return False
 
 
