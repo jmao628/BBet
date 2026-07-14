@@ -177,7 +177,13 @@ function ConvCard({ r, idx, lang, onOpen, t }: { r: ConvictionRow; idx: number; 
         <button onClick={() => onOpen(r.ticker)} className="min-w-0 flex-1 text-left">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-disp text-[16px] font-bold tracking-tight text-text hover:text-signal">{r.ticker}</span>
-            <span className="h-2 w-2 rounded-full" style={{ background: tierCol }} title={t(`Shortlist Tier ${r.tier}`, `登顶榜第 ${r.tier} 级`)} />
+            <span
+              className="rounded px-1.5 py-[1px] font-mono text-[9.5px] font-bold uppercase tracking-wide"
+              style={{ color: "#0b0f14", background: tierCol, boxShadow: `0 0 8px ${tierCol}66` }}
+              title={t(`Shortlist Tier ${r.tier}`, `登顶榜第 ${r.tier} 级`)}
+            >
+              {t(`Tier ${r.tier}`, `第${r.tier}名`)}
+            </span>
             {conv && conv.ok && <SourceBadge conv={conv} lang={lang} t={t} />}
           </div>
           <div className="mt-0.5 truncate text-[10.5px] text-muted2">
