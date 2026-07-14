@@ -8,6 +8,7 @@ import {
   capLabel,
   sectorLabel,
   CONVICTION_BAR,
+  CONV_TIER2_PER_SECTOR,
   type ConvictionRow,
 } from "../pipeline";
 import { ViewHead } from "../ui";
@@ -279,8 +280,8 @@ export function ConvictionView() {
         eyebrow={t("Stage 5 · Conviction", "Stage 5 · 管理层语气")}
         title={t("Management Conviction · Four Tones", "管理层 Conviction · 四层语气")}
         desc={t(
-          "An LLM reads the latest earnings call / filing — the ticker's own, or an upstream anchor's read through — and scores four tone layers out of 10 (L1 tone 0-2 · L2 directness 0-3 · L3 hard-vs-soft 0-3 · L4 walk-the-talk 0-2), each with source-text evidence + confidence. Scoped to the Shortlist survivors (Tier 1 + 2).",
-          "由 LLM 阅读最新电话会/公告——用自身,或用上游锚公司读出——按四层语气打分,满分 10（L1 语气 0-2 · L2 直白度 0-3 · L3 硬软 0-3 · L4 言行 0-2），每层附原文证据 + 置信度。范围锁定登顶榜入围者（第一名 + 第二名）。",
+          `An LLM reads the latest earnings-call transcript — the ticker's own, or an upstream anchor's read through — word by word and scores four tone layers out of 10 (L1 tone 0-2 · L2 directness 0-3 · L3 hard-vs-soft 0-3 · L4 walk-the-talk 0-2), each backed by a verbatim quote + confidence. Read scope: per sector, every Tier-1 name + the top ${CONV_TIER2_PER_SECTOR} Tier-2 by strength.`,
+          `由 LLM 逐字阅读最新电话会纪要——用自身,或用上游锚公司读出——按四层语气打分,满分 10（L1 语气 0-2 · L2 直白度 0-3 · L3 硬软 0-3 · L4 言行 0-2），每层附逐字原话 + 置信度。阅读范围:每个板块的全部第一名 + 第二名按强度前 ${CONV_TIER2_PER_SECTOR} 名。`,
         )}
       />
 

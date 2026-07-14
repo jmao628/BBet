@@ -1,6 +1,12 @@
-"""Stage 5 — Management Conviction (four-layer tone read), per Shortlist name.
+"""Stage 5 — Management Conviction (four-layer tone read).
 
-For each surviving name we ask an LLM **with web search** to READ the most recent
+Read scope (matches the dashboard's ConvictionView): for EACH sector, every
+Tier-1 shortlist name plus the top ``TIER2_PER_SECTOR`` Tier-2 names by composite
+strength — a tone read is expensive, so it's spent on each sector's real leaders,
+not the whole ~280-name Focus tail. ``_read_targets`` is a port of the frontend's
+buildFocus + buildShortlist so the names read here are exactly the ones shown.
+
+For each selected name we ask an LLM **with web search** to READ the most recent
 management commentary — the ticker's own earnings-call transcript / 10-Q-K / press
 release, or, if the company has no useful recent call of its own (pre-revenue, no
 transcript, freshly-IPO'd), an UPSTREAM ANCHOR's call read through to it — and to
@@ -50,7 +56,11 @@ from newsagg.catalyst import (
     _eco_neighbors,
     _extract_json,
     _load,
-    focus_ranked,
+    _seed_info,
+    _timing,
+    _P_FLOOR,
+    _T_FLOOR,
+    _N_FLOOR,
 )
 from newsagg.config import load_settings
 
@@ -61,6 +71,11 @@ MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
 # Per-layer caps (the rubric's ranges). Total = L1+L2+L3+L4 ∈ [0,10].
 _LAYER_MAX = {"L1": 2, "L2": 3, "L3": 3, "L4": 2}
+
+# Read universe (matches the dashboard's ConvictionView): for EACH sector, every
+# Tier-1 shortlist name plus the top N Tier-2 names by composite strength.
+SHORTLIST_CAT_BAR = 6  # catalyst score must EXCEED this to count (mirror pipeline.ts)
+TIER2_PER_SECTOR = 15
 
 
 def _anchor_for(ticker: str, eco: dict[str, list[dict]], caps: dict, names: dict[str, str]) -> tuple[str, str]:
@@ -305,22 +320,128 @@ def fetch_missing(
     return out
 
 
-def _ordered_names(output_dir: Path) -> dict[str, str]:
-    """Shortlist-priority order: Focus names, strongest first, biasing names whose
-    catalyst also fires (so the daily budget reads the Tier-1/Tier-2 survivors —
-    exactly where a management-tone read earns its keep — before the tail)."""
-    ranked = focus_ranked(output_dir)  # [(ticker, company, focus_score)] focus-sorted
-    if not ranked:
-        return {}
+# ── Shortlist tiering (port of the dashboard's buildFocus + buildShortlist) ───
+# Kept deliberately close to pipeline.ts so the names this job READS are exactly
+# the ones the ConvictionView SHOWS. Small ranking drift (we skip the +0.5
+# screen/advancing bonus, which needs heat state) can't change a name's TIER —
+# tier is decided by core (buy×eco) and catalyst>6, both computed identically.
+
+
+def _cat_live_score10(c: dict, today: date) -> float:
+    """One catalyst's live 0-10 (timing recomputed for today), mirroring
+    pipeline.ts catLiveScore10."""
+    tp = c.get("tpmn") or {}
+    ed = c.get("event_date")
+    days = None
+    if ed:
+        try:
+            days = (date.fromisoformat(str(ed)[:10]) - today).days
+        except ValueError:
+            days = tp.get("days")
+    else:
+        days = tp.get("days")
+    T = _timing(days)
+    P = float(tp.get("P") or 0)
+    M = float(tp.get("M") or 0)
+    N = float(tp.get("N") or 0)
+    strength = (M / 3) * (_P_FLOOR + (1 - _P_FLOOR) * (P / 3)) * (_T_FLOOR + (1 - _T_FLOOR) * (T / 25)) * (_N_FLOOR + (1 - _N_FLOOR) * (N / 2))
+    return round(strength * 100) / 10
+
+
+def _cat_ticker_score(entry: dict | None, today: date) -> float:
+    """A ticker's depth-weighted catalyst 0-10 (mirror catTickerScore): -1 if not
+    fetched, 0 if fetched with no catalysts."""
+    if not entry:
+        return -1.0
+    cats = entry.get("catalysts") or []
+    if not cats:
+        return 0.0
+    scores = sorted((_cat_live_score10(c, today) for c in cats), reverse=True)
+    best = scores[0]
+    depth = sum((scores[i] / 10) * (0.5 ** (i - 1)) for i in range(1, len(scores)))
+    factor = min(depth * 0.5, 1.0)
+    return round((best + (10 - best) * factor) * 10) / 10
+
+
+def _shortlist_rows(output_dir: Path) -> list[dict]:
+    """Every Focus name with its shortlist tier, sector, and composite strength."""
+    seeds = _seed_info(output_dir)  # {ticker: {company, rated, has_thesis}}
+    universe = set(seeds)
+    tech = _load(output_dir / "technical_latest.json")
+    ticks = tech.get("tickers") or {}
+    no_data = set(tech.get("no_data") or [])
+    caps = _load(output_dir / "marketcaps.json")
+    eco = _eco_neighbors(output_dir)
+    sectors = _load(output_dir / "sectors.json")
     cats = _load(output_dir / "catalyst.json")
-    scored: list[tuple[float, str, str]] = []
-    for t, c, fs in ranked:
-        cat = cats.get(t) or {}
-        cat_score = float(cat.get("score") or 0.0)
-        priority = 0.5 * fs + 0.5 * cat_score  # loose mirror of the shortlist composite
-        scored.append((priority, t, c))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return {t: c for _, t, c in scored}
+    today = date.today()
+
+    def is_anchor(tk: str) -> bool:
+        c = caps.get(tk)
+        return isinstance(c, (int, float)) and c >= BYPASS_CAP
+
+    rows: list[dict] = []
+    for t, s in seeds.items():
+        if not s.get("rated") or t in no_data:
+            continue
+        tt = ticks.get(t) or {}
+        strong = ((tt.get("gauge") or {}).get("summary")) == "strong_buy"
+        streak = int(tt.get("buy_streak") or 0)
+        attn = ((tt.get("attention") or {}).get("score")) or 0
+        neigh = [n for n in eco.get(t, []) if n["ticker"] in universe and n["ticker"] != t]
+        links = len(neigh)
+        anchors = sum(1 for n in neigh if is_anchor(n["ticker"]))
+        eco_w = sum((6 if is_anchor(n["ticker"]) else 2) * (n["importance"] / 2) for n in neigh)
+        g_buy = strong or streak >= 5
+        g_eco = anchors >= 1 or links >= 3
+        # Focus membership (inclusive; a pure-thesis-only name with no other signal
+        # would be Tier 3 anyway and we never read Tier 3, so skipping it is safe).
+        if not (g_buy or g_eco or links > 0 or streak >= 3):
+            continue
+        core = g_buy and g_eco
+        buy_part = (3.0 if strong else 1.6 if g_buy else 0.0) + min(streak, 5) / 5 * 2.0
+        eco_part = min(eco_w / 16.0, 1.0) * 4.5
+        focus_score = round((buy_part + eco_part) * 10) / 10
+        cscore = _cat_ticker_score(cats.get(t), today)
+        cat_hot = cscore > SHORTLIST_CAT_BAR
+        conditions = 1 + int(core) + int(cat_hot)
+        tier = 4 - conditions  # 3→1, 2→2, 1→3
+        cat01 = cscore / 10 if cscore >= 0 else 0.0
+        composite = round((0.45 * cat01 + 0.45 * focus_score / 10 + 0.10 * attn / 100) * 1000) / 10
+        rows.append({
+            "ticker": t,
+            "company": s.get("company") or (sectors.get(t) or {}).get("name", ""),
+            "sector": (sectors.get(t) or {}).get("sector", ""),
+            "tier": tier,
+            "composite": composite,
+        })
+    return rows
+
+
+def _read_targets(output_dir: Path) -> dict[str, str]:
+    """The conviction read universe: for EACH sector, ALL Tier-1 names + the top
+    TIER2_PER_SECTOR Tier-2 names by composite. Ordered Tier-1 (all sectors) first
+    then Tier-2, each by strength, so a capped daily run does the best names first."""
+    rows = _shortlist_rows(output_dir)
+    if not rows:
+        return {}
+    by_sector: dict[str, list[dict]] = {}
+    for r in rows:
+        if r["tier"] <= 2:
+            by_sector.setdefault(r["sector"], []).append(r)
+    selected: list[dict] = []
+    for sec_rows in by_sector.values():
+        selected.extend(r for r in sec_rows if r["tier"] == 1)
+        t2 = sorted((r for r in sec_rows if r["tier"] == 2), key=lambda r: r["composite"], reverse=True)
+        selected.extend(t2[:TIER2_PER_SECTOR])
+    # Tier-1 first, then by composite — highest-value reads lead a limited run.
+    selected.sort(key=lambda r: (r["tier"], -r["composite"]))
+    n1 = sum(1 for r in selected if r["tier"] == 1)
+    logger.info(
+        "read universe: %d names across %d sectors (%d Tier-1 + %d Tier-2 top-%d/sector)",
+        len(selected), len(by_sector), n1, len(selected) - n1, TIER2_PER_SECTOR,
+    )
+    return {r["ticker"]: r["company"] for r in selected}
 
 
 def main() -> int:
@@ -344,9 +465,9 @@ def main() -> int:
     if args.tickers:
         names = {t.strip().upper(): "" for t in args.tickers.split(",") if t.strip()}
     else:
-        names = _ordered_names(settings.output_dir)
+        names = _read_targets(settings.output_dir)
     if not names:
-        logger.warning("no Focus names yet (run technical + supplychain + catalyst first, or pass --tickers)")
+        logger.warning("no Shortlist survivors yet (run technical + supplychain + catalyst first, or pass --tickers)")
         return 1
 
     caps = _load(settings.output_dir / "marketcaps.json")

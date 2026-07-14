@@ -1021,13 +1021,15 @@ export function buildShortlist(focus: FocusItem[], catalyst: CatalystData | null
 
 // ── Stage 5 — Conviction (management tone) ───────────────────────────────────
 // Joins the Shortlist survivors to conviction.json (four-layer LLM tone read).
-// The universe is the Shortlist Tier 1 + Tier 2 (names meeting ≥2 of the three
-// shortlist conditions) — the survivors a management-tone read actually earns
-// its keep on. A name that isn't fetched yet is "pending"; a fetched name with
-// no citable call is "unsourced" (kept, low-confidence, so it never masquerades
-// as a real read). The 0-10 total is L1+L2+L3+L4, computed in Python.
+// The read universe is, PER SECTOR, every Tier-1 name plus the top
+// CONV_TIER2_PER_SECTOR Tier-2 names by composite strength — a management-tone
+// read is expensive, so it's spent on each sector's genuine leaders rather than
+// the whole 280-name tail. This MUST match newsagg/conviction.py's _read_targets
+// so the page shows exactly the names the job reads. A name not yet fetched is
+// "pending"; a fetched name with no citable call is "unsourced" (kept, low-
+// confidence). The 0-10 total is L1+L2+L3+L4, computed in Python.
 export const CONVICTION_BAR = 6; // 0-10 total to "advance" (backs the thesis)
-export const CONVICTION_SHORTLIST_TIER = 2; // read Tier ≤ this (1 + 2)
+export const CONV_TIER2_PER_SECTOR = 15; // top-N Tier-2 read per sector
 
 export type ConvictionStatus = "advance" | "watch" | "unsourced" | "pending";
 
@@ -1045,8 +1047,26 @@ export interface ConvictionRow {
   status: ConvictionStatus;
 }
 
+// Per-sector selection: all Tier-1 + top-N Tier-2 by composite (mirrors _read_targets).
+function selectConvictionTargets(rows: LeaderRow[]): LeaderRow[] {
+  const bySector = new Map<string, LeaderRow[]>();
+  for (const r of rows) {
+    if (r.tier > 2) continue;
+    const arr = bySector.get(r.sector) ?? [];
+    arr.push(r);
+    bySector.set(r.sector, arr);
+  }
+  const selected: LeaderRow[] = [];
+  for (const secRows of bySector.values()) {
+    selected.push(...secRows.filter((r) => r.tier === 1));
+    const t2 = secRows.filter((r) => r.tier === 2).sort((a, b) => b.composite - a.composite);
+    selected.push(...t2.slice(0, CONV_TIER2_PER_SECTOR));
+  }
+  return selected;
+}
+
 export function buildConviction(rows: LeaderRow[], conviction: ConvictionData | null): ConvictionRow[] {
-  const survivors = rows.filter((r) => r.tier <= CONVICTION_SHORTLIST_TIER);
+  const survivors = selectConvictionTargets(rows);
   const out: ConvictionRow[] = survivors.map((r) => {
     const conv = conviction?.[r.ticker] ?? null;
     const total = conv ? conv.total : -1;
