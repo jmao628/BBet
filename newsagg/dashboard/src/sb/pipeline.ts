@@ -1042,6 +1042,7 @@ export interface ConvictionRow {
   catScore: number; // shortlist catalyst 0-10 (-1 pending)
   focusScore: number; // 0-10
   attnScore: number; // 0-100
+  shortlistComposite: number; // 0-100 shortlist strength (core+catalyst+attn — already in the tier)
   conv: ConvictionTicker | null; // null = not fetched
   total: number; // 0-10 (-1 if pending)
   confidence: number; // 0-1
@@ -1087,6 +1088,7 @@ export function buildConviction(rows: LeaderRow[], conviction: ConvictionData | 
       catScore: r.catScore,
       focusScore: r.focusScore,
       attnScore: r.attnScore,
+      shortlistComposite: r.composite,
       conv,
       total,
       confidence: conv?.confidence ?? 0,
@@ -1105,19 +1107,12 @@ export function buildConviction(rows: LeaderRow[], conviction: ConvictionData | 
 }
 
 // ── Conviction Ranking — the synthesis at the Conviction gate ─────────────────
-// The payoff of the whole funnel: the Shortlist Tier-1 names whose Conviction
-// read cleared the bar, ranked by a weighted blend of the FOUR deepest signals,
-// each normalised 0-1 → the bar length is the 0-100 composite, its coloured
-// segments show how that score is built. Lenses re-weight and re-rank live.
+// The Shortlist TIER already encodes core + catalyst, so we DON'T re-blend them
+// (that would double-count). The gate simply ranks the tiered survivors by the
+// new deep signal — Conviction — with Tier as the primary bucket: Tier 1 above
+// Tier 2, and within each tier Conviction decides (shortlist strength breaks
+// ties). Universe = Tier 1 and Tier 2 names whose Conviction cleared the bar.
 export const RANK_MIN_CONVICTION = 6; // conviction total must EXCEED this
-export interface RankWeights { conv: number; cat: number; core: number; attn: number }
-export interface RankLens { key: string; en: string; zh: string; w: RankWeights }
-export const RANK_LENSES: RankLens[] = [
-  { key: "balanced", en: "Balanced", zh: "均衡", w: { conv: 0.4, cat: 0.3, core: 0.2, attn: 0.1 } },
-  { key: "conviction", en: "Conviction-led", zh: "重语气", w: { conv: 0.55, cat: 0.22, core: 0.13, attn: 0.1 } },
-  { key: "catalyst", en: "Catalyst-led", zh: "重催化", w: { conv: 0.28, cat: 0.5, core: 0.14, attn: 0.08 } },
-  { key: "ecosystem", en: "Ecosystem-led", zh: "重生态", w: { conv: 0.3, cat: 0.22, core: 0.4, attn: 0.08 } },
-];
 export const RANK_COLORS = { conv: "#c99be0", cat: "#48c78e", core: "#3dd6c4", attn: "#5fb0e8" } as const;
 
 export interface RankingRow {
@@ -1125,45 +1120,39 @@ export interface RankingRow {
   company: string;
   sector: string;
   cap: CapSize;
+  tier: 1 | 2; // shortlist tier (the bucket)
   conv: ConvictionTicker; // guaranteed ok
-  convScore: number; // 0-10
-  catScore: number; // 0-10
-  focusScore: number; // 0-10 (core)
-  attnScore: number; // 0-100
-  composite: number; // 0-100 under the active lens
-  parts: RankWeights; // weighted contributions (0-100), sum = composite
+  conviction: number; // 0-10 — the ranking key
+  catScore: number; // 0-10 (context / radar)
+  focusScore: number; // 0-10 core (context / radar)
+  attnScore: number; // 0-100 (context / radar)
+  shortlistComposite: number; // 0-100 shortlist strength (tie-break + context)
 }
 
-export function buildConvictionRanking(rows: ConvictionRow[], w: RankWeights): RankingRow[] {
+export function buildConvictionRanking(rows: ConvictionRow[]): RankingRow[] {
   const out: RankingRow[] = rows
-    .filter((r) => r.tier === 1 && r.conv && r.conv.ok && r.total > RANK_MIN_CONVICTION)
-    .map((r) => {
-      const conv01 = r.total / 10;
-      const cat01 = Math.max(0, r.catScore) / 10;
-      const core01 = r.focusScore / 10;
-      const attn01 = (r.attnScore ?? 0) / 100;
-      const parts = {
-        conv: w.conv * conv01 * 100,
-        cat: w.cat * cat01 * 100,
-        core: w.core * core01 * 100,
-        attn: w.attn * attn01 * 100,
-      };
-      const composite = Math.round((parts.conv + parts.cat + parts.core + parts.attn) * 10) / 10;
-      return {
-        ticker: r.ticker,
-        company: r.company,
-        sector: r.sector,
-        cap: r.cap,
-        conv: r.conv as ConvictionTicker,
-        convScore: r.total,
-        catScore: r.catScore,
-        focusScore: r.focusScore,
-        attnScore: r.attnScore ?? 0,
-        composite,
-        parts,
-      };
-    });
-  out.sort((a, b) => b.composite - a.composite || a.ticker.localeCompare(b.ticker));
+    .filter((r) => (r.tier === 1 || r.tier === 2) && r.conv && r.conv.ok && r.total > RANK_MIN_CONVICTION)
+    .map((r) => ({
+      ticker: r.ticker,
+      company: r.company,
+      sector: r.sector,
+      cap: r.cap,
+      tier: r.tier as 1 | 2,
+      conv: r.conv as ConvictionTicker,
+      conviction: r.total,
+      catScore: r.catScore,
+      focusScore: r.focusScore,
+      attnScore: r.attnScore ?? 0,
+      shortlistComposite: r.shortlistComposite,
+    }));
+  // Tier first (1 above 2), then Conviction desc, then shortlist strength.
+  out.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      b.conviction - a.conviction ||
+      b.shortlistComposite - a.shortlistComposite ||
+      a.ticker.localeCompare(b.ticker),
+  );
   return out;
 }
 

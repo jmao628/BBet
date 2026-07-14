@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, RANK_LENSES, noDataSet, belowMinCap } from "./pipeline";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, noDataSet, belowMinCap } from "./pipeline";
 import { OVERVIEW, FUNNEL, FOCUS, RANKING, CANDIDATES, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
@@ -48,8 +48,8 @@ function useCounts(): Record<string, number | null> {
   const convRows = conviction ? buildConviction(shortlist, conviction) : [];
   const convictionCount = conviction ? convRows.filter((r) => r.status === "advance").length : null;
 
-  // Composite Rank = Tier-1 names past Conviction 6 (the synthesis universe).
-  const rankingCount = conviction ? buildConvictionRanking(convRows, RANK_LENSES[0].w).length : null;
+  // Composite Rank = Tier-1/2 names past Conviction 6 (the synthesis universe).
+  const rankingCount = conviction ? buildConvictionRanking(convRows).length : null;
 
   return {
     seeds: seeds.length,
