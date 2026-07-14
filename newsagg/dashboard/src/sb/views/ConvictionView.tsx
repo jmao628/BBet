@@ -48,6 +48,23 @@ const LAYERS = [
 
 const TIER_COLOR: Record<1 | 2 | 3, string> = { 1: "#f0c862", 2: "#cdd6e2", 3: "#cd8b5e" };
 
+// A distinct hue per GICS sector, for the section headers. Muted, dark-theme
+// friendly; anything unmapped falls back to a neutral slate.
+const SECTOR_HUE: Record<string, string> = {
+  Technology: "#5fb0e8",
+  Healthcare: "#48c78e",
+  "Financial Services": "#7bd88f",
+  "Consumer Cyclical": "#e0785a",
+  "Consumer Defensive": "#c9a86a",
+  Industrials: "#9aa7b4",
+  Energy: "#e0b45a",
+  "Basic Materials": "#b58bd6",
+  "Communication Services": "#3dd6c4",
+  Utilities: "#6f8fb0",
+  "Real Estate": "#d68b9a",
+};
+const sectorHue = (s: string): string => SECTOR_HUE[s] ?? "#8aa0b2";
+
 // Total 0-10 → a warmth. Backs the thesis (≥ bar) glows green; lukewarm ambers;
 // weak / no read stays muted.
 function totalColor(total: number): string {
@@ -268,6 +285,22 @@ export function ConvictionView() {
   const nRead = bySector.filter((r) => r.status === "advance" || r.status === "watch").length;
   const nAdvance = bySector.filter((r) => r.status === "advance").length;
 
+  // Group the visible rows into per-sector sections, ordered by section size
+  // (same order as the chips); unclassified names sink to the end.
+  const grouped = useMemo(() => {
+    const order = new Map(sectorCounts.map(([s], i) => [s, i]));
+    const buckets = new Map<string, ConvictionRow[]>();
+    for (const r of shown) {
+      const key = r.sector || "__none";
+      const arr = buckets.get(key);
+      if (arr) arr.push(r);
+      else buckets.set(key, [r]);
+    }
+    return [...buckets.entries()].sort(
+      (a, b) => (order.get(a[0]) ?? 998) - (order.get(b[0]) ?? 998) || a[0].localeCompare(b[0]),
+    );
+  }, [shown, sectorCounts]);
+
   const FILTERS: { key: "all" | "read" | "advance"; label: string; n: number }[] = [
     { key: "all", label: t("All survivors", "全部入围"), n: bySector.length },
     { key: "read", label: t("Read", "已读"), n: nRead },
@@ -331,10 +364,33 @@ export function ConvictionView() {
               {t("None in this filter yet.", "该筛选下暂无。")}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {shown.map((r, i) => (
-                <ConvCard key={r.ticker} r={r} idx={i} lang={lang} onOpen={openDetail} t={t} />
-              ))}
+            <div className="space-y-7">
+              {grouped.map(([sec, secRows]) => {
+                const hue = sec === "__none" ? "#8aa0b2" : sectorHue(sec);
+                const adv = secRows.filter((r) => r.status === "advance").length;
+                return (
+                  <section key={sec} className="view-in">
+                    {/* sector header */}
+                    <div className="mb-3 flex items-center gap-2.5 border-b border-line pb-2">
+                      <span className="h-3.5 w-1 flex-none rounded-full" style={{ background: hue, boxShadow: `0 0 8px ${hue}88` }} />
+                      <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: hue }}>
+                        {sec === "__none" ? t("Unclassified", "未分类") : sectorLabel(sec, lang)}
+                      </h3>
+                      <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{secRows.length}</span>
+                      {adv > 0 && (
+                        <span className="text-[10.5px] font-medium" style={{ color: "#48c78e" }}>
+                          {adv} {t("back thesis", "撑论点")}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      {secRows.map((r, i) => (
+                        <ConvCard key={r.ticker} r={r} idx={i} lang={lang} onOpen={openDetail} t={t} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           )}
         </>
