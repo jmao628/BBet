@@ -43,10 +43,12 @@ if [[ -n "${OPENAI_API_KEY:-}" ]]; then
   OPENAI_LINES="    <key>OPENAI_API_KEY</key><string>$OPENAI_API_KEY</string>"
 fi
 
-# Daily catalyst budget: fetch at most CAT_LIMIT tickers (new focus names first,
-# then re-fetch cached ones older than CAT_MAX_AGE days or whose events fired).
-CAT_LIMIT="${CAT_LIMIT:-60}"
+# Daily catalyst budget: CAT_LIMIT = 0 means NO cap — re-analyse every new focus
+# name and every stale one (older than CAT_MAX_AGE days, or with a catalyst that
+# fired) the same day. Set CAT_LIMIT to a number to cap OpenAI spend/time.
+CAT_LIMIT="${CAT_LIMIT:-0}"
 CAT_MAX_AGE="${CAT_MAX_AGE:-4}"
+CAT_WORKERS="${CAT_WORKERS:-6}" # parallelism — higher finishes the no-cap run faster
 
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -263,6 +265,8 @@ cat > "$CATALYST_PLIST" <<EOF
     <string>$CAT_LIMIT</string>
     <string>--max-age</string>
     <string>$CAT_MAX_AGE</string>
+    <string>--workers</string>
+    <string>$CAT_WORKERS</string>
   </array>
   <key>WorkingDirectory</key><string>$REPO_DIR</string>
   <key>EnvironmentVariables</key>

@@ -46,7 +46,7 @@ echo "▶ 5/7 heat…"
 echo "▶ 6/7 supplychain (needs OPENAI_API_KEY; skipped if unset)…"
 "$PY" -m newsagg.supplychain || echo "  (supplychain skipped/failed; keeping existing maps)"
 echo "▶ 7/7 catalyst (needs OPENAI_API_KEY; new focus names + stale re-fetch)…"
-"$PY" -m newsagg.catalyst --limit "${CAT_LIMIT:-60}" --max-age "${CAT_MAX_AGE:-4}" || echo "  (catalyst skipped/failed; keeping existing catalysts)"
+"$PY" -m newsagg.catalyst --limit "${CAT_LIMIT:-0}" --max-age "${CAT_MAX_AGE:-4}" --workers "${CAT_WORKERS:-6}" || echo "  (catalyst skipped/failed; keeping existing catalysts)"
 
 echo
 echo "✓ done — hard-refresh the dashboard (Cmd+Shift+R) to see the updated universe."
