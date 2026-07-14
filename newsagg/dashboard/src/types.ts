@@ -196,9 +196,19 @@ export interface ConvictionLayer {
   evidence: string; // short quote / paraphrase from the source
   confidence: number; // 0-1, how well the text pins this grade
 }
+// Hedging is a language-density suppressor (not an additive layer): the final
+// total = raw_total × (1 − 0.15·level). High hedging discounts the whole score.
+export interface ConvictionHedging {
+  level: number; // 0 crisp … 3 pervasive hedging
+  factor: number; // 0.55 … 1.0 multiplier applied to raw_total
+  evidence: string; // a representative crisp/hedgy line
+  confidence: number;
+}
 export interface ConvictionTicker {
   layers: { L1: ConvictionLayer; L2: ConvictionLayer; L3: ConvictionLayer; L4: ConvictionLayer };
-  total: number; // 0-10
+  hedging: ConvictionHedging;
+  raw_total: number; // L1+L2+L3+L4 before the hedging discount (0-10)
+  total: number; // 0-10, hedging-discounted (raw_total × factor)
   confidence: number; // 0-1 overall (mean of layers)
   source: "own" | "upstream_anchor";
   anchor_ticker: string; // set when source = upstream_anchor

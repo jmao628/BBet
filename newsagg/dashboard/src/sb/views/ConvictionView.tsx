@@ -40,9 +40,9 @@ const LAYERS = [
   {
     key: "L4" as const,
     color: "#f0c862",
-    en: "Walk the talk",
-    zh: "言行一致",
-    rungs: { en: ["talks up but sells", "no signal", "bullish & buying"], zh: ["嘴热手减持", "无信号", "看多且增持"] },
+    en: "Follow-through",
+    zh: "兑现度",
+    rungs: { en: ["missed / dropped", "mixed", "delivered on last Q"], zh: ["未兑现/悄悄放弃", "参差/持平", "说到做到"] },
   },
 ];
 
@@ -64,6 +64,10 @@ const SECTOR_HUE: Record<string, string> = {
   "Real Estate": "#d68b9a",
 };
 const sectorHue = (s: string): string => SECTOR_HUE[s] ?? "#8aa0b2";
+
+// Format a 0-10 score: whole numbers plain, otherwise one decimal (the hedging
+// discount makes totals fractional, e.g. 8.5).
+const fmt10 = (n: number): string => (Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1));
 
 // Total 0-10 → a warmth. Backs the thesis (≥ bar) glows green; lukewarm ambers;
 // weak / no read stays muted.
@@ -194,7 +198,7 @@ function ConvCard({ r, idx, lang, onOpen, t }: { r: ConvictionRow; idx: number; 
         {/* total dial */}
         <div className="flex flex-none flex-col items-end">
           <div className="font-disp text-[26px] font-bold leading-none tabular-nums" style={{ color: col }}>
-            {r.total >= 0 ? r.total.toFixed(0) : "—"}
+            {r.total >= 0 ? fmt10(r.total) : "—"}
             {r.total >= 0 && <span className="text-[13px] text-muted2">/10</span>}
           </div>
           <span className="mt-0.5 text-[9px] uppercase tracking-wide text-muted2">{t("conviction", "语气分")}</span>
@@ -217,6 +221,27 @@ function ConvCard({ r, idx, lang, onOpen, t }: { r: ConvictionRow; idx: number; 
               <LayerMeter key={l.key} layer={l} data={conv?.layers[l.key]} lang={lang} />
             ))}
           </div>
+
+          {/* hedging suppressor — shown when it actually docks the score */}
+          {conv && (conv.hedging?.level ?? 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-dashed border-line2 bg-inset/40 px-2.5 py-2">
+              <span className="mt-[1px] flex-none text-[10px] uppercase tracking-wide text-muted2">{t("Hedging", "对冲语气")}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3].map((i) => (
+                    <span key={i} className="h-1.5 w-5 rounded-full" style={{ background: i <= conv.hedging.level ? "#e0785a" : "rgba(255,255,255,0.07)" }} />
+                  ))}
+                  <span className="ml-0.5 font-mono text-[10.5px] font-semibold" style={{ color: "#e0785a" }}>
+                    −{Math.round((1 - conv.hedging.factor) * 100)}%
+                  </span>
+                  <span className="text-[10px] text-muted2">
+                    ({fmt10(conv.raw_total)} → {fmt10(conv.total)})
+                  </span>
+                </div>
+                {conv.hedging.evidence && <p className="mt-1 text-[11px] italic leading-snug text-muted2">“{conv.hedging.evidence}”</p>}
+              </div>
+            </div>
+          )}
 
           {/* summary */}
           {conv?.summary && <p className="text-[11.5px] leading-relaxed text-muted">{conv.summary}</p>}
@@ -319,8 +344,8 @@ export function ConvictionView() {
         eyebrow={t("Stage 5 · Conviction", "Stage 5 · 管理层语气")}
         title={t("Management Conviction · Four Tones", "管理层 Conviction · 四层语气")}
         desc={t(
-          `An LLM reads the latest earnings-call transcript — the ticker's own, or an upstream anchor's read through — word by word and scores four tone layers out of 10 (L1 tone 0-2 · L2 directness 0-3 · L3 hard-vs-soft 0-3 · L4 walk-the-talk 0-2), each backed by a verbatim quote + confidence. Read scope: per sector, every Tier-1 name + the top ${CONV_TIER2_PER_SECTOR} Tier-2 by strength.`,
-          `由 LLM 逐字阅读最新电话会纪要——用自身,或用上游锚公司读出——按四层语气打分,满分 10（L1 语气 0-2 · L2 直白度 0-3 · L3 硬软 0-3 · L4 言行 0-2），每层附逐字原话 + 置信度。阅读范围:每个板块的全部第一名 + 第二名按强度前 ${CONV_TIER2_PER_SECTOR} 名。`,
+          `An LLM reads the latest earnings-call transcript — the ticker's own, or an upstream anchor's read through — word by word and scores four layers (L1 tone 0-2 · L2 directness 0-3 · L3 hard-vs-soft 0-3 · L4 follow-through vs last quarter 0-2), each backed by a verbatim quote; a hedging-language density then discounts the total (so mushy language can't score a free 10). Read scope: per sector, every Tier-1 name + the top ${CONV_TIER2_PER_SECTOR} Tier-2 by strength.`,
+          `由 LLM 逐字阅读最新电话会纪要——用自身,或用上游锚公司读出——按四层打分（L1 语气 0-2 · L2 直白度 0-3 · L3 硬软 0-3 · L4 对上季兑现度 0-2），每层附逐字原话;再用对冲语言密度对总分打折(满口含糊的拿不到白送的 10 分)。阅读范围:每个板块的全部第一名 + 第二名按强度前 ${CONV_TIER2_PER_SECTOR} 名。`,
         )}
       />
 

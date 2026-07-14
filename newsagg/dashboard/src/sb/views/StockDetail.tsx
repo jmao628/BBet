@@ -322,7 +322,7 @@ const CONV_LAYERS: { key: "L1" | "L2" | "L3" | "L4"; color: string; en: string; 
   { key: "L1", color: "#5fb0e8", en: "Tone", zh: "语气" },
   { key: "L2", color: "#3dd6c4", en: "Directness", zh: "直白" },
   { key: "L3", color: "#48c78e", en: "Hard vs soft", zh: "硬软" },
-  { key: "L4", color: "#f0c862", en: "Walk the talk", zh: "言行" },
+  { key: "L4", color: "#f0c862", en: "Follow-through", zh: "兑现度" },
 ];
 function convColor(total: number): string {
   if (total >= 7.5) return "#48c78e";
@@ -330,6 +330,7 @@ function convColor(total: number): string {
   if (total >= 4) return "#f0c862";
   return "#e0785a";
 }
+const fmtConv = (n: number): string => (Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1));
 function ConvBreakdown({ conv, lang, t }: { conv: ConvictionTicker; lang: Lang; t: (en: string, zh: string) => string }) {
   const col = convColor(conv.total);
   const anchor = conv.source === "upstream_anchor";
@@ -350,7 +351,7 @@ function ConvBreakdown({ conv, lang, t }: { conv: ConvictionTicker; lang: Lang; 
         </div>
         <div className="flex-none text-right">
           <div className="font-disp text-[24px] font-bold leading-none tabular-nums" style={{ color: col }}>
-            {conv.total.toFixed(0)}<span className="text-[12px] text-muted2">/10</span>
+            {fmtConv(conv.total)}<span className="text-[12px] text-muted2">/10</span>
           </div>
           <div className="text-[9px] uppercase tracking-wide text-muted2">{t("conf", "置信")} {Math.round(conv.confidence * 100)}%</div>
         </div>
@@ -380,6 +381,21 @@ function ConvBreakdown({ conv, lang, t }: { conv: ConvictionTicker; lang: Lang; 
           );
         })}
       </div>
+      {(conv.hedging?.level ?? 0) > 0 && (
+        <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-dashed border-line2 px-2.5 py-2">
+          <span className="mt-[1px] flex-none text-[10px] uppercase tracking-wide text-muted2">{t("Hedging", "对冲语气")}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              {[1, 2, 3].map((i) => (
+                <span key={i} className="h-1.5 w-4 rounded-full" style={{ background: i <= conv.hedging.level ? "#e0785a" : "rgba(255,255,255,0.07)" }} />
+              ))}
+              <span className="ml-0.5 font-mono text-[10.5px] font-semibold" style={{ color: "#e0785a" }}>−{Math.round((1 - conv.hedging.factor) * 100)}%</span>
+              <span className="text-[10px] text-muted2">({fmtConv(conv.raw_total)} → {fmtConv(conv.total)})</span>
+            </div>
+            {conv.hedging.evidence && <p className="mt-1 text-[10.5px] italic leading-snug text-muted2">“{conv.hedging.evidence}”</p>}
+          </div>
+        </div>
+      )}
       {conv.summary && <p className="mt-3 text-[11.5px] leading-relaxed text-muted">{conv.summary}</p>}
       {conv.source_url && (
         <a href={conv.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[11px] text-signal hover:underline">

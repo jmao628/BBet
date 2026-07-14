@@ -69,8 +69,13 @@ logger = logging.getLogger("newsagg.conviction")
 CONVICTION_FILE = "conviction.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
-# Per-layer caps (the rubric's ranges). Total = L1+L2+L3+L4 ∈ [0,10].
+# Per-layer caps (the rubric's ranges). raw_total = L1+L2+L3+L4 ∈ [0,10].
 _LAYER_MAX = {"L1": 2, "L2": 3, "L3": 3, "L4": 2}
+# Hedging is a language-density SUPPRESSOR (0-3), not an additive layer: the
+# final total = raw_total × (1 − 0.15·hedging). So pervasive hedging (level 3)
+# docks the score 45% — confident numbers wrapped in mushy language don't get a
+# free 10. This is the main cure for score saturation.
+_HEDGE_STEP = 0.15
 
 # Read universe (matches the dashboard's ConvictionView): for EACH sector, every
 # Tier-1 shortlist name plus the top N Tier-2 names by composite strength.
@@ -114,10 +119,11 @@ def _prompt(ticker: str, name: str, sector: str, anchor_ticker: str, anchor_name
     return (
         f"You are a buy-side analyst reading MANAGEMENT TONE line by line. Today is {today}. Using web search, "
         f"find and READ the FULL TEXT of the MOST RECENT quarterly earnings-call TRANSCRIPT for the US-listed "
-        f"company {who}{ctx} — BOTH the prepared remarks AND the analyst Q&A. Good transcript sources include "
-        "Motley Fool, Seeking Alpha, Roic.ai, Quartr, TIKR, the company's own IR site, and the 8-K exhibit on "
-        "SEC EDGAR. If truly no transcript exists, fall back to the latest 10-Q/10-K MD&A or guidance press "
-        "release. Read the actual words management used — do not judge from a headline or a summary article."
+        f"company {who}{ctx} — BOTH the prepared remarks AND the analyst Q&A. ALSO pull up the PRIOR quarter's "
+        "transcript (you need it for L4 follow-through). Good transcript sources include Motley Fool, Seeking "
+        "Alpha, Roic.ai, Quartr, TIKR, the company's own IR site, and the 8-K exhibit on SEC EDGAR. If truly no "
+        "transcript exists, fall back to the latest 10-Q/10-K MD&A or guidance press release. Read the actual "
+        "words management used — do not judge from a headline or a summary article."
         + anchor_line + "\n\n"
         "Then grade FOUR layers, and for EACH layer support the grade with a DIRECT VERBATIM QUOTE — the exact "
         "words from the transcript, copied character-for-character inside double quotes — prefixed with WHO said "
@@ -145,11 +151,21 @@ def _prompt(ticker: str, name: str, sector: str, anchor_ticker: str, anchor_name
         "'well-positioned') · 1 = one vague number or a single soft target · 2 = a mix, some hard some soft · "
         "3 = MULTIPLE hard, dated, QUANTIFIED commitments (e.g. specific revenue AND margin targets, dated "
         "milestones, signed backlog) — one lone number is not enough for a 3.\n"
-        "- L4 Walk the talk 0-2 — insider ACTIONS vs words (check recent Form 4s AND buyback activity): "
-        "0 = talks it up while insiders are NET SELLING · 1 = no clear signal, OR a buyback that is offset by "
-        "insider selling (a MIXED signal — this is the common case, use it) · 2 = bullish talk AND a clean positive "
-        "action: net insider BUYING, or a large active buyback with NO offsetting insider selling. If you see ANY "
-        "recent insider selling, L4 cannot exceed 1.\n\n"
+        "- L4 Follow-through 0-2 — did management DELIVER on the SPECIFIC promises/targets they made on the PRIOR "
+        "quarter's call? Compare the two transcripts: 0 = they MISSED, walked back, or quietly DROPPED a prior "
+        "commitment (e.g. hyped a product/metric last quarter, then went silent on it) · 1 = roughly in line, "
+        "mixed, or not enough prior specificity to judge · 2 = they explicitly HIT or BEAT what they committed to "
+        "last quarter. Insiders are only a MODIFIER here, not the driver: IGNORE routine 10b5-1 / RSU-tax / "
+        "option-exercise sales (that is mechanical, not a view). Only UNUSUAL open-market activity counts — real "
+        "cluster BUYING can confirm a 2; conspicuous cluster SELLING into a bullish story is a red flag that caps "
+        "this at 1.\n\n"
+        "SEPARATELY, rate HEDGING — the density of weak/uncertain LANGUAGE across the whole call. This is about "
+        "linguistic STYLE (weak modals + uncertainty words: 'we think', 'hopefully', 'should', 'roughly', 'kind "
+        "of', 'a bit', 'somewhat', 'try to', 'I guess', 'to some degree'), SEPARATE from whether they dodged a "
+        "question (L2) or quantified commitments (L3). 0 = crisp, declarative, confident throughout · 1 = mostly "
+        "crisp, some hedging · 2 = noticeably hedgy · 3 = pervasive hedging / vague qualifiers everywhere. High "
+        "hedging DISCOUNTS the whole score, so confident numbers wrapped in mushy language don't get a free pass. "
+        "Quote one representative line (crisp or hedgy).\n\n"
         "Return ONLY a JSON object (no prose, no markdown fences):\n"
         '{"ticker":"' + ticker + '",'
         '"source":"own or upstream_anchor",'
@@ -162,7 +178,8 @@ def _prompt(ticker: str, name: str, sector: str, anchor_ticker: str, anchor_name
         '"L1":{"score":0,"evidence":"speaker, segment: \\"exact verbatim quote from the transcript\\"","confidence":0.0},'
         '"L2":{"score":0,"evidence":"...","confidence":0.0},'
         '"L3":{"score":0,"evidence":"...","confidence":0.0},'
-        '"L4":{"score":0,"evidence":"...","confidence":0.0}}\n\n'
+        '"L4":{"score":0,"evidence":"last Q they said \\"...\\"; this Q: \\"...\\" (+ any unusual insider action)","confidence":0.0},'
+        '"hedging":{"level":0,"evidence":"a representative crisp or hedgy verbatim line","confidence":0.0}}\n\n'
         "Rules:\n"
         "- Each layer's `evidence` MUST contain a VERBATIM quote copied from the transcript (exact wording, in "
         "double quotes), attributed to the speaker. This is the whole point — the quote is the receipt for the grade.\n"
@@ -208,7 +225,18 @@ def _clean(parsed: dict, ticker: str, anchor_ticker: str, anchor_name: str, mode
             "evidence": (raw.get("evidence") or "").strip()[:700],
             "confidence": conf,
         }
-    total = sum(layers[k]["score"] for k in _LAYER_MAX)  # 0-10
+    raw_total = sum(layers[k]["score"] for k in _LAYER_MAX)  # 0-10 (pre-suppression)
+    hraw = parsed.get("hedging") if isinstance(parsed.get("hedging"), dict) else {}
+    h_level = _lvl(hraw.get("level"), 3)
+    h_conf = _conf(hraw.get("confidence"))
+    h_factor = round(1 - _HEDGE_STEP * h_level, 2)  # 0→1.0, 3→0.55
+    hedging = {
+        "level": h_level,
+        "factor": h_factor,
+        "evidence": (hraw.get("evidence") or "").strip()[:400],
+        "confidence": h_conf,
+    }
+    total = round(raw_total * h_factor, 1)  # final 0-10, hedging-discounted
     src = (parsed.get("source") or "own").strip().lower()
     src = "upstream_anchor" if src.startswith("upstream") else "own"
     a_tk = (parsed.get("anchor_ticker") or "").strip().upper()
@@ -222,6 +250,8 @@ def _clean(parsed: dict, ticker: str, anchor_ticker: str, anchor_name: str, mode
         url = ""
     return {
         "layers": layers,
+        "hedging": hedging,
+        "raw_total": raw_total,
         "total": total,
         "confidence": round(sum(confs) / len(confs), 2) if confs else 0.0,
         "source": src if src == "own" else "upstream_anchor",
