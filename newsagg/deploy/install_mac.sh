@@ -74,6 +74,23 @@ CONV_LIMIT="${CONV_LIMIT:-0}"
 CONV_MAX_AGE="${CONV_MAX_AGE:-25}"
 CONV_WORKERS="${CONV_WORKERS:-6}"
 
+# Price freshness: by default the technical (price/volume) job runs ONCE a day.
+# The Strong-Buy leaderboard ranks by "today's move", so a once-a-day pull shows
+# a "stale" badge for most of the session. Set TECH_EVERY_MIN (e.g. 60) to re-pull
+# prices every N minutes instead — the leaderboard then stays fresh on its own.
+# yfinance needs Yahoo reachable, so keep the VPN/proxy up (pass PROXY=...).
+TECH_EVERY_MIN="${TECH_EVERY_MIN:-}"
+if [[ -n "$TECH_EVERY_MIN" ]]; then
+  TECH_SCHED="  <key>StartInterval</key><integer>$(( TECH_EVERY_MIN * 60 ))</integer>"
+  echo "Technical prices: every ${TECH_EVERY_MIN} min (intraday) — keep the VPN/proxy up."
+else
+  TECH_SCHED="  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>$HOUR</integer>
+    <key>Minute</key><integer>15</integer>
+  </dict>"
+fi
+
 # Repo root = two levels up from this script (newsagg/deploy/ -> repo).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -206,11 +223,7 @@ cat > "$TECH_PLIST" <<EOF
     <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 $PROXY_LINES
   </dict>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key><integer>$HOUR</integer>
-    <key>Minute</key><integer>15</integer>
-  </dict>
+$TECH_SCHED
   <key>StandardOutPath</key><string>$LOG_DIR/technical.log</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/technical.log</string>
 </dict>
