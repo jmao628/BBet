@@ -13,7 +13,8 @@ export type ViewKey =
   | "catalyst"
   | "shortlist"
   | "conviction"
-  | "ranking";
+  | "ranking"
+  | "backtest";
 
 interface DashboardState {
   data: SAData | null;

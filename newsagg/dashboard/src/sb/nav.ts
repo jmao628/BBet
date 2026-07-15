@@ -41,3 +41,13 @@ export const RANKING: NavStage = {
   zh: "综合排行",
   hint: { en: "Tier-1/2 · conviction > 6", zh: "金/银档 · 语气 > 6" },
 };
+
+// A standalone tool (not a funnel stage): backtest entry/exit points over the
+// price history and tune the rules.
+export const BACKTEST: NavStage = {
+  key: "backtest",
+  step: null,
+  en: "Backtest",
+  zh: "回测实验室",
+  hint: { en: "tune entry points · optimizer", zh: "打磨点位 · 优化器" },
+};
