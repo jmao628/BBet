@@ -43,9 +43,10 @@ export interface BtResult {
   winRate: number;
   avg: number;
   median: number;
-  total: number; // compounded equity return over the trade sequence
-  maxDD: number; // max drawdown of the equity curve (fraction, ≤ 0)
-  equity: number[]; // cumulative multiplier, starts at 1
+  total: number; // cumulative P&L, fixed size per trade (Σ of per-trade returns)
+  maxDD: number; // max drawdown of the cumulative-P&L curve (≤ 0)
+  profitFactor: number; // gross wins / gross losses
+  equity: number[]; // cumulative P&L, starts at 0
   hist: { lo: number; hi: number; count: number }[];
   perTicker: TickerStat[];
   benchmark: number; // avg buy-&-hold over the window
@@ -158,18 +159,26 @@ export function runBacktest(tech: TechnicalData | null, tickers: string[], p: Bt
   const sorted = [...rets].sort((a, b) => a - b);
   const median = n ? sorted[Math.floor(n / 2)] : 0;
 
-  // Equity over the trade sequence (ordered by entry, one position at a time).
+  // Cumulative P&L over the trade sequence, FIXED SIZE per trade (additive Σ of
+  // returns) — not compounded. Compounding many overlapping trades produces an
+  // unrealistic exponential-then-crash curve; additive P&L is the honest
+  // signal-quality view and its drawdown is meaningful.
   const seq = [...trades].sort((a, b) => a.entry - b.entry || a.exit - b.exit);
-  const equity: number[] = [1];
-  let peak = 1;
+  const equity: number[] = [0];
+  let peak = 0;
   let maxDD = 0;
+  let grossWin = 0;
+  let grossLoss = 0;
   for (const tr of seq) {
-    const v = equity[equity.length - 1] * (1 + tr.ret);
+    const v = equity[equity.length - 1] + tr.ret;
     equity.push(v);
     peak = Math.max(peak, v);
-    maxDD = Math.min(maxDD, v / peak - 1);
+    maxDD = Math.min(maxDD, v - peak);
+    if (tr.ret >= 0) grossWin += tr.ret;
+    else grossLoss += -tr.ret;
   }
-  const total = equity[equity.length - 1] - 1;
+  const total = equity[equity.length - 1];
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
 
   // Histogram of per-trade returns (percent bins).
   const edges = [-Infinity, -0.15, -0.1, -0.05, -0.02, 0, 0.02, 0.05, 0.1, 0.15, Infinity];
@@ -195,6 +204,7 @@ export function runBacktest(tech: TechnicalData | null, tickers: string[], p: Bt
     median,
     total,
     maxDD,
+    profitFactor,
     equity,
     hist,
     perTicker,

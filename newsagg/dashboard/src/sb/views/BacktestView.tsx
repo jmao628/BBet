@@ -53,16 +53,16 @@ function Tile({ label, value, color, sub }: { label: string; value: string; colo
 function EquityCurve({ equity, sig }: { equity: number[]; sig: string }) {
   if (equity.length < 2) return <div className="grid h-56 place-items-center text-[12px] text-muted2">no trades under these rules</div>;
   const W = 100, H = 100;
-  const min = Math.min(...equity, 1);
-  const max = Math.max(...equity, 1);
+  const min = Math.min(...equity, 0);
+  const max = Math.max(...equity, 0);
   const x = (i: number) => (i / (equity.length - 1)) * W;
   const y = (v: number) => H - ((v - min) / (max - min || 1)) * H;
   const pts = equity.map((v, i) => `${x(i).toFixed(2)},${y(v).toFixed(2)}`);
   const line = "M" + pts.join(" L");
   const area = `M${x(0)},${H} L` + pts.join(" L") + ` L${x(equity.length - 1)},${H} Z`;
-  const up = equity[equity.length - 1] >= 1;
+  const up = equity[equity.length - 1] >= 0;
   const col = up ? GOOD : BAD;
-  const yb = y(1);
+  const yb = y(0);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-56 w-full">
       <defs>
@@ -150,12 +150,14 @@ function Spark({ c }: { c: number[] | undefined }) {
 }
 
 const UNIS = [
+  { key: "mylist", en: "My list", zh: "我的清单" },
   { key: "focus", en: "Focus List", zh: "重点名单" },
   { key: "tier1", en: "Shortlist T1", zh: "登顶金档" },
   { key: "tier2", en: "Shortlist T1+2", zh: "登顶金+银" },
   { key: "all", en: "All priced", zh: "全部有价" },
 ] as const;
 type UniKey = (typeof UNIS)[number]["key"];
+const WATCH_KEY = "midea.backtest.watch.v1";
 
 export function BacktestView() {
   const data = useStore((s) => s.data);
@@ -172,6 +174,13 @@ export function BacktestView() {
   const [p, setP] = useState<BtParams>(loadParams);
   const [uni, setUni] = useState<UniKey>("tier2");
   const [sweep, setSweep] = useState<SweepResult | null>(null);
+  const [watchText, setWatchText] = useState<string>(() => {
+    try {
+      return localStorage.getItem(WATCH_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
   useEffect(() => {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(p));
@@ -179,22 +188,32 @@ export function BacktestView() {
       /* ignore */
     }
   }, [p]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(WATCH_KEY, watchText);
+    } catch {
+      /* ignore */
+    }
+  }, [watchText]);
+
+  // My-list tickers, parsed from the free-text box (comma / space / newline).
+  const myList = useMemo(() => [...new Set(watchText.toUpperCase().split(/[^A-Z0-9.]+/).filter(Boolean))], [watchText]);
 
   const universes = useMemo(() => {
     const focus = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
     const shortlist = buildShortlist(focus, catalyst);
     return {
+      mylist: myList,
       focus: focus.map((f) => f.ticker),
       tier1: shortlist.filter((r) => r.tier === 1).map((r) => r.ticker),
       tier2: shortlist.filter((r) => r.tier <= 2).map((r) => r.ticker),
       all: Object.keys(technical?.tickers ?? {}),
     } as Record<UniKey, string[]>;
-  }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst]);
+  }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst, myList]);
 
   const tickers = universes[uni];
   const res = useMemo(() => runBacktest(technical, tickers, p), [technical, tickers, p]);
   const sig = `${uni}|${p.entry}|${p.lookback}|${p.threshold}|${p.holdDays}|${p.stopLoss}|${p.takeProfit}|${res.n}`;
-  const edge = res.total - res.benchmark;
 
   const set = (patch: Partial<BtParams>) => setP((x) => ({ ...x, ...patch }));
   const meta = ENTRY_META[p.entry];
@@ -210,7 +229,7 @@ export function BacktestView() {
         )}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* ── controls ── */}
         <div className="space-y-4">
           <div className="rounded-2xl border border-line bg-panel p-4">
@@ -222,6 +241,38 @@ export function BacktestView() {
                 </button>
               ))}
             </div>
+
+            {uni === "mylist" && (
+              <div className="mb-4">
+                <textarea
+                  value={watchText}
+                  onChange={(e) => setWatchText(e.target.value)}
+                  placeholder={t("Add your tickers: NVDA MSFT AAPL …", "加入你的代码：NVDA MSFT AAPL …")}
+                  rows={2}
+                  className="w-full resize-none rounded-lg border border-line bg-inset px-2.5 py-2 font-mono text-[12px] text-text placeholder:text-muted2 focus:border-signal/60 focus:outline-none"
+                />
+                {myList.length > 0 && (
+                  <>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {myList.map((tk) => {
+                        const has = !!technical?.tickers?.[tk]?.close_series;
+                        return (
+                          <span key={tk} className="rounded px-1.5 py-[1px] font-mono text-[10px]" style={{ color: has ? "var(--text)" : BAD, background: has ? "rgba(255,255,255,0.06)" : "#e0785a1a" }} title={has ? "" : t("no price data in the system yet", "系统里暂无价格数据")}>
+                            {tk}{has ? "" : " ✕"}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-muted2">
+                      {t(
+                        `${myList.filter((tk) => technical?.tickers?.[tk]?.close_series).length}/${myList.length} have price history — the rest are skipped (add them to the price fetch to include).`,
+                        `${myList.filter((tk) => technical?.tickers?.[tk]?.close_series).length}/${myList.length} 有价格历史,其余跳过(需把它们加进价格抓取才能纳入)。`,
+                      )}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="mb-2 text-[11px] uppercase tracking-wide text-muted2">{t("Entry signal", "进场信号")}</div>
             <div className="mb-1 grid grid-cols-2 gap-1.5">
@@ -262,14 +313,14 @@ export function BacktestView() {
             <Tile label={t("Win rate", "胜率")} value={`${Math.round(res.winRate * 100)}%`} color={res.winRate >= 0.5 ? GOOD : BAD} />
             <Tile label={t("Avg / trade", "每笔均收")} value={pctS(res.avg)} color={res.avg >= 0 ? GOOD : BAD} />
             <Tile label={t("Median", "中位")} value={pctS(res.median)} color={res.median >= 0 ? GOOD : BAD} />
-            <Tile label={t("Strategy total", "策略累计")} value={pctS(res.total)} color={res.total >= 0 ? GOOD : BAD} sub={t("1 position, in signal order", "单仓·按信号顺序")} />
-            <Tile label={t("Max drawdown", "最大回撤")} value={pctS(res.maxDD)} color={BAD} />
+            <Tile label={t("Cum. P&L", "累计盈亏")} value={pctS(res.total)} color={res.total >= 0 ? GOOD : BAD} sub={t("Σ, fixed size / trade", "Σ·每笔固定仓")} />
+            <Tile label={t("Max drawdown", "最大回撤")} value={pctS(res.maxDD)} color={BAD} sub={t("of cum. P&L", "累计盈亏口径")} />
+            <Tile label={t("Profit factor", "盈亏比")} value={res.profitFactor === Infinity ? "∞" : res.profitFactor.toFixed(2)} color={res.profitFactor >= 1 ? GOOD : BAD} sub={t("gross win / loss", "总盈/总亏")} />
             <Tile label={t("Buy & hold", "买入持有")} value={pctS(res.benchmark)} sub={t("window baseline", "窗口基准")} />
-            <Tile label={t("Edge vs B&H", "超额")} value={pctS(edge)} color={edge >= 0 ? GOOD : BAD} />
           </div>
 
           {/* equity + histogram */}
-          <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
             <div className="rounded-2xl border border-line bg-panel p-4">
               <div className="mb-2 flex items-baseline justify-between">
                 <span className="text-[12px] font-semibold">{t("Equity curve", "资金曲线")}</span>
