@@ -311,3 +311,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rank-rise, .num-pop { animation: none; }
 }
+
+/* Backtest view — equity-curve draw-on. */
+@keyframes bt-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.bt-draw { stroke-dasharray: 1; animation: bt-draw 0.95s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .bt-draw { animation: none; stroke-dasharray: none; } }
