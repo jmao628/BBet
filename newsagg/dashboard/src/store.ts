@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CatalystData, ConvictionData, HeatData, Health, HomeWidget, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "./types";
+import type { CatalystData, ConvictionData, HeatData, Health, HomeWidget, MarketCaps, PriceTrack, SAData, TechnicalData, SectorData, SupplyChainData } from "./types";
 
 export type ConnStatus = "connecting" | "live" | "stale" | "error";
 export type Lang = "en" | "zh";
@@ -24,6 +24,7 @@ interface DashboardState {
   supplychain: SupplyChainData | null;
   catalyst: CatalystData | null;
   conviction: ConvictionData | null;
+  track: PriceTrack | null;
   marketCaps: MarketCaps | null;
   health: Health | null;
   status: ConnStatus;
@@ -39,6 +40,7 @@ interface DashboardState {
   setSupplychain: (s: SupplyChainData | null) => void;
   setCatalyst: (c: CatalystData | null) => void;
   setConviction: (c: ConvictionData | null) => void;
+  setTrack: (t: PriceTrack | null) => void;
   setMarketCaps: (m: MarketCaps | null) => void;
   setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
@@ -57,6 +59,7 @@ export const useStore = create<DashboardState>((set) => ({
   supplychain: null,
   catalyst: null,
   conviction: null,
+  track: null,
   marketCaps: null,
   health: null,
   status: "connecting",
@@ -72,6 +75,7 @@ export const useStore = create<DashboardState>((set) => ({
   setSupplychain: (s) => set({ supplychain: s }),
   setCatalyst: (c) => set({ catalyst: c }),
   setConviction: (c) => set({ conviction: c }),
+  setTrack: (t) => set({ track: t }),
   setMarketCaps: (m) => set({ marketCaps: m }),
   setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),

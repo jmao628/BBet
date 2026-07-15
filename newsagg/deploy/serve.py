@@ -37,10 +37,20 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
-        if urlparse(self.path).path == "/api/quote":
+        path = urlparse(self.path).path
+        if path == "/api/quote":
             self._serve_quote()
             return
+        if path == "/api/watchlist":
+            self._serve_watchlist_get()
+            return
         super().do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        if urlparse(self.path).path == "/api/watchlist":
+            self._serve_watchlist_post()
+            return
+        self._send_json(404, {"error": "not found"})
 
     def _send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -70,6 +80,49 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         out["ticker"] = ticker
         out["generated_at"] = datetime.now(timezone.utc).isoformat()
         self._send_json(200, out)
+
+    # The backtest watchlist, persisted server-side so the daily price-track job
+    # (newsagg.track) can pick it up and grow a dated history for those names.
+    def _watchlist_path(self) -> str:
+        import os
+
+        return os.path.join(self.directory, "data", "newsagg", "watchlist.json")
+
+    def _serve_watchlist_get(self) -> None:
+        try:
+            with open(self._watchlist_path(), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {"tickers": []}
+        self._send_json(200, data)
+
+    def _serve_watchlist_post(self) -> None:
+        import os
+        import re
+
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except ValueError:
+            self._send_json(400, {"error": "bad json"})
+            return
+        tickers = body.get("tickers") if isinstance(body, dict) else None
+        if not isinstance(tickers, list):
+            self._send_json(400, {"error": "tickers must be a list"})
+            return
+        clean: list[str] = []
+        seen: set[str] = set()
+        for t in tickers:
+            s = str(t).strip().upper()
+            if s and re.fullmatch(r"[A-Z0-9.\-]{1,8}", s) and s not in seen:
+                seen.add(s)
+                clean.append(s)
+        payload = {"tickers": clean, "updated_at": datetime.now(timezone.utc).isoformat()}
+        path = self._watchlist_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        self._send_json(200, payload)
 
     # Quieter logging — the default logs every poll request.
     def log_message(self, *args) -> None:  # noqa: D401

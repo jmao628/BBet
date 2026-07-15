@@ -7,7 +7,12 @@
 // so this is a short-horizon "what has been working lately" backtest, not a
 // multi-year study. It's for tuning entry/exit points against current behaviour.
 
-import type { TechnicalData } from "../types";
+// Minimal price source — anything with per-ticker close arrays. Both the trailing
+// technical file and the growing forward price-track satisfy this, so the engine
+// runs over either without change.
+export interface PriceSource {
+  tickers?: Record<string, { close_series?: number[] }>;
+}
 
 export type EntryKind = "breakout" | "momentum" | "bollinger" | "pullback";
 
@@ -118,7 +123,7 @@ function warmup(p: BtParams): number {
   return 21;
 }
 
-export function runBacktest(tech: TechnicalData | null, tickers: string[], p: BtParams): BtResult {
+export function runBacktest(tech: PriceSource | null, tickers: string[], p: BtParams): BtResult {
   const trades: Trade[] = [];
   const perT = new Map<string, Trade[]>();
   let benchSum = 0;
@@ -219,7 +224,7 @@ export interface SweepAxis { key: "lookback" | "holdDays" | "takeProfit" | "stop
 export interface SweepCell { rv: number; cv: number; avg: number; n: number; total: number }
 export interface SweepResult { rows: SweepAxis; cols: SweepAxis; cells: SweepCell[][]; best: { r: number; c: number } | null }
 
-export function optimize(tech: TechnicalData | null, tickers: string[], p: BtParams): SweepResult {
+export function optimize(tech: PriceSource | null, tickers: string[], p: BtParams): SweepResult {
   const pct = (v: number) => (v === 0 ? "off" : `${Math.round(v * 100)}%`);
   const holdAxis: SweepAxis = { key: "holdDays", label: "hold (days)", values: [3, 5, 8, 13, 21], fmt: (v) => String(v) };
   const usesLb = ENTRY_META[p.entry].usesLookback;

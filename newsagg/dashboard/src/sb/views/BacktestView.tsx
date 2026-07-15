@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
 import { buildFocus, buildShortlist } from "../pipeline";
 import {
@@ -167,6 +167,7 @@ export function BacktestView() {
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   const catalyst = useStore((s) => s.catalyst);
+  const track = useStore((s) => s.track);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
@@ -199,6 +200,32 @@ export function BacktestView() {
   // My-list tickers, parsed from the free-text box (comma / space / newline).
   const myList = useMemo(() => [...new Set(watchText.toUpperCase().split(/[^A-Z0-9.]+/).filter(Boolean))], [watchText]);
 
+  // Sync the watchlist with the server so the daily track job picks it up. Load
+  // on mount (server wins if it has names); save (debounced) on change.
+  const loaded = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/watchlist")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && Array.isArray(j.tickers) && j.tickers.length) setWatchText(j.tickers.join(" "));
+      })
+      .catch(() => {})
+      .finally(() => {
+        loaded.current = true;
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!loaded.current) return; // don't clobber the server before the initial load
+    const id = setTimeout(() => {
+      fetch("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: myList }) }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(id);
+  }, [myList]);
+
   const universes = useMemo(() => {
     const focus = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
     const shortlist = buildShortlist(focus, catalyst);
@@ -211,9 +238,22 @@ export function BacktestView() {
     } as Record<UniKey, string[]>;
   }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst, myList]);
 
-  const tickers = universes[uni];
-  const res = useMemo(() => runBacktest(technical, tickers, p), [technical, tickers, p]);
-  const sig = `${uni}|${p.entry}|${p.lookback}|${p.threshold}|${p.holdDays}|${p.stopLoss}|${p.takeProfit}|${res.n}`;
+  // Forward tracking: a growing dated close history (newsagg.track), adapted to
+  // the engine's price-source shape so the SAME strategy runs over it.
+  const forwardSrc = useMemo(
+    () => (track ? { tickers: Object.fromEntries(Object.entries(track.tickers).map(([tk, v]) => [tk, { close_series: v.closes }])) } : null),
+    [track],
+  );
+  const forwardTickers = useMemo(() => Object.keys(track?.tickers ?? {}), [track]);
+  const forwardDays = useMemo(() => Math.max(0, ...forwardTickers.map((tk) => track?.tickers?.[tk]?.closes.length ?? 0)), [forwardTickers, track]);
+
+  const [source, setSource] = useState<"trailing" | "forward">("trailing");
+  const priceSrc = source === "forward" ? forwardSrc : technical;
+  const tickers = source === "forward" ? forwardTickers : universes[uni];
+  const closesFor = (tk: string): number[] | undefined => (source === "forward" ? track?.tickers?.[tk]?.closes : technical?.tickers?.[tk]?.close_series);
+
+  const res = useMemo(() => runBacktest(priceSrc, tickers, p), [priceSrc, tickers, p]);
+  const sig = `${source}|${uni}|${p.entry}|${p.lookback}|${p.threshold}|${p.holdDays}|${p.stopLoss}|${p.takeProfit}|${res.n}`;
 
   const set = (patch: Partial<BtParams>) => setP((x) => ({ ...x, ...patch }));
   const meta = ENTRY_META[p.entry];
@@ -233,6 +273,25 @@ export function BacktestView() {
         {/* ── controls ── */}
         <div className="space-y-4">
           <div className="rounded-2xl border border-line bg-panel p-4">
+            {/* data source: trailing window vs forward track */}
+            <div className="mb-4 flex rounded-full border border-line p-0.5">
+              {(["trailing", "forward"] as const).map((s) => (
+                <button key={s} onClick={() => setSource(s)} className={`flex-1 rounded-full px-2 py-1 text-[11.5px] transition-colors ${source === s ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}>
+                  {s === "trailing" ? t("Trailing 60d", "近 60 日") : t("Forward track", "向前跟踪")}
+                </button>
+              ))}
+            </div>
+
+            {source === "forward" && (
+              <div className="mb-4 rounded-lg border border-line bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-muted">
+                {forwardDays > 1
+                  ? t(`Tracking ${forwardTickers.length} names since ${track?.start_date ?? "—"} · ${forwardDays} days logged. Grows daily.`, `已跟踪 ${forwardTickers.length} 只,自 ${track?.start_date ?? "—"} · 已记录 ${forwardDays} 天,每天自动累积。`)
+                  : t("Forward tracking just started — not enough days yet. Add names in My list (switch to Trailing 60d), then it records one point per day as the track job runs.", "向前跟踪刚开始 —— 天数还不够。切到「近 60 日」在「我的清单」加票,之后 track 任务每天记一个点,慢慢就能回测了。")}
+              </div>
+            )}
+
+            {source === "trailing" && (
+            <>
             <div className="mb-2 text-[11px] uppercase tracking-wide text-muted2">{t("Universe", "股票池")}</div>
             <div className="mb-4 grid grid-cols-2 gap-1.5">
               {UNIS.map((u) => (
@@ -241,8 +300,10 @@ export function BacktestView() {
                 </button>
               ))}
             </div>
+            </>
+            )}
 
-            {uni === "mylist" && (
+            {source === "trailing" && uni === "mylist" && (
               <div className="mb-4">
                 <textarea
                   value={watchText}
@@ -293,7 +354,7 @@ export function BacktestView() {
             </div>
 
             <div className="mt-4 flex gap-2">
-              <button onClick={() => setSweep(optimize(technical, tickers, p))} className="flex-1 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-[12px] font-semibold text-gold transition-colors hover:bg-gold/20" style={{ borderColor: "#f0c86288", color: "#f0c862", background: "#f0c86214" }}>
+              <button onClick={() => setSweep(optimize(priceSrc, tickers, p))} className="flex-1 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-[12px] font-semibold text-gold transition-colors hover:bg-gold/20" style={{ borderColor: "#f0c86288", color: "#f0c862", background: "#f0c86214" }}>
                 {t("⚡ Optimize", "⚡ 优化")}
               </button>
               <button onClick={() => setP(DEFAULT_P)} className="rounded-lg border border-line px-3 py-2 text-[12px] text-muted hover:text-text">{t("Reset", "重置")}</button>
@@ -373,7 +434,7 @@ export function BacktestView() {
                         <td className="px-2 text-right tabular-nums" style={{ color: s.win >= 0.5 ? GOOD : BAD }}>{Math.round(s.win * 100)}%</td>
                         <td className="px-2 text-right tabular-nums" style={{ color: s.avg >= 0 ? GOOD : BAD }}>{pctS(s.avg)}</td>
                         <td className="px-2 text-right font-semibold tabular-nums" style={{ color: s.total >= 0 ? GOOD : BAD }}>{pctS(s.total)}</td>
-                        <td className="px-2"><div className="flex justify-end"><Spark c={technical?.tickers?.[s.ticker]?.close_series} /></div></td>
+                        <td className="px-2"><div className="flex justify-end"><Spark c={closesFor(s.ticker)} /></div></td>
                       </tr>
                     ))}
                   </tbody>

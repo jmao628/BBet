@@ -222,3 +222,11 @@ export interface ConvictionTicker {
   generated_at: string;
 }
 export type ConvictionData = Record<string, ConvictionTicker>;
+
+// Growing, dated close history for the backtest watchlist (newsagg.track) — used
+// to FORWARD-track a strategy from the day tracking started.
+export interface PriceTrack {
+  start_date?: string;
+  generated_at?: string;
+  tickers: Record<string, { dates: string[]; closes: number[] }>;
+}
