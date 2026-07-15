@@ -13,6 +13,7 @@ const SUPPLY_URL = "/data/newsagg/supplychain.json";
 const CATALYST_URL = "/data/newsagg/catalyst.json";
 const CONVICTION_URL = "/data/newsagg/conviction.json";
 const TRACK_URL = "/data/newsagg/price_track.json";
+const HISTORY_URL = "/data/newsagg/price_history.json";
 const MCAP_URL = "/data/newsagg/marketcaps.json";
 const HEALTH_URL = "/data/newsagg/health.json";
 const POLL_MS = 15_000;
@@ -27,6 +28,7 @@ export function usePoller() {
   const setCatalyst = useStore((s) => s.setCatalyst);
   const setConviction = useStore((s) => s.setConviction);
   const setTrack = useStore((s) => s.setTrack);
+  const setHistory = useStore((s) => s.setHistory);
   const setMarketCaps = useStore((s) => s.setMarketCaps);
   const setHealth = useStore((s) => s.setHealth);
   const setStatus = useStore((s) => s.setStatus);
@@ -103,6 +105,12 @@ export function usePoller() {
         /* ignore */
       }
       try {
+        const phres = await fetch(`${HISTORY_URL}?t=${Date.now()}`);
+        if (alive) setHistory(phres.ok ? ((await phres.json()) as PriceTrack) : null);
+      } catch {
+        /* ignore */
+      }
+      try {
         const mres = await fetch(`${MCAP_URL}?t=${Date.now()}`);
         if (alive) setMarketCaps(mres.ok ? ((await mres.json()) as MarketCaps) : null);
       } catch {
@@ -122,5 +130,5 @@ export function usePoller() {
       alive = false;
       clearInterval(id);
     };
-  }, [setData, setHeat, setTechnical, setSectors, setSupplychain, setCatalyst, setConviction, setTrack, setMarketCaps, setHealth, setStatus]);
+  }, [setData, setHeat, setTechnical, setSectors, setSupplychain, setCatalyst, setConviction, setTrack, setHistory, setMarketCaps, setHealth, setStatus]);
 }

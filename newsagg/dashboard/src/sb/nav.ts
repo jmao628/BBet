@@ -47,7 +47,7 @@ export const RANKING: NavStage = {
 export const BACKTEST: NavStage = {
   key: "backtest",
   step: null,
-  en: "Backtest",
-  zh: "回测实验室",
-  hint: { en: "tune entry points · optimizer", zh: "打磨点位 · 优化器" },
+  en: "Tracker",
+  zh: "组合跟踪",
+  hint: { en: "your basket since Day 1", zh: "自选组合 · 自 Day 1" },
 };

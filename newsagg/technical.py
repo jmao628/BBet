@@ -31,6 +31,7 @@ from newsagg.marketcap import seed_tickers
 logger = logging.getLogger("newsagg.technical")
 
 TECHNICAL_FILE = "technical_latest.json"
+PRICE_HISTORY_FILE = "price_history.json"  # dated 1y closes per ticker (for the tracker)
 
 
 @dataclass
@@ -370,39 +371,49 @@ def _fetch_bars(ticker: str) -> dict | None:
     df = yf.Ticker(ticker.replace(".", "-")).history(period="1y", auto_adjust=False)
     if df is None or df.empty:
         return None
-    highs, lows, closes, volumes = [], [], [], []
-    for h, low, c, v in zip(df["High"], df["Low"], df["Close"], df["Volume"]):
+    highs, lows, closes, volumes, dates = [], [], [], [], []
+    for ts, h, low, c, v in zip(df.index, df["High"], df["Low"], df["Close"], df["Volume"]):
         if c != c or v != v:  # skip NaN rows
             continue
         highs.append(float(h))
         lows.append(float(low))
         closes.append(float(c))
         volumes.append(float(v))
-    return {"highs": highs, "lows": lows, "closes": closes, "volumes": volumes}
+        dates.append(ts.date().isoformat() if hasattr(ts, "date") else str(ts)[:10])
+    return {"highs": highs, "lows": lows, "closes": closes, "volumes": volumes, "dates": dates}
 
 
-def build_technical(tickers: list[str], p: TechParams | None = None, workers: int = 8) -> dict:
+def build_technical(tickers: list[str], p: TechParams | None = None, workers: int = 8) -> tuple[dict, dict]:
+    """Returns (technicals, price_history) — the second is dated 1y closes per
+    ticker for the tracker (return-since-Day-1 for any date)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     p = p or TechParams()
 
-    def one(t: str) -> tuple[str, dict | None]:
+    def one(t: str) -> tuple[str, dict | None, dict | None]:
         try:
             bars = _fetch_bars(t)
-            return t, (compute_ticker(bars, p) if bars else None)
+            tech = compute_ticker(bars, p) if bars else None
+            hist = None
+            if bars and len(bars["closes"]) >= 2 and bars.get("dates"):
+                hist = {"dates": bars["dates"], "closes": [round(c, 4) for c in bars["closes"]]}
+            return t, tech, hist
         except Exception:  # noqa: BLE001
-            return t, None
+            return t, None, None
 
     out: dict[str, dict] = {}
+    hist_out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(one, t) for t in tickers]
         for i, fut in enumerate(as_completed(futures), 1):
-            t, res = fut.result()
+            t, res, hist = fut.result()
             if res:
                 out[t] = res
+            if hist:
+                hist_out[t] = hist
             if i % 40 == 0:
                 logger.info("  %d/%d…", i, len(tickers))
-    return out
+    return out, hist_out
 
 
 def main() -> int:
@@ -422,7 +433,7 @@ def main() -> int:
         return 1
 
     logger.info("computing technicals for %d tickers…", len(tickers))
-    tech = build_technical(tickers)
+    tech, history = build_technical(tickers)
     out_path = settings.output_dir / TECHNICAL_FILE
 
     if not tech:
@@ -446,6 +457,19 @@ def main() -> int:
     }
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload))
+
+    # Dated 1y close history for the tracker (return-since-Day-1). Merge with any
+    # existing file so a name that failed this run keeps its prior history.
+    if history:
+        hist_path = settings.output_dir / PRICE_HISTORY_FILE
+        try:
+            existing = json.loads(hist_path.read_text()).get("tickers", {}) if hist_path.exists() else {}
+        except ValueError:
+            existing = {}
+        existing.update(history)
+        hist_path.write_text(json.dumps({"generated_at": payload["generated_at"], "tickers": existing}))
+        logger.info("wrote price history for %d tickers", len(existing))
+
     logger.info("wrote technicals for %d/%d tickers", len(tech), len(tickers))
     print(f"technicals: {len(tech)}/{len(tickers)}")
     return 0

@@ -25,6 +25,7 @@ interface DashboardState {
   catalyst: CatalystData | null;
   conviction: ConvictionData | null;
   track: PriceTrack | null;
+  history: PriceTrack | null; // dated 1y closes per ticker (tracker)
   marketCaps: MarketCaps | null;
   health: Health | null;
   status: ConnStatus;
@@ -41,6 +42,7 @@ interface DashboardState {
   setCatalyst: (c: CatalystData | null) => void;
   setConviction: (c: ConvictionData | null) => void;
   setTrack: (t: PriceTrack | null) => void;
+  setHistory: (h: PriceTrack | null) => void;
   setMarketCaps: (m: MarketCaps | null) => void;
   setHealth: (h: Health | null) => void;
   setStatus: (s: ConnStatus) => void;
@@ -60,6 +62,7 @@ export const useStore = create<DashboardState>((set) => ({
   catalyst: null,
   conviction: null,
   track: null,
+  history: null,
   marketCaps: null,
   health: null,
   status: "connecting",
@@ -76,6 +79,7 @@ export const useStore = create<DashboardState>((set) => ({
   setCatalyst: (c) => set({ catalyst: c }),
   setConviction: (c) => set({ conviction: c }),
   setTrack: (t) => set({ track: t }),
+  setHistory: (h) => set({ history: h }),
   setMarketCaps: (m) => set({ marketCaps: m }),
   setHealth: (h) => set({ health: h }),
   setStatus: (s) => set({ status: s }),

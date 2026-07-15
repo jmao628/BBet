@@ -1,43 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildFocus, buildShortlist } from "../pipeline";
-import {
-  ENTRY_META,
-  optimize,
-  runBacktest,
-  type BtParams,
-  type BtResult,
-  type EntryKind,
-  type SweepResult,
-} from "../backtest";
+import { buildFocus, buildShortlist, sectorLabel } from "../pipeline";
+import { buildBasket, type Basket } from "../tracker";
 import { ViewHead } from "../ui";
 
 const GOOD = "#48c78e";
 const BAD = "#e0785a";
-const pctS = (v: number, d = 1): string => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`;
+const TIER_COLOR: Record<1 | 2 | 3, string> = { 1: "#f0c862", 2: "#cdd6e2", 3: "#cd8b5e" };
+const pctS = (v: number | null | undefined, d = 1): string => (v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`);
+const retColor = (v: number | null | undefined): string => (v == null ? "var(--muted2)" : v >= 0 ? GOOD : BAD);
 
-const DEFAULT_P: BtParams = { entry: "breakout", lookback: 10, threshold: 0.05, holdDays: 5, stopLoss: 0.05, takeProfit: 0.12 };
-const STORE_KEY = "midea.backtest.v1";
-function loadParams(): BtParams {
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+const LIST_KEY = "midea.track.list.v1";
+const DAY1_KEY = "midea.track.day1.v1";
+function loadList(): string[] {
   try {
-    const s = localStorage.getItem(STORE_KEY);
-    if (s) return { ...DEFAULT_P, ...(JSON.parse(s) as Partial<BtParams>) };
+    const s = localStorage.getItem(LIST_KEY);
+    if (s) return JSON.parse(s) as string[];
   } catch {
     /* ignore */
   }
-  return DEFAULT_P;
+  return [];
 }
-
-function Slider({ label, value, min, max, step, onChange, fmt }: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; fmt: (v: number) => string }) {
-  return (
-    <label className="block">
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-[11px] text-muted2">{label}</span>
-        <span className="font-mono text-[12px] font-semibold text-text">{fmt(value)}</span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" style={{ accentColor: "var(--signal, #3dd6c4)" }} />
-    </label>
-  );
+function loadDay1(): string {
+  try {
+    return localStorage.getItem(DAY1_KEY) || todayISO();
+  } catch {
+    return todayISO();
+  }
 }
 
 function Tile({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
@@ -45,119 +35,50 @@ function Tile({ label, value, color, sub }: { label: string; value: string; colo
     <div className="rounded-xl border border-line bg-panel2 px-3.5 py-3">
       <div className="text-[10px] uppercase tracking-wide text-muted2">{label}</div>
       <div className="mt-1 font-disp text-[22px] font-bold leading-none tabular-nums" style={{ color: color ?? "var(--text)" }}>{value}</div>
-      {sub && <div className="mt-1 text-[10px] text-muted2">{sub}</div>}
+      {sub && <div className="mt-1 truncate text-[10px] text-muted2">{sub}</div>}
     </div>
   );
 }
 
-function EquityCurve({ equity, sig }: { equity: number[]; sig: string }) {
-  if (equity.length < 2) return <div className="grid h-56 place-items-center text-[12px] text-muted2">no trades under these rules</div>;
-  const W = 100, H = 100;
-  const min = Math.min(...equity, 0);
-  const max = Math.max(...equity, 0);
-  const x = (i: number) => (i / (equity.length - 1)) * W;
-  const y = (v: number) => H - ((v - min) / (max - min || 1)) * H;
-  const pts = equity.map((v, i) => `${x(i).toFixed(2)},${y(v).toFixed(2)}`);
-  const line = "M" + pts.join(" L");
-  const area = `M${x(0)},${H} L` + pts.join(" L") + ` L${x(equity.length - 1)},${H} Z`;
-  const up = equity[equity.length - 1] >= 0;
-  const col = up ? GOOD : BAD;
-  const yb = y(0);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-56 w-full">
-      <defs>
-        <linearGradient id="eqg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={col} stopOpacity="0.24" />
-          <stop offset="1" stopColor={col} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <line x1="0" y1={yb} x2={W} y2={yb} stroke="var(--line2,#2b3a48)" strokeWidth="0.5" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
-      <path d={area} fill="url(#eqg)" />
-      <path key={sig} d={line} className="bt-draw" fill="none" stroke={col} strokeWidth="1.6" pathLength={1} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function Histogram({ hist }: { hist: BtResult["hist"] }) {
-  const maxC = Math.max(1, ...hist.map((b) => b.count));
-  const lab = (lo: number, hi: number) => {
-    if (lo === -Infinity) return `<${Math.round(hi * 100)}`;
-    if (hi === Infinity) return `>${Math.round(lo * 100)}`;
-    return `${Math.round(lo * 100)}`;
-  };
-  return (
-    <div className="flex h-32 items-end gap-1">
-      {hist.map((b, i) => {
-        const col = b.hi <= 0 ? BAD : GOOD;
-        return (
-          <div key={i} className="flex flex-1 flex-col items-center justify-end">
-            <span className="mb-1 font-mono text-[9px] text-muted2">{b.count || ""}</span>
-            <div className="w-full rounded-t transition-[height] duration-500" style={{ height: `${(b.count / maxC) * 100}%`, minHeight: b.count ? 2 : 0, background: col, opacity: 0.9 }} />
-            <span className="mt-1 font-mono text-[8px] text-muted2">{lab(b.lo, b.hi)}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Heatmap({ sweep, onPick, t }: { sweep: SweepResult; onPick: (hold: number, colKey: SweepResult["cols"]["key"], colVal: number) => void; t: (en: string, zh: string) => string }) {
-  const maxAbs = Math.max(0.005, ...sweep.cells.flat().map((c) => Math.abs(c.avg)));
-  return (
-    <div className="overflow-x-auto">
-      <div className="inline-grid gap-1" style={{ gridTemplateColumns: `auto repeat(${sweep.cols.values.length}, minmax(52px, 1fr))` }}>
-        <div />
-        {sweep.cols.values.map((cv) => (
-          <div key={cv} className="pb-1 text-center font-mono text-[10px] text-muted2">{sweep.cols.fmt(cv)}</div>
-        ))}
-        {sweep.cells.map((row, r) => (
-          <div key={r} className="contents">
-            <div className="flex items-center justify-end pr-1.5 font-mono text-[10px] text-muted2">{sweep.rows.fmt(sweep.rows.values[r])}</div>
-            {row.map((cell, c) => {
-              const isBest = sweep.best?.r === r && sweep.best?.c === c;
-              const bg = cell.avg >= 0 ? `rgba(72,199,142,${(cell.avg / maxAbs) * 0.6 + 0.06})` : `rgba(224,120,90,${(Math.abs(cell.avg) / maxAbs) * 0.6 + 0.06})`;
-              return (
-                <button
-                  key={c}
-                  onClick={() => onPick(sweep.rows.values[r], sweep.cols.key, cell.cv)}
-                  title={`${cell.n} trades`}
-                  className="grid h-11 place-items-center rounded-md text-[11px] font-semibold tabular-nums transition-transform hover:scale-[1.05]"
-                  style={{ background: bg, color: "#e9eef3", outline: isBest ? "2px solid #f0c862" : "none", boxShadow: isBest ? "0 0 14px #f0c86255" : undefined }}
-                >
-                  {cell.n < 5 ? "·" : pctS(cell.avg, 1)}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 text-[10px] text-muted2">{t("Cell = avg return per trade under those exit rules. Gold = best (≥8 trades). Click to apply.", "格子 = 该退出参数下每笔平均收益。金框 = 最优(≥8 笔)。点击套用。")}</div>
-    </div>
-  );
-}
-
-function Spark({ c }: { c: number[] | undefined }) {
+function Spark({ c, up }: { c: number[]; up: boolean }) {
   if (!c || c.length < 2) return null;
   const min = Math.min(...c);
   const max = Math.max(...c);
   const pts = c.map((v, i) => `${((i / (c.length - 1)) * 100).toFixed(1)},${(28 - ((v - min) / (max - min || 1)) * 26).toFixed(1)}`).join(" ");
-  const up = c[c.length - 1] >= c[0];
   return (
-    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-6 w-20">
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-6 w-24">
       <polyline points={pts} fill="none" stroke={up ? GOOD : BAD} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
 
-const UNIS = [
-  { key: "mylist", en: "My list", zh: "我的清单" },
-  { key: "focus", en: "Focus List", zh: "重点名单" },
-  { key: "tier1", en: "Shortlist T1", zh: "登顶金档" },
-  { key: "tier2", en: "Shortlist T1+2", zh: "登顶金+银" },
-  { key: "all", en: "All priced", zh: "全部有价" },
-] as const;
-type UniKey = (typeof UNIS)[number]["key"];
-const WATCH_KEY = "midea.backtest.watch.v1";
+// Basket value curve, 1.0 at Day 1.
+function BasketCurve({ curve, sig }: { curve: Basket["curve"]; sig: string }) {
+  if (curve.length < 2) return <div className="grid h-52 place-items-center text-[12px] text-muted2">not enough days yet — the basket curve grows daily</div>;
+  const W = 100, H = 100;
+  const vals = curve.map((c) => c.v);
+  const min = Math.min(...vals, 1);
+  const max = Math.max(...vals, 1);
+  const x = (i: number) => (i / (curve.length - 1)) * W;
+  const y = (v: number) => H - ((v - min) / (max - min || 1)) * H;
+  const pts = curve.map((c, i) => `${x(i).toFixed(2)},${y(c.v).toFixed(2)}`);
+  const up = vals[vals.length - 1] >= 1;
+  const col = up ? GOOD : BAD;
+  const area = `M${x(0)},${H} L` + pts.join(" L") + ` L${x(curve.length - 1)},${H} Z`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-52 w-full">
+      <defs>
+        <linearGradient id="bkg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={col} stopOpacity="0.22" />
+          <stop offset="1" stopColor={col} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <line x1="0" y1={y(1)} x2={W} y2={y(1)} stroke="var(--line2,#2b3a48)" strokeWidth="0.5" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
+      <path d={area} fill="url(#bkg)" />
+      <path key={sig} d={"M" + pts.join(" L")} className="bt-draw" fill="none" stroke={col} strokeWidth="1.6" pathLength={1} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export function BacktestView() {
   const data = useStore((s) => s.data);
@@ -167,48 +88,38 @@ export function BacktestView() {
   const supplychain = useStore((s) => s.supplychain);
   const marketCaps = useStore((s) => s.marketCaps);
   const catalyst = useStore((s) => s.catalyst);
-  const track = useStore((s) => s.track);
+  const history = useStore((s) => s.history);
   const openDetail = useStore((s) => s.openDetail);
   const lang = useStore((s) => s.lang);
   const t = useT();
 
-  const [p, setP] = useState<BtParams>(loadParams);
-  const [uni, setUni] = useState<UniKey>("tier2");
-  const [sweep, setSweep] = useState<SweepResult | null>(null);
-  const [watchText, setWatchText] = useState<string>(() => {
-    try {
-      return localStorage.getItem(WATCH_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(p));
-    } catch {
-      /* ignore */
-    }
-  }, [p]);
-  useEffect(() => {
-    try {
-      localStorage.setItem(WATCH_KEY, watchText);
-    } catch {
-      /* ignore */
-    }
-  }, [watchText]);
+  const [myList, setMyList] = useState<string[]>(loadList);
+  const [day1, setDay1] = useState<string>(loadDay1);
+  const [q, setQ] = useState("");
 
-  // My-list tickers, parsed from the free-text box (comma / space / newline).
-  const myList = useMemo(() => [...new Set(watchText.toUpperCase().split(/[^A-Z0-9.]+/).filter(Boolean))], [watchText]);
+  // The shortlisted pool — every name that reached the Shortlist (all tiers).
+  const shortlist = useMemo(() => {
+    const focus = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
+    return buildShortlist(focus, catalyst);
+  }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst]);
 
-  // Sync the watchlist with the server so the daily track job picks it up. Load
-  // on mount (server wins if it has names); save (debounced) on change.
+  const inList = useMemo(() => new Set(myList), [myList]);
+  const pool = useMemo(() => {
+    const needle = q.trim().toUpperCase();
+    return shortlist.filter((r) => !needle || r.ticker.includes(needle) || (r.company || "").toUpperCase().includes(needle));
+  }, [shortlist, q]);
+
+  const basket = useMemo(() => buildBasket(history, myList, day1), [history, myList, day1]);
+  const sig = `${day1}|${myList.join(",")}|${basket.curve.length}`;
+
+  // Persist + sync the list with the server (so the daily jobs price these names).
   const loaded = useRef(false);
   useEffect(() => {
     let alive = true;
     fetch("/api/watchlist")
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
-        if (alive && j && Array.isArray(j.tickers) && j.tickers.length) setWatchText(j.tickers.join(" "));
+        if (alive && j && Array.isArray(j.tickers) && j.tickers.length) setMyList(j.tickers as string[]);
       })
       .catch(() => {})
       .finally(() => {
@@ -219,222 +130,140 @@ export function BacktestView() {
     };
   }, []);
   useEffect(() => {
-    if (!loaded.current) return; // don't clobber the server before the initial load
+    try {
+      localStorage.setItem(LIST_KEY, JSON.stringify(myList));
+    } catch {
+      /* ignore */
+    }
+    if (!loaded.current) return;
     const id = setTimeout(() => {
       fetch("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: myList }) }).catch(() => {});
     }, 800);
     return () => clearTimeout(id);
   }, [myList]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(DAY1_KEY, day1);
+    } catch {
+      /* ignore */
+    }
+  }, [day1]);
 
-  const universes = useMemo(() => {
-    const focus = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
-    const shortlist = buildShortlist(focus, catalyst);
-    return {
-      mylist: myList,
-      focus: focus.map((f) => f.ticker),
-      tier1: shortlist.filter((r) => r.tier === 1).map((r) => r.ticker),
-      tier2: shortlist.filter((r) => r.tier <= 2).map((r) => r.ticker),
-      all: Object.keys(technical?.tickers ?? {}),
-    } as Record<UniKey, string[]>;
-  }, [data, heat, technical, marketCaps, sectors, supplychain, catalyst, myList]);
+  const add = (tk: string) => {
+    const s = tk.trim().toUpperCase();
+    if (s && !myList.includes(s)) setMyList((l) => [...l, s]);
+  };
+  const remove = (tk: string) => setMyList((l) => l.filter((x) => x !== tk));
 
-  // Forward tracking: a growing dated close history (newsagg.track), adapted to
-  // the engine's price-source shape so the SAME strategy runs over it.
-  const forwardSrc = useMemo(
-    () => (track ? { tickers: Object.fromEntries(Object.entries(track.tickers).map(([tk, v]) => [tk, { close_series: v.closes }])) } : null),
-    [track],
-  );
-  const forwardTickers = useMemo(() => Object.keys(track?.tickers ?? {}), [track]);
-  const forwardDays = useMemo(() => Math.max(0, ...forwardTickers.map((tk) => track?.tickers?.[tk]?.closes.length ?? 0)), [forwardTickers, track]);
-
-  const [source, setSource] = useState<"trailing" | "forward">("trailing");
-  const priceSrc = source === "forward" ? forwardSrc : technical;
-  const tickers = source === "forward" ? forwardTickers : universes[uni];
-  const closesFor = (tk: string): number[] | undefined => (source === "forward" ? track?.tickers?.[tk]?.closes : technical?.tickers?.[tk]?.close_series);
-
-  const res = useMemo(() => runBacktest(priceSrc, tickers, p), [priceSrc, tickers, p]);
-  const sig = `${source}|${uni}|${p.entry}|${p.lookback}|${p.threshold}|${p.holdDays}|${p.stopLoss}|${p.takeProfit}|${res.n}`;
-
-  const set = (patch: Partial<BtParams>) => setP((x) => ({ ...x, ...patch }));
-  const meta = ENTRY_META[p.entry];
+  const pickRows = [...basket.picks].sort((a, b) => (b.ret ?? -Infinity) - (a.ret ?? -Infinity));
 
   return (
     <div className="view-in">
       <ViewHead
-        eyebrow={t("Lab · Backtest", "实验室 · 回测")}
-        title={t("Backtest · Tune Your Entry Points", "回测 · 打磨你的交易点位")}
+        eyebrow={t("Lab · Tracker", "实验室 · 组合跟踪")}
+        title={t("Portfolio Tracker · Returns Since Day 1", "组合跟踪 · 自 Day 1 的收益")}
         desc={t(
-          "Run an entry/exit strategy over the recent daily price history of a chosen universe. See how the trade points would have performed, which stocks worked best, then let the optimizer sweep the exit rules to find and apply the best settings. Your tuned rule is remembered.",
-          "在选定股票池的近期日线价格上,跑一套进出场策略,看这些交易点位的历史表现、哪些股票最吃这套规则,再用优化器扫描退出参数、找出并一键套用最优设定。你调好的规则会被记住。",
+          "Drag names from the shortlisted pool into your basket, set a Day 1, and track each stock's and the equal-weight basket's return since then. Prices are kept and refreshed by the daily jobs, so the record keeps growing.",
+          "从登顶名单里把票拖进你的组合,设一个 Day 1,就能跟踪每只票、以及等权组合自那天起的收益。价格由每日任务保留并刷新,记录持续增长。",
         )}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-        {/* ── controls ── */}
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-line bg-panel p-4">
-            {/* data source: trailing window vs forward track */}
-            <div className="mb-4 flex rounded-full border border-line p-0.5">
-              {(["trailing", "forward"] as const).map((s) => (
-                <button key={s} onClick={() => setSource(s)} className={`flex-1 rounded-full px-2 py-1 text-[11.5px] transition-colors ${source === s ? "bg-signal/15 text-signal" : "text-muted hover:text-text"}`}>
-                  {s === "trailing" ? t("Trailing 60d", "近 60 日") : t("Forward track", "向前跟踪")}
-                </button>
-              ))}
-            </div>
+      {/* Day 1 + basket summary */}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-xl border border-line bg-panel2 px-3.5 py-3">
+          <div className="text-[10px] uppercase tracking-wide text-muted2">{t("Day 1", "起始日")}</div>
+          <input
+            type="date"
+            value={day1}
+            min={basket.minDate ?? undefined}
+            max={todayISO()}
+            onChange={(e) => setDay1(e.target.value || todayISO())}
+            className="mt-1 w-full bg-transparent font-mono text-[13px] text-text focus:outline-none"
+            style={{ colorScheme: "dark" }}
+          />
+        </div>
+        <Tile label={t("Basket return", "组合收益")} value={pctS(basket.ret)} color={retColor(basket.ret)} sub={t(`${basket.covered} tracked · ${basket.days}d`, `${basket.covered} 只 · ${basket.days} 天`)} />
+        <Tile label={t("Best", "最强")} value={basket.best ? `${basket.best.ticker} ${pctS(basket.best.ret)}` : "—"} color={GOOD} />
+        <Tile label={t("Worst", "最弱")} value={basket.worst ? `${basket.worst.ticker} ${pctS(basket.worst.ret)}` : "—"} color={BAD} />
+        <Tile label={t("Names", "只数")} value={String(myList.length)} sub={basket.covered < myList.length ? t(`${myList.length - basket.covered} pending data`, `${myList.length - basket.covered} 只待数据`) : t("all priced", "均有价格")} />
+        <Tile label={t("Since", "自")} value={basket.days ? `${basket.days}d` : "—"} sub={day1} />
+      </div>
 
-            {source === "forward" && (
-              <div className="mb-4 rounded-lg border border-line bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-muted">
-                {forwardDays > 1
-                  ? t(`Tracking ${forwardTickers.length} names since ${track?.start_date ?? "—"} · ${forwardDays} days logged. Grows daily.`, `已跟踪 ${forwardTickers.length} 只,自 ${track?.start_date ?? "—"} · 已记录 ${forwardDays} 天,每天自动累积。`)
-                  : t("Forward tracking just started — not enough days yet. Add names in My list (switch to Trailing 60d), then it records one point per day as the track job runs.", "向前跟踪刚开始 —— 天数还不够。切到「近 60 日」在「我的清单」加票,之后 track 任务每天记一个点,慢慢就能回测了。")}
-              </div>
-            )}
-
-            {source === "trailing" && (
-            <>
-            <div className="mb-2 text-[11px] uppercase tracking-wide text-muted2">{t("Universe", "股票池")}</div>
-            <div className="mb-4 grid grid-cols-2 gap-1.5">
-              {UNIS.map((u) => (
-                <button key={u.key} onClick={() => setUni(u.key)} className={`rounded-lg border px-2 py-1.5 text-[12px] transition-colors ${uni === u.key ? "border-signal/60 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}>
-                  {lang === "zh" ? u.zh : u.en}
-                </button>
-              ))}
-            </div>
-            </>
-            )}
-
-            {source === "trailing" && uni === "mylist" && (
-              <div className="mb-4">
-                <textarea
-                  value={watchText}
-                  onChange={(e) => setWatchText(e.target.value)}
-                  placeholder={t("Add your tickers: NVDA MSFT AAPL …", "加入你的代码：NVDA MSFT AAPL …")}
-                  rows={2}
-                  className="w-full resize-none rounded-lg border border-line bg-inset px-2.5 py-2 font-mono text-[12px] text-text placeholder:text-muted2 focus:border-signal/60 focus:outline-none"
-                />
-                {myList.length > 0 && (
-                  <>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {myList.map((tk) => {
-                        const has = !!technical?.tickers?.[tk]?.close_series;
-                        return (
-                          <span key={tk} className="rounded px-1.5 py-[1px] font-mono text-[10px]" style={{ color: has ? "var(--text)" : BAD, background: has ? "rgba(255,255,255,0.06)" : "#e0785a1a" }} title={has ? "" : t("no price data in the system yet", "系统里暂无价格数据")}>
-                            {tk}{has ? "" : " ✕"}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-1.5 text-[10px] text-muted2">
-                      {t(
-                        `${myList.filter((tk) => technical?.tickers?.[tk]?.close_series).length}/${myList.length} have price history — the rest are skipped (add them to the price fetch to include).`,
-                        `${myList.filter((tk) => technical?.tickers?.[tk]?.close_series).length}/${myList.length} 有价格历史,其余跳过(需把它们加进价格抓取才能纳入)。`,
-                      )}
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-
-            <div className="mb-2 text-[11px] uppercase tracking-wide text-muted2">{t("Entry signal", "进场信号")}</div>
-            <div className="mb-1 grid grid-cols-2 gap-1.5">
-              {(Object.keys(ENTRY_META) as EntryKind[]).map((k) => (
-                <button key={k} onClick={() => set({ entry: k })} className={`rounded-lg border px-2 py-1.5 text-[12px] transition-colors ${p.entry === k ? "border-signal/60 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}>
-                  {lang === "zh" ? ENTRY_META[k].zh : ENTRY_META[k].en}
-                </button>
-              ))}
-            </div>
-            <p className="mb-4 text-[10.5px] text-muted2">{lang === "zh" ? meta.desc.zh : meta.desc.en}</p>
-
-            <div className="space-y-3.5">
-              {meta.usesLookback && <Slider label={t("Lookback (days)", "回看 (天)")} value={p.lookback} min={3} max={40} step={1} onChange={(v) => set({ lookback: v })} fmt={(v) => String(v)} />}
-              {meta.usesThreshold && <Slider label={t("Momentum threshold", "动量阈值")} value={p.threshold} min={0} max={0.3} step={0.01} onChange={(v) => set({ threshold: v })} fmt={(v) => `${Math.round(v * 100)}%`} />}
-              <Slider label={t("Max hold (days)", "最长持有 (天)")} value={p.holdDays} min={1} max={30} step={1} onChange={(v) => set({ holdDays: v })} fmt={(v) => String(v)} />
-              <Slider label={t("Stop-loss", "止损")} value={p.stopLoss} min={0} max={0.25} step={0.01} onChange={(v) => set({ stopLoss: v })} fmt={(v) => (v === 0 ? t("off", "关") : `${Math.round(v * 100)}%`)} />
-              <Slider label={t("Take-profit", "止盈")} value={p.takeProfit} min={0} max={0.5} step={0.01} onChange={(v) => set({ takeProfit: v })} fmt={(v) => (v === 0 ? t("off", "关") : `${Math.round(v * 100)}%`)} />
-            </div>
-
-            <div className="mt-4 flex gap-2">
-              <button onClick={() => setSweep(optimize(priceSrc, tickers, p))} className="flex-1 rounded-lg border border-gold/50 bg-gold/10 px-3 py-2 text-[12px] font-semibold text-gold transition-colors hover:bg-gold/20" style={{ borderColor: "#f0c86288", color: "#f0c862", background: "#f0c86214" }}>
-                {t("⚡ Optimize", "⚡ 优化")}
-              </button>
-              <button onClick={() => setP(DEFAULT_P)} className="rounded-lg border border-line px-3 py-2 text-[12px] text-muted hover:text-text">{t("Reset", "重置")}</button>
-            </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+        {/* Shortlisted pool */}
+        <div className="rounded-2xl border border-line bg-panel p-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[12px] font-semibold">{t("Shortlisted", "登顶名单")}</span>
+            <span className="font-mono text-[11px] text-muted2">{shortlist.length}</span>
           </div>
-
-          <p className="px-1 text-[10px] leading-relaxed text-muted2">
-            {t(`Window ≈ last ${res.window} trading days · ${tickers.length} names. Short-horizon, in-sample — a signal-quality check, not a promise.`, `窗口 ≈ 近 ${res.window} 个交易日 · ${tickers.length} 只。短周期、样本内 —— 是信号质量检验,不是收益承诺。`)}
-          </p>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={t("search ticker / name…", "搜代码 / 名称…")}
+            className="mb-2 w-full rounded-lg border border-line bg-inset px-2.5 py-1.5 text-[12px] text-text placeholder:text-muted2 focus:border-signal/60 focus:outline-none"
+          />
+          <div className="max-h-[560px] space-y-1 overflow-y-auto pr-1">
+            {pool.slice(0, 400).map((r) => {
+              const on = inList.has(r.ticker);
+              return (
+                <div
+                  key={r.ticker}
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", r.ticker)}
+                  onClick={() => (on ? remove(r.ticker) : add(r.ticker))}
+                  className={`flex cursor-grab items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors active:cursor-grabbing ${on ? "border-signal/40 bg-signal/[0.07]" : "border-line hover:border-line2 hover:bg-white/[0.02]"}`}
+                  title={t("drag into your basket, or click to add", "拖进组合,或点击加入")}
+                >
+                  <span className="h-2 w-2 flex-none rounded-full" style={{ background: TIER_COLOR[r.tier] }} title={`Tier ${r.tier}`} />
+                  <span className="font-disp text-[13px] font-bold text-text">{r.ticker}</span>
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-muted2">{r.company || "—"}{r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""}</span>
+                  <span className="flex-none text-[13px]" style={{ color: on ? GOOD : "var(--muted2)" }}>{on ? "✓" : "+"}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* ── results ── */}
+        {/* My basket + curve */}
         <div className="space-y-4">
-          {/* stat tiles */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Tile label={t("Trades", "交易数")} value={String(res.n)} />
-            <Tile label={t("Win rate", "胜率")} value={`${Math.round(res.winRate * 100)}%`} color={res.winRate >= 0.5 ? GOOD : BAD} />
-            <Tile label={t("Avg / trade", "每笔均收")} value={pctS(res.avg)} color={res.avg >= 0 ? GOOD : BAD} />
-            <Tile label={t("Median", "中位")} value={pctS(res.median)} color={res.median >= 0 ? GOOD : BAD} />
-            <Tile label={t("Cum. P&L", "累计盈亏")} value={pctS(res.total)} color={res.total >= 0 ? GOOD : BAD} sub={t("Σ, fixed size / trade", "Σ·每笔固定仓")} />
-            <Tile label={t("Max drawdown", "最大回撤")} value={pctS(res.maxDD)} color={BAD} sub={t("of cum. P&L", "累计盈亏口径")} />
-            <Tile label={t("Profit factor", "盈亏比")} value={res.profitFactor === Infinity ? "∞" : res.profitFactor.toFixed(2)} color={res.profitFactor >= 1 ? GOOD : BAD} sub={t("gross win / loss", "总盈/总亏")} />
-            <Tile label={t("Buy & hold", "买入持有")} value={pctS(res.benchmark)} sub={t("window baseline", "窗口基准")} />
-          </div>
-
-          {/* equity + histogram */}
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-            <div className="rounded-2xl border border-line bg-panel p-4">
-              <div className="mb-2 flex items-baseline justify-between">
-                <span className="text-[12px] font-semibold">{t("Equity curve", "资金曲线")}</span>
-                <span className="font-mono text-[11px]" style={{ color: res.total >= 0 ? GOOD : BAD }}>{pctS(res.total)}</span>
-              </div>
-              <EquityCurve equity={res.equity} sig={sig} />
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              add(e.dataTransfer.getData("text/plain"));
+            }}
+            className="rounded-2xl border border-dashed border-line2 bg-panel p-3"
+          >
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="text-[12px] font-semibold">{t("My basket", "我的组合")}</span>
+              {myList.length > 0 && <button onClick={() => setMyList([])} className="text-[11px] text-muted2 hover:text-text">{t("clear", "清空")}</button>}
             </div>
-            <div className="rounded-2xl border border-line bg-panel p-4">
-              <div className="mb-2 text-[12px] font-semibold">{t("Return distribution", "收益分布")}</div>
-              <Histogram hist={res.hist} />
-              <div className="mt-1 text-center text-[9px] text-muted2">{t("per-trade return (%)", "每笔收益 (%)")}</div>
-            </div>
-          </div>
-
-          {/* optimizer heatmap */}
-          {sweep && (
-            <div className="view-in rounded-2xl border border-line bg-panel p-4">
-              <div className="mb-3 flex items-baseline gap-2">
-                <span className="text-[12px] font-semibold" style={{ color: "#f0c862" }}>{t("Optimizer", "优化器")}</span>
-                <span className="text-[10.5px] text-muted2">{sweep.rows.label} × {sweep.cols.label}</span>
-                <button onClick={() => setSweep(null)} className="ml-auto text-[11px] text-muted2 hover:text-text">{t("hide", "收起")}</button>
-              </div>
-              <Heatmap sweep={sweep} onPick={(hold, key, val) => set({ holdDays: hold, [key]: val } as Partial<BtParams>)} t={t} />
-            </div>
-          )}
-
-          {/* per-ticker leaderboard */}
-          <div className="rounded-2xl border border-line bg-panel p-4">
-            <div className="mb-3 text-[12px] font-semibold">{t("Which stocks worked best", "哪些股票最吃这套规则")}</div>
-            {res.perTicker.length === 0 ? (
-              <div className="py-6 text-center text-[12px] text-muted2">{t("No trades — loosen the rules.", "没有交易 —— 放宽规则。")}</div>
+            {myList.length === 0 ? (
+              <div className="grid h-24 place-items-center text-center text-[12px] text-muted2">{t("Drag names here (or click one on the left) to start your basket.", "把票拖到这里(或点左边)开始你的组合。")}</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-[12px]">
+                <table className="w-full text-[12.5px]">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wide text-muted2">
                       <th className="py-1.5 text-left font-medium">{t("Ticker", "标的")}</th>
-                      <th className="px-2 text-right font-medium">{t("Trades", "笔")}</th>
-                      <th className="px-2 text-right font-medium">{t("Win", "胜率")}</th>
-                      <th className="px-2 text-right font-medium">{t("Avg", "均收")}</th>
-                      <th className="px-2 text-right font-medium">{t("Total", "累计")}</th>
-                      <th className="px-2 text-right font-medium">{t("Recent", "近况")}</th>
+                      <th className="px-2 text-right font-medium">{t("Day 1", "起始价")}</th>
+                      <th className="px-2 text-right font-medium">{t("Now", "现价")}</th>
+                      <th className="px-2 text-right font-medium">{t("Return", "收益")}</th>
+                      <th className="px-2 text-right font-medium">{t("Since Day 1", "自 Day 1")}</th>
+                      <th className="px-1"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {res.perTicker.slice(0, 14).map((s) => (
-                      <tr key={s.ticker} onClick={() => openDetail(s.ticker)} className="cursor-pointer border-t border-line/60 hover:bg-white/[0.02]">
-                        <td className="py-1.5 font-disp font-bold text-text">{s.ticker}</td>
-                        <td className="px-2 text-right tabular-nums text-muted">{s.n}</td>
-                        <td className="px-2 text-right tabular-nums" style={{ color: s.win >= 0.5 ? GOOD : BAD }}>{Math.round(s.win * 100)}%</td>
-                        <td className="px-2 text-right tabular-nums" style={{ color: s.avg >= 0 ? GOOD : BAD }}>{pctS(s.avg)}</td>
-                        <td className="px-2 text-right font-semibold tabular-nums" style={{ color: s.total >= 0 ? GOOD : BAD }}>{pctS(s.total)}</td>
-                        <td className="px-2"><div className="flex justify-end"><Spark c={closesFor(s.ticker)} /></div></td>
+                    {pickRows.map((p) => (
+                      <tr key={p.ticker} className="border-t border-line/60">
+                        <td className="py-1.5">
+                          <button onClick={() => openDetail(p.ticker)} className="font-disp font-bold text-text hover:text-signal">{p.ticker}</button>
+                        </td>
+                        <td className="px-2 text-right tabular-nums text-muted2">{p.day1Close != null ? p.day1Close.toFixed(2) : "—"}</td>
+                        <td className="px-2 text-right tabular-nums text-muted">{p.nowClose != null ? p.nowClose.toFixed(2) : "—"}</td>
+                        <td className="px-2 text-right font-semibold tabular-nums" style={{ color: retColor(p.ret) }}>{p.has ? pctS(p.ret) : t("pending", "待数据")}</td>
+                        <td className="px-2"><div className="flex justify-end">{p.spark.length > 1 ? <Spark c={p.spark} up={(p.ret ?? 0) >= 0} /> : null}</div></td>
+                        <td className="px-1 text-right"><button onClick={() => remove(p.ticker)} className="text-muted2 hover:text-[#e0785a]" title={t("remove", "移除")}>✕</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -442,6 +271,21 @@ export function BacktestView() {
               </div>
             )}
           </div>
+
+          <div className="rounded-2xl border border-line bg-panel p-4">
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="text-[12px] font-semibold">{t("Basket value since Day 1", "组合净值 · 自 Day 1")}</span>
+              <span className="font-mono text-[11px]" style={{ color: retColor(basket.ret) }}>{pctS(basket.ret)}</span>
+            </div>
+            <BasketCurve curve={basket.curve} sig={sig} />
+          </div>
+
+          <p className="text-[11px] leading-relaxed text-muted2">
+            {t(
+              "Equal-weight buy-&-hold from Day 1 (no stop / target / holding limit). If a name shows \"pending\", its price history hasn't been fetched yet — it fills in on the next daily run. Set Day 1 within the available history.",
+              "自 Day 1 起等权买入持有(无止损/止盈/持有限制)。若某只显示「待数据」,说明它的价格历史还没抓到,下一次每日运行会补上。Day 1 请设在已有历史范围内。",
+            )}
+          </p>
         </div>
       </div>
     </div>
