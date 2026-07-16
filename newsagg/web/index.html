@@ -3,204 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SeekingAlpha Tracker</title>
+  <title>MIDEA</title>
+  <!-- The dashboard is the React app under ./dashboard/. This legacy path
+       redirects there so /newsagg/web/ and /newsagg/web/dashboard/ both land
+       on MIDEA. (The old static "SeekingAlpha Tracker" page lives in git
+       history if ever needed.) -->
+  <meta http-equiv="refresh" content="0; url=./dashboard/" />
+  <script>location.replace("./dashboard/");</script>
   <style>
-    :root {
-      --bg: #0d1117; --panel: #161b22; --border: #2a313c; --text: #e6edf3;
-      --muted: #8b949e; --accent: #2f81f7; --green: #2ea043; --greenbg: #12351f;
-      --strong: #3fb950; --strongbg: #113526; --chip: #21262d;
-      --qbg: #1b3b28; --qtext: #4ade80;
-    }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f6f8fa; --panel: #ffffff; --border: #d0d7de; --text: #1f2328;
-        --muted: #636c76; --accent: #0969da; --green: #1a7f37; --greenbg: #dafbe1;
-        --strong: #1a7f37; --strongbg: #caf0d8; --chip: #eef1f4;
-        --qbg: #1f5132; --qtext: #ffffff;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    header {
-      position: sticky; top: 0; z-index: 10; background: var(--panel);
-      border-bottom: 1px solid var(--border); padding: 14px 20px;
-      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    }
-    header h1 { font-size: 17px; margin: 0; font-weight: 650; }
-    .meta { color: var(--muted); font-size: 12.5px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
-      display: inline-block; margin-right: 5px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-    button {
-      margin-left: auto; background: var(--accent); color: #fff; border: 0;
-      padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
-    }
-    button:disabled { opacity: .5; cursor: default; }
-    main { max-width: 1180px; margin: 0 auto; padding: 20px; }
-    .panel {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 10px; margin-bottom: 20px; overflow: hidden;
-    }
-    .panel > h2 {
-      font-size: 14px; margin: 0; padding: 12px 16px; font-weight: 620;
-      border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center;
-    }
-    .count { color: var(--muted); font-weight: 400; font-size: 12.5px; }
-    .wdesc { padding: 10px 16px 0; color: var(--muted); font-size: 12.5px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px 16px; border-bottom: 1px solid var(--border); }
-    th { color: var(--muted); font-weight: 550; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
-    tr:last-child td { border-bottom: 0; }
-    tbody tr:hover { background: rgba(127,127,127,.06); }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .tk { font-weight: 650; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .rank { color: var(--muted); font-variant-numeric: tabular-nums; width: 34px; }
-    .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
-    .b-buy { background: var(--greenbg); color: var(--green); }
-    .b-strong { background: var(--strongbg); color: var(--strong); }
-    .qbox { display: inline-block; min-width: 42px; text-align: center; background: var(--qbg);
-      color: var(--qtext); font-weight: 650; font-size: 12.5px; padding: 2px 6px; border-radius: 4px;
-      font-variant-numeric: tabular-nums; }
-    .empty { padding: 22px 16px; color: var(--muted); }
-    .err { color: #f85149; font-size: 12.5px; }
-    .truncate { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    /* widget columns */
-    .wcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0; }
-    .wcol { border-right: 1px solid var(--border); }
-    .wcol:last-child { border-right: 0; }
-    .wcol-h { font-weight: 620; font-size: 12.5px; padding: 10px 16px 4px; color: var(--text); }
-    .co { color: var(--muted); }
+    html, body { margin: 0; height: 100%; background: #0a1017; color: #8695a3;
+      font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .wrap { height: 100%; display: grid; place-items: center; }
+    a { color: #3dd6c4; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>📈 SeekingAlpha Tracker</h1>
-    <span class="meta"><span class="dot"></span><span id="status">loading…</span></span>
-    <span class="meta" id="updated"></span>
-    <button id="refresh" onclick="load()">Refresh</button>
-  </header>
-
-  <main>
-    <div id="errors"></div>
-
-    <div class="panel">
-      <h2>Analyst Buy / Strong Buy Calls <span class="count" id="picks-count"></span></h2>
-      <div id="picks"></div>
-    </div>
-
-    <!-- Homepage widgets (Quant Ratings, Analyst Coverage, Top Quant, Compelling Ideas, Strong Buys) -->
-    <div id="widgets"></div>
-
-    <div class="panel">
-      <h2>Top Performing Analysts <span class="count" id="top-count"></span></h2>
-      <div id="top"></div>
-    </div>
-  </main>
-
-  <script>
-    const DATA_URL = "/data/newsagg/seekingalpha_latest.json";
-    const REFRESH_MS = 60_000;
-
-    const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-    function ratingCell(r) {
-      if (!r) return "";
-      if (/^[0-5]\.\d{2}$/.test(r)) return `<span class="qbox">${esc(r)}</span>`;
-      const cls = /strong/i.test(r) ? "b-strong" : "b-buy";
-      return `<span class="badge ${cls}">${esc(r)}</span>`;
-    }
-
-    // A single ticker row inside a widget column.
-    function widgetRow(row) {
-      const sym = `<a class="tk" href="https://seekingalpha.com/symbol/${esc(row.ticker)}" target="_blank">${esc(row.ticker)}</a>`;
-      const mid = row.article
-        ? `<a href="${esc(row.article_url)}" target="_blank" class="truncate" style="display:inline-block">${esc(row.article)}</a>${row.analyst ? `<div class="co" style="font-size:12px">${esc(row.analyst)}</div>` : ""}`
-        : `<span class="co">${esc(row.company || "")}</span>`;
-      return `<tr><td style="width:70px">${sym}</td><td>${mid}</td><td style="width:70px;text-align:right">${ratingCell(row.rating)}</td></tr>`;
-    }
-
-    function renderWidgets(widgets) {
-      const host = document.getElementById("widgets");
-      if (!widgets.length) { host.innerHTML = ""; return; }
-      host.innerHTML = widgets.map(w => {
-        const total = w.groups.reduce((n, g) => n + g.rows.length, 0);
-        const cols = w.groups.map(g => `
-          <div class="wcol">
-            ${g.label ? `<div class="wcol-h">${esc(g.label)}</div>` : ""}
-            <table><tbody>${g.rows.map(widgetRow).join("")}</tbody></table>
-          </div>`).join("");
-        return `<div class="panel">
-          <h2>${esc(w.title)} <span class="count">(${total})</span></h2>
-          ${w.description ? `<div class="wdesc">${esc(w.description)}</div>` : ""}
-          <div class="wcols">${cols}</div>
-        </div>`;
-      }).join("");
-    }
-
-    function ratingBadge(r) {
-      const cls = /strong/i.test(r) ? "b-strong" : "b-buy";
-      return `<span class="badge ${cls}">${esc(r)}</span>`;
-    }
-
-    function renderPicks(picks) {
-      document.getElementById("picks-count").textContent = picks.length ? `(${picks.length})` : "";
-      const el = document.getElementById("picks");
-      if (!picks.length) { el.innerHTML = `<div class="empty">No analyst calls from the Top Analysts page yet (see "Most Compelling Analyst Ideas" below).</div>`; return; }
-      const rows = picks.map(p => `
-        <tr>
-          <td class="rank">${p.rank ?? ""}</td>
-          <td>${p.profile_url ? `<a href="${esc(p.profile_url)}" target="_blank">${esc(p.analyst)}</a>` : esc(p.analyst)}</td>
-          <td><span class="tk">${esc(p.ticker)}</span></td>
-          <td>${ratingBadge(p.rating)}</td>
-          <td class="truncate">${p.article_url ? `<a href="${esc(p.article_url)}" target="_blank">${esc(p.article_title || "article")}</a>` : esc(p.article_title || "")}</td>
-          <td class="meta">${p.published ? esc(p.published.slice(0, 10)) : ""}</td>
-        </tr>`).join("");
-      el.innerHTML = `<table><thead><tr>
-        <th>#</th><th>Analyst</th><th>Ticker</th><th>Rating</th><th>Article</th><th>Date</th>
-      </tr></thead><tbody>${rows}</tbody></table>`;
-    }
-
-    function renderTop(analysts) {
-      document.getElementById("top-count").textContent = analysts.length ? `(${analysts.length})` : "";
-      const el = document.getElementById("top");
-      if (!analysts.length) { el.innerHTML = `<div class="empty">No analysts found.</div>`; return; }
-      const rows = analysts.slice(0, 50).map(a => `
-        <tr><td class="rank">${a.rank ?? ""}</td>
-        <td><a href="${esc(a.profile_url)}" target="_blank">${esc(a.name)}</a></td></tr>`).join("");
-      el.innerHTML = `<table><thead><tr><th>#</th><th>Analyst</th></tr></thead><tbody>${rows}</tbody></table>`;
-    }
-
-    async function load() {
-      const btn = document.getElementById("refresh");
-      btn.disabled = true;
-      try {
-        const res = await fetch(DATA_URL + "?t=" + Date.now());
-        if (!res.ok) throw new Error("no data file yet (run the scraper first)");
-        const d = await res.json();
-        renderPicks(d.analyst_picks || []);
-        renderWidgets(d.home_widgets || []);
-        renderTop(d.top_analysts || []);
-        document.getElementById("status").textContent = "live";
-        document.getElementById("updated").textContent =
-          d.generated_at ? "updated " + new Date(d.generated_at).toLocaleString() : "";
-        document.getElementById("errors").innerHTML = (d.errors && d.errors.length)
-          ? `<div class="panel"><div class="empty err">scrape warnings: ${esc(d.errors.join("; "))}</div></div>` : "";
-      } catch (e) {
-        document.getElementById("status").textContent = "waiting for data";
-        document.getElementById("errors").innerHTML =
-          `<div class="panel"><div class="empty err">${esc(e.message)}</div></div>`;
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    load();
-    setInterval(load, REFRESH_MS);
-  </script>
+  <div class="wrap">
+    <div>Loading MIDEA… if it doesn't open, go to <a href="./dashboard/">./dashboard/</a>.</div>
+  </div>
 </body>
 </html>
