@@ -42,8 +42,9 @@ def _load(path: Path) -> dict[str, dict]:
 def _fetch_one(ticker: str) -> dict | None:
     import yfinance as yf
 
+    tk = yf.Ticker(ticker.replace(".", "-"))
     try:
-        info = yf.Ticker(ticker.replace(".", "-")).info
+        info = tk.info
     except Exception:  # noqa: BLE001
         return None
     if not isinstance(info, dict):
@@ -54,6 +55,19 @@ def _fetch_one(ticker: str) -> dict | None:
     if not sector and not industry:
         return None
     mc = info.get("marketCap")
+    # Belt-and-suspenders: if .info didn't carry a market cap, try fast_info
+    # before giving up, so more tickers get a real number in one pass.
+    if not (isinstance(mc, (int, float)) and mc > 0):
+        try:
+            fi = tk.fast_info
+            mc = getattr(fi, "market_cap", None)
+            if mc is None:
+                try:
+                    mc = fi["marketCap"]
+                except Exception:  # noqa: BLE001
+                    mc = None
+        except Exception:  # noqa: BLE001
+            mc = None
     # Always store the key (0 = genuinely no cap from yfinance) so the backfill
     # check below treats it as done and never re-fetches it every run.
     market_cap = int(mc) if isinstance(mc, (int, float)) and mc > 0 else 0
