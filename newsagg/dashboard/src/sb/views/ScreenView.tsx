@@ -55,71 +55,54 @@ export function ScreenView() {
   }, [candidates, sectors]);
   const shownCands = scSector ? candidates.filter((x) => sectorOf(x.ticker) === scSector) : candidates;
 
-  // Ecosystem network. SELECTION RULE — a ticker earns a row (becomes the
-  // "subject") only if it is a *discovery target*: in your universe AND not a
-  // mega-cap (≥$100B). Mega-caps (AMZN, NVDA, MSFT…) are anchors — you don't
-  // "discover" them, so they never sit on the left; they only appear as chips
-  // that a target is tied to. RANKING — by how many other universe names it
-  // links to (its centrality); ties broken alphabetically. That's why CRDO (a
-  // small cap) is a row and AMZN (its mega-cap customer) is only a chip.
-  const links = useMemo(() => {
-    if (!supplychain) return [];
+  // Ecosystem network — grouped strictly BY SECTOR. Each graph contains ONLY
+  // that sector's own stocks (Tech shows tech, never WFC). Within a sector the
+  // ring is split by MARKET CAP: large caps sit on the inner gold ring, smaller
+  // caps on the outer blue ring. Edges are supply-chain ties that stay inside
+  // the sector (a member's supplier/customer/peer that is ALSO in this sector).
+  const ecoSectors = useMemo(() => {
+    const bySector = new Map<string, EcoMember[]>();
+    if (!supplychain) return bySector;
     const uni = buildUniverse(data);
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
     const eco = buildEcoAdjacency(supplychain, marketCaps); // symmetrized
-    type Neighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
-    const rows: { ticker: string; company: string; neighbors: Neighbor[]; anchors: number; crit: number }[] = [];
-    for (const [tk, ns] of eco) {
-      // Selection: a discovery target = in-universe, not a mega-cap anchor, and
-      // not a tiny/illiquid micro-cap (skip < $300M when the cap is known).
-      if (!inUni.has(tk) || bypassesHeat(marketCaps?.[tk])) continue;
-      const mc = marketCaps?.[tk];
-      if (typeof mc === "number" && mc < 3e8) continue;
-      // Nodes must be in YOUR universe (passed the seed screen) — an off-universe
-      // name like DELL/NOW that never entered the seed table is not drawn.
-      const neighbors = ns
-        .filter((n) => inUni.has(n.ticker) && n.ticker !== tk)
-        .sort((a, b) => Number(b.anchor) - Number(a.anchor) || b.importance - a.importance);
-      if (!neighbors.length) continue;
-      rows.push({
-        ticker: tk,
-        company: companyOf.get(tk) ?? "",
-        neighbors,
-        anchors: neighbors.filter((n) => n.anchor).length,
-        crit: neighbors.filter((n) => n.importance >= 3).length,
-      });
+    for (const u of uni) {
+      const sec = sectorOf(u.ticker);
+      if (!sec) continue;
+      const cap = marketCaps?.[u.ticker];
+      if (typeof cap === "number" && cap < 3e8) continue; // drop tiny/illiquid
+      // Keep only ties whose other end is in THIS sector and in your universe —
+      // that is what makes the graph a pure single-sector network.
+      const links = (eco.get(u.ticker) ?? [])
+        .filter((n) => n.ticker !== u.ticker && inUni.has(n.ticker) && sectorOf(n.ticker) === sec)
+        .map((n) => ({ ticker: n.ticker, kind: n.kind, importance: n.importance }));
+      const m: EcoMember = {
+        ticker: u.ticker,
+        company: companyOf.get(u.ticker) ?? "",
+        cap: typeof cap === "number" ? cap : 0,
+        big: bypassesHeat(cap), // ≥$100B ⇒ inner gold ring
+        links,
+      };
+      if (!bySector.has(sec)) bySector.set(sec, []);
+      bySector.get(sec)!.push(m);
     }
-    // Rank by total links, then mega-cap anchors, then critical ties, then alpha.
-    rows.sort(
-      (a, b) =>
-        b.neighbors.length - a.neighbors.length ||
-        b.anchors - a.anchors ||
-        b.crit - a.crit ||
-        a.ticker.localeCompare(b.ticker),
-    );
-    return rows;
-  }, [supplychain, data, marketCaps]);
-
-  // A target shows in the graph if it's tied to ANY in-universe mega-cap
-  // ecosystem HUB (supplier, customer, OR peer — role shown by edge colour).
-  // Upstream-supplier-only was too narrow: whole sectors (esp. Technology) hang
-  // their mega-cap ties on CUSTOMERS/PEERS (NVDA, MSFT, AMZN), while their true
-  // suppliers (TSMC, ASML) are foreign / not in your universe — so they vanished.
-  const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string }[] }) => {
-    const sec = sectorOf(r.ticker);
-    return !!sec && r.neighbors.some((n) => n.anchor);
-  };
-  const ecoSectorCounts = useMemo(() => {
-    const c = new Map<string, number>();
-    for (const r of links) if (graphEligible(r)) c.set(sectorOf(r.ticker), (c.get(sectorOf(r.ticker)) ?? 0) + 1);
-    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+    return bySector;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [links, sectors]);
+  }, [supplychain, data, marketCaps, sectors]);
+
+  const ecoSectorCounts = useMemo(
+    () => [...ecoSectors.entries()].map(([s, m]) => [s, m.length] as [string, number]).sort((a, b) => b[1] - a[1]),
+    [ecoSectors],
+  );
   // The ecosystem graph is always ONE sector (a mixed "All" is an unreadable
-  // hairball). Default to the sector with the most targets.
+  // hairball). Default to the sector with the most names.
   const effEcoSector = ecoSector ?? ecoSectorCounts[0]?.[0] ?? null;
-  const ecoRows = effEcoSector ? links.filter((r) => sectorOf(r.ticker) === effEcoSector) : links;
+  const ecoMembers = effEcoSector ? ecoSectors.get(effEcoSector) ?? [] : [];
+  const linkTotal = useMemo(
+    () => [...ecoSectors.values()].reduce((s, m) => s + m.length, 0),
+    [ecoSectors],
+  );
 
   // Nodes to "light up" = names scoring high on YOUR Focus List (score ≥ 7/10).
   const hotScores = useMemo(() => {
@@ -168,13 +151,13 @@ export function ScreenView() {
         <Card
           title={t("Ecosystem Links", "生态关联网络")}
           sub={
-            links.length
-              ? t(`${links.length} targets across sectors · pick one below`, `${links.length} 个目标(跨板块) · 下方选板块`)
-              : t("no cross-universe links mapped yet", "尚未映射到跨 universe 关联")
+            linkTotal
+              ? t(`${linkTotal} names · grouped by sector · pick one below`, `${linkTotal} 只 · 按板块分组 · 下方选板块`)
+              : t("no in-sector links mapped yet", "尚未映射到板块内关联")
           }
           right={<MethodInfo />}
         >
-          {links.length === 0 ? (
+          {linkTotal === 0 ? (
             <div className="py-6 text-center text-[12.5px] text-muted">
               {t(
                 "Once more tickers are mapped (python -m newsagg.supplychain), the ones whose suppliers/customers/peers are also in your universe show up here — the interconnected cluster worth focusing on.",
@@ -187,12 +170,21 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time — every node is a name from YOUR seed universe. Centre = the sector; inner gold ring = the mega-cap ecosystem HUBS these names are tied to (≥$100B, any sector — supplier, customer, or peer; the edge colour tells you which); outer nodes = discovery targets, placed near the hubs they connect to. A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块——每个节点都是你 seed 库里的票。中心 = 该板块；内圈金色 = 这些票关联到的大票**生态枢纽**（≥$1000亿,可跨板块——供应商 / 客户 / 同业,连线颜色区分）；外圈 = 发现目标,摆在它关联的枢纽附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time — every node belongs to THIS sector (a Tech graph shows only Tech names). Centre = the sector. Inner gold ring = its large-cap members (≥$100B market cap); outer blue ring = the smaller-cap names. Edges are supply-chain ties that stay inside the sector — a member's supplier, customer, or peer that is also in this sector (edge colour tells you which). A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块——每个节点都属于该板块（Tech 图里只有 Tech 的票）。中心 = 该板块。内圈金色 = 板块内大市值成员（≥$1000亿市值）；外圈蓝色 = 小市值成员。连线是留在板块内部的产业链关系——某成员的供应商 / 客户 / 同业且同属该板块（连线颜色区分）。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span className="text-muted2">{t("Edge colour = target's role to the anchor:", "连线颜色 = 目标对锚的角色：")}</span>
+                  <span className="flex items-center gap-1.5" style={{ color: "#f0d78a" }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: "#e9c46a" }} />
+                    {t("large cap (≥$100B)", "大市值（≥$1000亿）")}
+                  </span>
+                  <span className="flex items-center gap-1.5" style={{ color: "#8fd6ea" }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: "#5fb0e8" }} />
+                    {t("smaller cap", "小市值")}
+                  </span>
+                  <span className="text-muted2">·</span>
+                  <span className="text-muted2">{t("Edge colour = tie type:", "连线颜色 = 关系类型：")}</span>
                   {(["upstream", "downstream", "peers"] as const).map((k) => (
                     <span key={k} className="flex items-center gap-1.5" style={{ color: GRP_COLOR[k] }}>
                       <span className="h-2 w-2 rounded-full" style={{ background: GRP_COLOR[k] }} />
@@ -220,7 +212,7 @@ export function ScreenView() {
                   ))}
                 </div>
               )}
-              <EcoGraph rows={ecoRows} scores={hotScores} hub={hubLabel} onOpen={openDetail} t={t} />
+              <EcoGraph members={ecoMembers} scores={hotScores} hub={hubLabel} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -338,46 +330,55 @@ export function ScreenView() {
 }
 
 // ── Ecosystem graph ────────────────────────────────────────────────────────
-// A radial network: a central hub → the mega-cap anchors (inner ring) → the
-// discovery targets (outer ring), each placed near the anchors it links to.
-// Connections are drawn as animated "flowing light" edges coloured by role.
-type EcoNeighbor = { ticker: string; kind: string; anchor: boolean; importance: number };
-type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; anchors: number; crit: number };
+// A radial network for ONE sector. Centre = the sector hub. Inner gold ring =
+// its large-cap members (≥$100B); outer blue ring = the smaller-cap members.
+// Every node belongs to this sector — no cross-sector nodes. Edges are
+// supply-chain ties that stay inside the sector, coloured by tie type.
+type EcoLink = { ticker: string; kind: string; importance: number };
+type EcoMember = { ticker: string; company: string; cap: number; big: boolean; links: EcoLink[] };
 
 function EcoGraph({
-  rows,
+  members,
   scores,
   hub,
   onOpen,
   t,
 }: {
-  rows: EcoRow[];
+  members: EcoMember[];
   scores: Map<string, number>;
   hub: string;
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
-  const TOPT = 24;
-  // A supplier anchor = an in-universe mega-cap UPSTREAM hub the target depends
-  // A hub = any in-universe mega-cap ecosystem tie (supplier / customer / peer —
-  // the edge colour tells you which). Broadened from upstream-only so tech (tied
-  // to mega-cap customers/peers) and every other sector actually populate.
-  const isHub = (n: EcoNeighbor) => n.anchor;
-  const eligible = rows.filter((r) => r.neighbors.some(isHub));
-  const total = eligible.length;
-  const targets = eligible.slice(0, TOPT);
+  const RING_BIG = 16; // max large-caps on the inner ring
+  const RING_SMALL = 30; // max smaller-caps on the outer ring
+  const byCap = [...members].sort((a, b) => b.cap - a.cap);
+  let big = byCap.filter((m) => m.big);
+  let small = byCap.filter((m) => !m.big);
+  // Fallback: a sector with no true mega-cap still gets a gold "anchor" ring —
+  // promote its largest few names so the graph has a readable inner hub.
+  if (!big.length && byCap.length) {
+    const k = Math.min(3, byCap.length);
+    big = byCap.slice(0, k);
+    small = byCap.slice(k);
+  }
+  big = big.slice(0, RING_BIG);
+  // Keep the most connected / Focus-listed smaller names when there are many.
+  small = [...small]
+    .sort(
+      (a, b) =>
+        (scores.has(b.ticker) ? 1 : 0) - (scores.has(a.ticker) ? 1 : 0) ||
+        b.links.length - a.links.length ||
+        b.cap - a.cap,
+    )
+    .slice(0, RING_SMALL);
 
-  // The mega-cap hubs, most-cited first (cap the ring).
-  const freq = new Map<string, number>();
-  for (const r of eligible) for (const n of r.neighbors) if (isHub(n)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
-  const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).map((e) => e[0]);
-  const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
-  if (!targets.length || !anchors.length) {
+  if (!big.length && !small.length) {
     return (
       <div className="py-10 text-center text-[12.5px] text-muted">
         {t(
-          "No anchor-linked targets in this view yet — refresh supply-chain, or widen the sector filter.",
-          "此视图暂无挂靠大票锚的目标——刷新供应链数据，或放宽板块筛选。",
+          "No names mapped in this sector yet — refresh supply-chain, or pick another sector.",
+          "该板块暂无映射到的票——刷新供应链数据，或换一个板块。",
         )}
       </div>
     );
@@ -387,37 +388,42 @@ function EcoGraph({
   const cx = W / 2;
   const cy = 350;
   const H = 700;
-  const Ri = 132;
-  const Ro = 292;
-  const aAngle = (i: number) => (i / anchors.length) * 2 * Math.PI - Math.PI / 2;
-  const aPos = (i: number) => ({ x: cx + Ri * Math.cos(aAngle(i)), y: cy + Ri * Math.sin(aAngle(i)) });
+  const Ri = big.length > 1 ? 150 : 0;
+  const Ro = 300;
 
-  // order targets by the circular mean of their anchor angles, then space evenly
-  const withAngle = targets.map((r) => {
-    let sx = 0;
-    let sy = 0;
-    for (const n of r.neighbors) {
-      const i = anchorIdx.get(n.ticker);
-      if (n.anchor && i != null) {
-        sx += Math.cos(aAngle(i));
-        sy += Math.sin(aAngle(i));
-      }
+  const bAngle = (i: number) => (big.length ? (i / big.length) * 2 * Math.PI - Math.PI / 2 : 0);
+  const bPos = (i: number) =>
+    big.length === 1 ? { x: cx, y: cy } : { x: cx + Ri * Math.cos(bAngle(i)), y: cy + Ri * Math.sin(bAngle(i)) };
+  const sAngle = (i: number) => (small.length ? (i / small.length) * 2 * Math.PI - Math.PI / 2 : 0);
+  const sPos = (i: number) => ({ x: cx + Ro * Math.cos(sAngle(i)), y: cy + Ro * Math.sin(sAngle(i)) });
+
+  // Position lookup for edge drawing (every drawn node, by ticker).
+  const pos = new Map<string, { x: number; y: number }>();
+  big.forEach((m, i) => pos.set(m.ticker, bPos(i)));
+  small.forEach((m, i) => pos.set(m.ticker, sPos(i)));
+
+  // Same-sector edges, de-duplicated by unordered pair. Keep the strongest tie.
+  const edges = new Map<string, { a: string; b: string; kind: string; importance: number }>();
+  for (const m of members) {
+    if (!pos.has(m.ticker)) continue;
+    for (const l of m.links) {
+      if (!pos.has(l.ticker)) continue;
+      const key = m.ticker < l.ticker ? `${m.ticker}|${l.ticker}` : `${l.ticker}|${m.ticker}`;
+      const prev = edges.get(key);
+      if (!prev || l.importance > prev.importance)
+        edges.set(key, { a: m.ticker, b: l.ticker, kind: l.kind, importance: l.importance });
     }
-    return { r, ang: Math.atan2(sy, sx) };
-  });
-  withAngle.sort((a, b) => a.ang - b.ang);
-  const n = withAngle.length;
-  const tAngle = (i: number) => (i / n) * 2 * Math.PI - Math.PI / 2;
-  const tPos = (i: number) => ({ x: cx + Ro * Math.cos(tAngle(i)), y: cy + Ro * Math.sin(tAngle(i)) });
+  }
 
   const GRP: Record<string, string> = GRP_COLOR;
+  const drawn = big.length + small.length;
 
   return (
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `${total > TOPT ? `Top ${targets.length} of ${total}` : `${total}`} hub-linked targets · ${anchors.length} hubs · glowing = on your Focus List · click any node`,
-          `${total > TOPT ? `前 ${targets.length} / 共 ${total}` : `${total}`} 个枢纽关联目标 · ${anchors.length} 个枢纽 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
+          `${hub} sector · ${drawn} names shown (${members.length} total) · ${big.length} large-cap · ${small.length} smaller · glowing = on your Focus List · click any node`,
+          `${hub} 板块 · 展示 ${drawn} 只（共 ${members.length}）· ${big.length} 大市值 · ${small.length} 小市值 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
@@ -430,34 +436,31 @@ function EcoGraph({
           </defs>
           <circle cx={cx} cy={cy} r={210} fill="url(#ecoCoreGlow)" />
 
-          {/* center → anchor spokes */}
-          {anchors.map((_, i) => {
-            const p = aPos(i);
-            return <line key={`ca${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e9c46a55" strokeWidth={1.2} />;
-          })}
+          {/* center → large-cap spokes */}
+          {big.length > 1 &&
+            big.map((_, i) => {
+              const p = bPos(i);
+              return <line key={`cb${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e9c46a55" strokeWidth={1.2} />;
+            })}
 
-          {/* target → anchor edges (animated flowing light) */}
-          {withAngle.map(({ r }, ti) => {
-            const tp = tPos(ti);
-            return r.neighbors
-              .filter((nb) => nb.anchor && anchorIdx.has(nb.ticker))
-              .map((nb) => {
-                const ap = aPos(anchorIdx.get(nb.ticker)!);
-                const c = GRP[nb.kind] ?? "#5fb0e8";
-                return (
-                  <line
-                    key={`e${r.ticker}-${nb.ticker}`}
-                    className="eco-edge"
-                    x1={tp.x}
-                    y1={tp.y}
-                    x2={ap.x}
-                    y2={ap.y}
-                    stroke={c}
-                    strokeWidth={nb.importance >= 3 ? 2 : 1}
-                    strokeOpacity={nb.importance >= 3 ? 0.9 : 0.5}
-                  />
-                );
-              });
+          {/* same-sector supply-chain edges, coloured by tie type */}
+          {[...edges.values()].map((e) => {
+            const pa = pos.get(e.a)!;
+            const pb = pos.get(e.b)!;
+            const c = GRP[e.kind] ?? "#5fb0e8";
+            return (
+              <line
+                key={`e${e.a}-${e.b}`}
+                className="eco-edge"
+                x1={pa.x}
+                y1={pa.y}
+                x2={pb.x}
+                y2={pb.y}
+                stroke={c}
+                strokeWidth={e.importance >= 3 ? 2 : 1}
+                strokeOpacity={e.importance >= 3 ? 0.85 : 0.45}
+              />
+            );
           })}
 
           {/* center hub */}
@@ -466,37 +469,47 @@ function EcoGraph({
             {hub}
           </text>
 
-          {/* anchor nodes */}
-          {anchors.map((a, i) => {
-            const p = aPos(i);
-            return (
-              <g key={a} className="eco-node" onClick={() => onOpen(a)}>
-                <circle cx={p.x} cy={p.y} r={17} fill="#2a2413" stroke="#e9c46a" strokeWidth={2} style={{ filter: "drop-shadow(0 0 7px #e9c46a99)" }} />
-                <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#f0d78a">
-                  {a}
-                </text>
-              </g>
-            );
-          })}
+          {/* large-cap nodes (gold inner ring) */}
+          {big.length > 1 &&
+            big.map((m, i) => {
+              const p = bPos(i);
+              const hot = scores.has(m.ticker);
+              return (
+                <g key={m.ticker} className="eco-node" onClick={() => onOpen(m.ticker)}>
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={18}
+                    fill="#2a2413"
+                    stroke={hot ? "#ffe08a" : "#e9c46a"}
+                    strokeWidth={hot ? 2.6 : 2}
+                    style={{ filter: `drop-shadow(0 0 ${hot ? 10 : 7}px #e9c46a99)` }}
+                  />
+                  <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#f0d78a">
+                    {m.ticker}
+                  </text>
+                </g>
+              );
+            })}
 
-          {/* target nodes + labels — glow = high Focus score on your side */}
-          {withAngle.map(({ r }, ti) => {
-            const p = tPos(ti);
-            const rad = 5 + Math.min(r.neighbors.length, 8) * 0.9;
-            const ang = tAngle(ti);
+          {/* smaller-cap nodes (blue outer ring) + labels */}
+          {small.map((m, i) => {
+            const p = sPos(i);
+            const rad = 5 + Math.min(m.links.length, 8) * 0.9;
+            const ang = sAngle(i);
             const lx = cx + (Ro + 20) * Math.cos(ang);
             const ly = cy + (Ro + 20) * Math.sin(ang);
             const anchorRight = Math.cos(ang) >= 0;
-            const hot = scores.has(r.ticker); // in your Focus List → light up
+            const hot = scores.has(m.ticker); // in your Focus List → light up
             return (
-              <g key={r.ticker} className="eco-node" onClick={() => onOpen(r.ticker)}>
+              <g key={m.ticker} className="eco-node" onClick={() => onOpen(m.ticker)}>
                 <circle
                   cx={p.x}
                   cy={p.y}
                   r={hot ? rad + 1.5 : rad}
-                  fill={hot ? "#3dd6c4" : "#14313a"}
-                  stroke={hot ? "#7ff0e2" : "#3dd6c455"}
-                  strokeWidth={hot ? 2.5 : 1.2}
+                  fill={hot ? "#3dd6c4" : "#123244"}
+                  stroke={hot ? "#7ff0e2" : "#5fb0e888"}
+                  strokeWidth={hot ? 2.5 : 1.4}
                   style={hot ? { filter: "drop-shadow(0 0 8px #3dd6c4)" } : undefined}
                 />
                 <text
@@ -506,9 +519,9 @@ function EcoGraph({
                   fontSize={hot ? 11.5 : 10}
                   fontFamily="ui-monospace, monospace"
                   fontWeight={hot ? 700 : 500}
-                  fill={hot ? "#7ff0e2" : "#8695a3"}
+                  fill={hot ? "#7ff0e2" : "#8fb6cc"}
                 >
-                  {r.ticker}
+                  {m.ticker}
                 </text>
               </g>
             );
