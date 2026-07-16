@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
 import { buildFocus, companyMap, noDataSet, belowMinCap, sectorLabel } from "../pipeline";
 
@@ -216,9 +216,45 @@ export function OverviewView() {
   // the rest of the funnel.
   const tiny = useMemo(() => belowMinCap(data, marketCaps), [data, marketCaps]);
 
+  // The leaderboard's strong-buy set (stable across polls unless the set changes).
+  const sbKey = useMemo(() => {
+    const noData = noDataSet(technical);
+    return Object.entries(technical?.tickers ?? {})
+      .filter(([tk, tt]) => !noData.has(tk) && tt.gauge?.summary === "strong_buy" && !tiny.has(tk))
+      .map(([tk]) => tk)
+      .sort()
+      .join(",");
+  }, [technical, tiny]);
+
+  // Live overlay: the leaderboard ranks by "today's move", which the daily
+  // technical snapshot only refreshes once a run. Batch-fetch live moves for the
+  // strong-buy set every 60s (one yfinance call via serve.py) so it auto-updates
+  // and re-ranks. Falls back to the snapshot when the endpoint is absent (Vite
+  // dev) or a name isn't returned.
+  const [live, setLive] = useState<{ moves: Record<string, number>; at: number } | null>(null);
+  useEffect(() => {
+    if (!sbKey) return;
+    let alive = true;
+    const pull = () => {
+      fetch(`/api/quotes?tickers=${encodeURIComponent(sbKey)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (alive && j && j.quotes && Object.keys(j.quotes).length) setLive({ moves: j.quotes as Record<string, number>, at: Date.now() });
+        })
+        .catch(() => {});
+    };
+    pull();
+    const id = setInterval(pull, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [sbKey]);
+
   const movers = useMemo<Mover[]>(() => {
     const noData = noDataSet(technical);
     const cmap = companyMap(data);
+    const lm = live?.moves ?? {};
     const out: Mover[] = [];
     for (const [ticker, tt] of Object.entries(technical?.tickers ?? {})) {
       if (noData.has(ticker)) continue;
@@ -229,7 +265,7 @@ export function OverviewView() {
         ticker,
         company: cmap.get(ticker) ?? "",
         sector: sectors?.[ticker]?.sector ?? "",
-        changePct: tt.change_pct ?? 0,
+        changePct: lm[ticker] ?? tt.change_pct ?? 0, // live move if we have it
         onFocus: focusSet.has(ticker),
         attnScore: at?.score ?? 0,
         rvol: at?.rvol ?? null,
@@ -240,7 +276,7 @@ export function OverviewView() {
       });
     }
     return out.sort((a, b) => b.changePct - a.changePct);
-  }, [technical, data, sectors, focusSet, tiny]);
+  }, [technical, data, sectors, focusSet, tiny, live]);
 
   const bySector = useMemo(() => {
     const m = new Map<string, Mover[]>();
@@ -273,21 +309,31 @@ export function OverviewView() {
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-ok" />
             </span>
             {t("what's firing per sector · ranked by today's move", "每板块今日在点火的票 · 按当日涨跌排名")}
-            {(() => {
-              const g = technical?.generated_at ? new Date(technical.generated_at) : null;
-              if (!g) return null;
-              const stale = Date.now() - g.getTime() > 30 * 3600 * 1000; // prices should refresh daily
-              const d = g.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-              return (
-                <span
-                  className="rounded-full border px-2 py-[1px] font-mono text-[10px]"
-                  style={stale ? { color: "#f2a73c", borderColor: "#f2a73c66", background: "#f2a73c14" } : { color: "#6f7f8e", borderColor: "var(--line,#22303c)" }}
-                  title={stale ? t("Prices haven't refreshed — the yfinance job needs the VPN/proxy.", "价格未刷新 —— yfinance 任务需要 VPN/代理。") : ""}
-                >
-                  {stale ? t(`⚠ prices as of ${d} (stale)`, `⚠ 价格截至 ${d}(已过期)`) : t(`prices ${d}`, `价格 ${d}`)}
-                </span>
-              );
-            })()}
+            {live ? (
+              <span
+                className="rounded-full border px-2 py-[1px] font-mono text-[10px]"
+                style={{ color: "#48c78e", borderColor: "#48c78e55", background: "#48c78e14" }}
+                title={t("Live moves — batch-refreshed every 60s from the local server", "实时涨跌 · 每 60 秒经本地服务器批量刷新")}
+              >
+                ● {t("LIVE", "实时")} {new Date(live.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+            ) : (
+              (() => {
+                const g = technical?.generated_at ? new Date(technical.generated_at) : null;
+                if (!g) return null;
+                const stale = Date.now() - g.getTime() > 30 * 3600 * 1000; // prices should refresh daily
+                const d = g.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                return (
+                  <span
+                    className="rounded-full border px-2 py-[1px] font-mono text-[10px]"
+                    style={stale ? { color: "#f2a73c", borderColor: "#f2a73c66", background: "#f2a73c14" } : { color: "#6f7f8e", borderColor: "var(--line,#22303c)" }}
+                    title={stale ? t("Prices haven't refreshed — run the local server (serve.py) for live moves, or the yfinance job needs the VPN/proxy.", "价格未刷新 —— 用本地服务器(serve.py)拿实时涨跌,或 yfinance 任务需要 VPN/代理。") : ""}
+                  >
+                    {stale ? t(`⚠ prices as of ${d} (stale)`, `⚠ 价格截至 ${d}(已过期)`) : t(`prices ${d}`, `价格 ${d}`)}
+                  </span>
+                );
+              })()
+            )}
           </p>
         </div>
 

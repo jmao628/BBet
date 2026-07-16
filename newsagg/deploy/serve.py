@@ -41,6 +41,9 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         if path == "/api/quote":
             self._serve_quote()
             return
+        if path == "/api/quotes":
+            self._serve_quotes()
+            return
         if path == "/api/watchlist":
             self._serve_watchlist_get()
             return
@@ -80,6 +83,48 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         out["ticker"] = ticker
         out["generated_at"] = datetime.now(timezone.utc).isoformat()
         self._send_json(200, out)
+
+    def _serve_quotes(self) -> None:
+        """Batch today's-move for many tickers in ONE yfinance call, so the
+        Strong-Buy leaderboard can refresh + re-rank live (per-ticker /api/quote
+        would be hundreds of calls). Returns {ticker: change_pct}."""
+        import re
+
+        params = parse_qs(urlparse(self.path).query)
+        raw = (params.get("tickers", [""])[0] or "").strip().upper()
+        tickers = [x for x in re.split(r"[^A-Z0-9.\-]+", raw) if x][:500]
+        if not tickers:
+            self._send_json(400, {"error": "no tickers"})
+            return
+        ymap = {t: t.replace(".", "-") for t in tickers}
+        out: dict[str, float] = {}
+        try:
+            import yfinance as yf
+
+            df = yf.download(list(ymap.values()), period="2d", auto_adjust=False, progress=False, threads=True)
+            # df["Close"] works for both: a DataFrame (multi-ticker, columns = tickers)
+            # or a Series (single ticker). `multi` distinguishes them.
+            closes = df["Close"]
+            multi = hasattr(closes, "columns")
+            cols = set(closes.columns) if multi else set()
+            for tk, y in ymap.items():
+                try:
+                    if multi:
+                        if y not in cols:
+                            continue
+                        vals = [float(x) for x in closes[y].tolist() if x == x]
+                    else:
+                        if len(ymap) != 1:
+                            continue
+                        vals = [float(x) for x in closes.tolist() if x == x]
+                    if len(vals) >= 2 and vals[-2]:
+                        out[tk] = round(100 * (vals[-1] / vals[-2] - 1), 2)
+                except Exception:  # noqa: BLE001, PERF203
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(502, {"error": f"batch failed: {exc}"})
+            return
+        self._send_json(200, {"quotes": out, "generated_at": datetime.now(timezone.utc).isoformat()})
 
     # The backtest watchlist, persisted server-side so the daily price-track job
     # (newsagg.track) can pick it up and grow a dated history for those names.
