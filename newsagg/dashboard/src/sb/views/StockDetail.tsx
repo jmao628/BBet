@@ -921,7 +921,10 @@ export function StockDetail() {
     ? new Date(technical.generated_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : null;
   const h = heat?.tickers?.[ticker];
-  const mc = marketCaps?.[ticker];
+  // Prefer the reliable sectors.json .info market cap; fall back to the flaky
+  // fast_info feed. (Run `python -m newsagg.sectors` to backfill caps.)
+  const secMc = sectors?.[ticker]?.market_cap;
+  const mc = typeof secMc === "number" && secMc > 0 ? secMc : marketCaps?.[ticker];
   const cap = capSizeFromCap(mc, caps);
   const a = tech?.attention;
   const attnIgnites = a?.ignites ?? false;
@@ -983,7 +986,17 @@ export function StockDetail() {
             </div>
             <div className="mt-1 text-[12px] text-muted">
               {company || "—"} · {capLabel(cap, lang)}
-              {mc ? ` · $${(mc / 1e9).toFixed(1)}B` : ""}
+              {mc ? (
+                <>
+                  {" · "}
+                  <span className={mc >= 1e12 ? "font-medium text-[#f0d78a]" : ""}>
+                    {mc >= 1e12 ? `$${(mc / 1e12).toFixed(2)}T` : `$${(mc / 1e9).toFixed(1)}B`}
+                    {mc >= 1e12 ? t(" · large cap", " · 大盘") : ""}
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted2">{t(" · cap n/a", " · 市值缺失")}</span>
+              )}
               {sectors?.[ticker]?.sector ? ` · ${sectorLabel(sectors[ticker].sector, lang)}` : ""}
               {sectors?.[ticker]?.industry ? ` · ${sectors[ticker].industry}` : ""}
             </div>

@@ -10,6 +10,9 @@ const GRP_COLOR: Record<string, string> = {
   peers: "#e9c46a",
 };
 
+// Gold inner ring = 大盘: market cap ≥ $1T.
+const GOLD_CAP = 1e12;
+
 const PHASE_L: Record<string, { en: string; zh: string }> = {
   detonate: { en: "Detonate", zh: "引爆" },
   ignite: { en: "Ignite", zh: "点火" },
@@ -71,7 +74,7 @@ export function ScreenView() {
     // reliability: (1) sectors.json market_cap — from yfinance .info, populated
     // for every node; (2) the marketcaps.json fast_info feed — flaky, often
     // missing mega-caps; (3) the static large-cap safety net; (4) the SA cap-size
-    // label → a nominal value. "large" ⇒ inner gold ring.
+    // label → a nominal value. GOLD RING = a real market cap ≥ $1T (大盘).
     const CAP_NOMINAL: Record<string, number> = { large: 2e10, mid: 4e9, small: 5e8, unknown: 1e8 };
     for (const u of uni) {
       const sec = sectorOf(u.ticker);
@@ -88,7 +91,10 @@ export function ScreenView() {
       if (typeof numeric === "number" && numeric < 3e8) continue; // drop tiny/illiquid
       const size = capSizeFromCap(numeric, u.caps); // large|mid|small|unknown
       const known = LARGE_CAP_TICKERS.has(u.ticker);
-      const large = size === "large" || known; // gold-ring eligibility
+      // Gold ring is a STRICT market-cap threshold: ≥ $1T. It needs a real cap
+      // number (sectors.json .info cap), so run `python -m newsagg.sectors` to
+      // backfill caps if the gold ring looks empty.
+      const large = typeof numeric === "number" && numeric >= GOLD_CAP;
       const capVal = numeric ?? (known ? 2e10 : CAP_NOMINAL[size]);
       // Keep only ties whose other end is in THIS sector and in your universe —
       // that is what makes the graph a pure single-sector network.
@@ -188,14 +194,14 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time — every node belongs to THIS sector (a Tech graph shows only Tech names). Centre = the sector. Inner gold ring = its large-cap members (≥$100B market cap); outer blue ring = the smaller-cap names. Edges are supply-chain ties that stay inside the sector — a member's supplier, customer, or peer that is also in this sector (edge colour tells you which). A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块——每个节点都属于该板块（Tech 图里只有 Tech 的票）。中心 = 该板块。内圈金色 = 板块内大市值成员（≥$1000亿市值）；外圈蓝色 = 小市值成员。连线是留在板块内部的产业链关系——某成员的供应商 / 客户 / 同业且同属该板块（连线颜色区分）。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time — every node belongs to THIS sector (a Tech graph shows only Tech names). Centre = the sector. Inner gold ring = its large-cap members (market cap ≥ $1T); outer blue ring = the smaller-cap names. Edges are supply-chain ties that stay inside the sector — a member's supplier, customer, or peer that is also in this sector (edge colour tells you which). A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块——每个节点都属于该板块（Tech 图里只有 Tech 的票）。中心 = 该板块。内圈金色 = 板块内大盘成员（市值 ≥ $1万亿）；外圈蓝色 = 小市值成员。连线是留在板块内部的产业链关系——某成员的供应商 / 客户 / 同业且同属该板块（连线颜色区分）。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="flex items-center gap-1.5" style={{ color: "#f0d78a" }}>
                     <span className="h-2 w-2 rounded-full" style={{ background: "#e9c46a" }} />
-                    {t("large cap (≥$100B)", "大市值（≥$1000亿）")}
+                    {t("large cap (≥$1T)", "大盘（≥$1万亿）")}
                   </span>
                   <span className="flex items-center gap-1.5" style={{ color: "#8fd6ea" }}>
                     <span className="h-2 w-2 rounded-full" style={{ background: "#5fb0e8" }} />
@@ -371,17 +377,11 @@ function EcoGraph({
   const RING_BIG = 16; // max large-caps on the inner ring
   const RING_SMALL = 30; // max smaller-caps on the outer ring
   const byCap = [...members].sort((a, b) => b.cap - a.cap);
-  // Gold inner ring = the sector's large-caps, biggest first. Overflow beyond
-  // the ring cap drops to the outer ring so the ring stays readable.
+  // Gold inner ring = the sector's 大盘 (market cap ≥ $1T), biggest first. No
+  // fallback: a sector with no $1T name simply shows an empty gold ring — every
+  // node goes on the outer ring. Overflow beyond the ring cap drops outward too.
   let big = byCap.filter((m) => m.large);
   let small = byCap.filter((m) => !m.large);
-  // Fallback: a sector with no large-cap still gets a gold "anchor" ring —
-  // promote its largest few names so the graph has a readable inner hub.
-  if (!big.length && byCap.length) {
-    const k = Math.min(3, byCap.length);
-    big = byCap.slice(0, k);
-    small = byCap.slice(k);
-  }
   if (big.length > RING_BIG) {
     small = [...big.slice(RING_BIG), ...small]; // large overflow → outer ring
     big = big.slice(0, RING_BIG);
@@ -445,8 +445,8 @@ function EcoGraph({
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `${hub} sector · ${drawn} names shown (${members.length} total) · ${big.length} large-cap · ${small.length} smaller · glowing = on your Focus List · click any node`,
-          `${hub} 板块 · 展示 ${drawn} 只（共 ${members.length}）· ${big.length} 大市值 · ${small.length} 小市值 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
+          `${hub} sector · ${drawn} names shown (${members.length} total) · ${big.length} large-cap (≥$1T) · ${small.length} smaller · glowing = on your Focus List · click any node`,
+          `${hub} 板块 · 展示 ${drawn} 只（共 ${members.length}）· ${big.length} 大盘(≥$1万亿) · ${small.length} 小市值 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
