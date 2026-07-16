@@ -15,8 +15,12 @@ import {
   catLiveBest,
   catTickerScore,
   catalystTypeLabel,
+  buildShortlist,
+  SHORTLIST_CAT_BAR,
+  SHORTLIST_W,
   CATALYST_BAR,
   type FocusItem,
+  type LeaderRow,
 } from "../pipeline";
 import type { Catalyst, CatalystTicker, ConvictionTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
 
@@ -106,6 +110,65 @@ function ScoreBreakdown({
           {advBy.map((k) => (LENS_LABEL[k] ? (lang === "zh" ? LENS_LABEL[k].zh : LENS_LABEL[k].en) : k)).join(" · ")}
         </div>
       )}
+    </div>
+  );
+}
+
+// Shortlist — the three conditions that set the tier, and the weighted strength
+// composite, all with THIS ticker's actual numbers.
+const TIER_LABEL: Record<1 | 2 | 3, { color: string; en: string; zh: string }> = {
+  1: { color: "#f0c862", en: "Tier 1 · all three", zh: "第一名 · 三条全中" },
+  2: { color: "#cdd6e2", en: "Tier 2 · two of three", zh: "第二名 · 中两条" },
+  3: { color: "#cd8b5e", en: "Tier 3 · focus only", zh: "第三名 · 仅在名单" },
+};
+function ShortlistBreakdown({ row, lang, t }: { row: LeaderRow; lang: Lang; t: (en: string, zh: string) => string }) {
+  const tl = TIER_LABEL[row.tier];
+  const cat01 = Math.max(0, row.catScore) / 10;
+  const focus01 = row.focusScore / 10;
+  const attn01 = row.attnScore / 100;
+  const conds: { on: boolean; label: string; note: string }[] = [
+    { on: true, label: t("On Focus List", "在重点名单"), note: t("reached the shortlist", "进入登顶名单") },
+    { on: row.core, label: t("Core", "核心"), note: t("buy × ecosystem both fire", "买入 × 生态双触发") },
+    { on: row.catHot, label: t(`Catalyst > ${SHORTLIST_CAT_BAR}`, `催化剂 > ${SHORTLIST_CAT_BAR}`), note: row.catScore >= 0 ? t(`catalyst ${row.catScore.toFixed(1)}`, `催化剂 ${row.catScore.toFixed(1)}`) : t("not fetched", "未抓取") },
+  ];
+  const parts: { label: string; w: number; norm: number; color: string }[] = [
+    { label: t("Catalyst", "催化剂"), w: SHORTLIST_W.cat, norm: cat01, color: "#48c78e" },
+    { label: t("Core", "核心"), w: SHORTLIST_W.focus, norm: focus01, color: "#3dd6c4" },
+    { label: t("Attention", "注意力"), w: SHORTLIST_W.attn, norm: attn01, color: "#5fb0e8" },
+  ];
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Shortlist — how it's built", "登顶名单打分 · 拆解")}</div>
+        <div className="flex items-center gap-2 text-[12px]">
+          <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: "#0b0f14", background: tl.color }}>{lang === "zh" ? tl.zh : tl.en}</span>
+          <span className="font-mono text-[15px] font-semibold text-signal">{row.composite.toFixed(1)}<span className="text-[10px] text-muted2">/100</span></span>
+        </div>
+      </div>
+      {/* the three tier conditions */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {conds.map((c) => (
+          <span key={c.label} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10.5px]" style={{ color: c.on ? "#0b0f14" : "var(--muted2)", background: c.on ? "#48c78e" : "transparent", borderColor: c.on ? "transparent" : "var(--line,#22303c)" }} title={c.note}>
+            {c.on ? "✓" : "○"} {c.label}
+          </span>
+        ))}
+      </div>
+      {/* weighted strength composite */}
+      <div className="space-y-2">
+        {parts.map((p) => (
+          <div key={p.label} className="flex items-center gap-3 text-[12px]">
+            <span className="w-16 flex-none text-muted">{p.label}</span>
+            <span className="h-1.5 w-24 flex-none overflow-hidden rounded-full bg-inset">
+              <span className="block h-full rounded-full" style={{ width: `${Math.max(4, p.norm * 100)}%`, background: p.color }} />
+            </span>
+            <span className="flex-1 truncate font-mono text-[11px] text-muted2">{p.w} × {(p.norm * 100).toFixed(0)}% = {(p.w * p.norm * 100).toFixed(1)}</span>
+            <span className="w-10 flex-none text-right font-mono text-text">{(p.w * p.norm * 100).toFixed(1)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 border-t border-line pt-2 font-mono text-[11px] text-muted2">
+        {t(`strength = 0.45·cat + 0.45·core + 0.10·attn = ${row.composite.toFixed(1)}`, `强度 = 0.45·催 + 0.45·核 + 0.10·注 = ${row.composite.toFixed(1)}`)}
+      </div>
     </div>
   );
 }
@@ -837,6 +900,11 @@ export function StockDetail() {
         : undefined,
     [data, heat, technical, marketCaps, sectors, supplychain, ticker],
   );
+  const shortlistRow = useMemo(() => {
+    if (!ticker) return undefined;
+    const focus = buildFocus(data, heat, technical, marketCaps, sectors, supplychain);
+    return buildShortlist(focus, catalyst).find((r) => r.ticker === ticker);
+  }, [ticker, data, heat, technical, marketCaps, sectors, supplychain, catalyst]);
   const advBy = useMemo(
     () => (ticker ? buildRankings(data, heat, technical, marketCaps).advancingBy.get(ticker) ?? [] : []),
     [data, heat, technical, marketCaps, ticker],
@@ -976,6 +1044,8 @@ export function StockDetail() {
           {catalyst?.[ticker] && catalyst[ticker].catalysts.length > 0 && (
             <CatBreakdown cat={catalyst[ticker]} lang={lang} t={t} />
           )}
+
+          {shortlistRow && <ShortlistBreakdown row={shortlistRow} lang={lang} t={t} />}
 
           {conviction?.[ticker] && conviction[ticker].ok && (
             <ConvBreakdown conv={conviction[ticker]} lang={lang} t={t} />
