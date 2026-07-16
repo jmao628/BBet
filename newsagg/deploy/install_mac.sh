@@ -18,7 +18,13 @@
 # Usage:
 #   bash newsagg/deploy/install_mac.sh            # daily at 09:00 local
 #   bash newsagg/deploy/install_mac.sh 7          # daily at 07:00 local
+#   bash newsagg/deploy/install_mac.sh 17         # daily at 17:00 (5 PM) local
 #   PORT=8080 bash newsagg/deploy/install_mac.sh  # serve on a different port
+#
+# NOTE: launchd schedules in LOCAL wall-clock time. Hour 17 fires at 5 PM in the
+# Mac's timezone — that IS 5 PM Eastern only if the Mac is set to Eastern time
+# (it auto-tracks EST/EDT). The install output prints the current timezone so
+# you can confirm; if the Mac is elsewhere, pass the local hour equal to 5 PM ET.
 
 set -euo pipefail
 
@@ -119,7 +125,14 @@ WEB_PLIST="$LA_DIR/com.newsagg.web.plist"
 
 echo "Repo:   $REPO_DIR"
 echo "Python: $PY"
-echo "Daily scrape at ${HOUR}:00 local; web server on http://localhost:${PORT}"
+echo "Timezone: $(date '+%Z (UTC%z)') — the schedule below is in THIS local time."
+if [[ "$HOUR" == "17" ]]; then
+  case "$(date +%Z)" in
+    EST|EDT) echo "         ✓ Mac is on Eastern time, so 17:00 = 5 PM ET." ;;
+    *) echo "         ⚠ Mac is NOT on Eastern time — 17:00 here is NOT 5 PM ET. Pass the local hour that equals 5 PM ET instead." ;;
+  esac
+fi
+echo "Daily full re-run ${HOUR}:00–${HOUR}:40 local (scrape→…→track); web server on http://localhost:${PORT}"
 
 cat > "$SCRAPE_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
