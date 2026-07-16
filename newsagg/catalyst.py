@@ -36,6 +36,7 @@ import logging
 import math
 import os
 import re
+import time
 from datetime import date
 from pathlib import Path
 
@@ -358,11 +359,30 @@ def _complete(client, model: str, prompt: str) -> str:
     return "".join(parts)
 
 
+_FETCH_ATTEMPTS = 5  # persistent per-ticker retry — the gateway's upstream 500s
+# intermittently (worse over a flaky VPN route). Each attempt already carries the
+# SDK's own max_retries=8 backoff, so this grinds through as long as the route
+# succeeds SOME of the time. If it's ~always failing, no retry count saves it.
+
+
 def _fetch_one(client, ticker: str, name: str, today: date, model: str, sector: str = "") -> dict | None:
-    try:
-        text = _complete(client, model, _prompt(ticker, name, sector))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("  %s: API error (%s)", ticker, exc)
+    text = ""
+    last_err: Exception | None = None
+    for attempt in range(1, _FETCH_ATTEMPTS + 1):
+        try:
+            text = _complete(client, model, _prompt(ticker, name, sector))
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            text = ""
+        if text.strip():
+            break
+        if attempt < _FETCH_ATTEMPTS:
+            wait = min(2 ** attempt, 30)
+            reason = type(last_err).__name__ if last_err else "empty response"
+            logger.info("  %s: attempt %d/%d failed (%s) — retry in %ds", ticker, attempt, _FETCH_ATTEMPTS, reason, wait)
+            time.sleep(wait)
+    if not text.strip():
+        logger.warning("  %s: gave up after %d attempts (%s)", ticker, _FETCH_ATTEMPTS, last_err)
         return None
     parsed = _extract_json(text)
     if parsed is None:
