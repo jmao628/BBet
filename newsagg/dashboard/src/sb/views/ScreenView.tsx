@@ -101,12 +101,14 @@ export function ScreenView() {
     return rows;
   }, [supplychain, data, marketCaps]);
 
-  // A target only shows in the graph if it links to a same-sector mega-cap
-  // SUPPLIER (that's what the graph draws). Count those, so the chip number
-  // matches what actually appears.
+  // A target shows in the graph if it depends on ANY in-universe mega-cap
+  // SUPPLIER (upstream hub). Suppliers are usually CROSS-sector (a Tech name
+  // depends on a semis-cap supplier, a Consumer name on an Industrials one), so
+  // we don't require the supplier to share the target's sector — that filter was
+  // excluding almost everything.
   const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string }[] }) => {
     const sec = sectorOf(r.ticker);
-    return !!sec && r.neighbors.some((n) => n.anchor && n.kind === "upstream" && sectorOf(n.ticker) === sec);
+    return !!sec && r.neighbors.some((n) => n.anchor && n.kind === "upstream");
   };
   const ecoSectorCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -185,8 +187,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time — every node is a name from YOUR seed universe. Centre = the sector; inner gold ring = that sector's mega-cap SUPPLIERS (≥$100B upstream hubs; peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块——每个节点都是你 seed 库里的票。中心 = 该板块；内圈金色 = 该板块的大票**供应商**（≥$1000亿的上游枢纽；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标，摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time — every node is a name from YOUR seed universe. Centre = the sector; inner gold ring = the mega-cap SUPPLIERS these names depend on (≥$100B upstream hubs, any sector; peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块——每个节点都是你 seed 库里的票。中心 = 该板块；内圈金色 = 这些票依赖的大票**供应商**（≥$1000亿的上游枢纽,可跨板块；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标,摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -218,7 +220,7 @@ export function ScreenView() {
                   ))}
                 </div>
               )}
-              <EcoGraph rows={ecoRows} scores={hotScores} sectorOf={sectorOf} sector={effEcoSector} hub={hubLabel} onOpen={openDetail} t={t} />
+              <EcoGraph rows={ecoRows} scores={hotScores} hub={hubLabel} onOpen={openDetail} t={t} />
             </>
           )}
         </Card>
@@ -345,24 +347,21 @@ type EcoRow = { ticker: string; company: string; neighbors: EcoNeighbor[]; ancho
 function EcoGraph({
   rows,
   scores,
-  sectorOf,
-  sector,
   hub,
   onOpen,
   t,
 }: {
   rows: EcoRow[];
   scores: Map<string, number>;
-  sectorOf: (t: string) => string;
-  sector: string | null;
   hub: string;
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
   const TOPT = 24;
-  // A supplier anchor = a same-sector mega-cap UPSTREAM hub that is in your
-  // universe. Peers/customers-only mega-caps (UBER) don't count.
-  const isSupplier = (n: EcoNeighbor) => n.anchor && n.kind === "upstream" && (!sector || sectorOf(n.ticker) === sector);
+  // A supplier anchor = an in-universe mega-cap UPSTREAM hub the target depends
+  // on — cross-sector suppliers count (that's the norm). Peers/customers-only
+  // mega-caps (UBER) don't count.
+  const isSupplier = (n: EcoNeighbor) => n.anchor && n.kind === "upstream";
   const eligible = rows.filter((r) => r.neighbors.some(isSupplier));
   const total = eligible.length;
   const targets = eligible.slice(0, TOPT);
