@@ -22,10 +22,14 @@ export function SeedsView() {
   const [source, setSource] = useState<"all" | "fresh" | "carried">("all");
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
 
-  // Only CONFIRMED no-data OTC/foreign ADRs are dropped. A newly-added seed that
-  // technical hasn't fetched yet still shows (it's not confirmed no-data).
-  const excluded = useMemo(() => allSeeds.filter((r) => noData.has(r.ticker)), [allSeeds, noData]);
-  const seeds = useMemo(() => allSeeds.filter((r) => !noData.has(r.ticker)), [allSeeds, noData]);
+  // Drop any seed with NO yfinance price — the confirmed no-data OTC/foreign ADRs
+  // AND anything we currently have no price bar for (ETFs, forex like USD/CAD,
+  // failed fetches). Reactive: a name reappears automatically once a later
+  // technical run fetches it. Guarded so we don't nuke everything before the
+  // technical feed has loaded (then noData is empty and hasData can't be trusted).
+  const isNoPrice = (tk: string) => noData.has(tk) || (!!technical && !hasData(tk));
+  const excluded = useMemo(() => allSeeds.filter((r) => isNoPrice(r.ticker)), [allSeeds, noData, technical]);
+  const seeds = useMemo(() => allSeeds.filter((r) => !isNoPrice(r.ticker)), [allSeeds, noData, technical]);
 
   // Everything stays (incl. thesis-only names with no SA rating). The only cut is
   // micro-caps below the market-cap floor — penny names like PERF. ★ Analyst
@@ -156,8 +160,8 @@ export function SeedsView() {
       {excluded.length > 0 && (
         <div className="mb-3 text-[11px] text-muted2">
           {t(
-            `${excluded.length} OTC / foreign ADRs with no yfinance price were dropped from the universe.`,
-            `${excluded.length} 只 yfinance 无行情的 OTC / 海外 ADR 已从种子池剔除。`,
+            `${excluded.length} names with no yfinance price (OTC / foreign ADRs, ETFs, forex) were dropped from the universe.`,
+            `${excluded.length} 只 yfinance 无行情的标的(OTC / 海外 ADR、ETF、外汇)已从种子池剔除。`,
           )}
         </div>
       )}

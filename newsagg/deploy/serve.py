@@ -25,7 +25,7 @@ import functools
 import json
 import sys
 from datetime import datetime, timezone
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 
@@ -182,7 +182,11 @@ def main() -> None:
         sys.path.insert(0, directory)
     handler = functools.partial(NoCacheHandler, directory=directory)
     print(f"serving {directory} on http://localhost:{port} (no-cache, +live quotes)")
-    HTTPServer(("", port), handler).serve_forever()
+    # ThreadingHTTPServer (not HTTPServer): the live-quote endpoints do slow
+    # yfinance fetches that can hang for seconds. On a single-threaded server that
+    # blocks EVERY other request — the page stalls waiting for a quote batch. One
+    # thread per request keeps static files + JSON serving instantly regardless.
+    ThreadingHTTPServer(("", port), handler).serve_forever()
 
 
 if __name__ == "__main__":
