@@ -194,18 +194,22 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time — every node belongs to THIS sector (a Tech graph shows only Tech names). Centre = the sector. Inner gold ring = its large-cap members (market cap ≥ $1T); outer blue ring = the smaller-cap names. Edges are supply-chain ties that stay inside the sector — a member's supplier, customer, or peer that is also in this sector (edge colour tells you which). A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块——每个节点都属于该板块（Tech 图里只有 Tech 的票）。中心 = 该板块。内圈金色 = 板块内大盘成员（市值 ≥ $1万亿）；外圈蓝色 = 小市值成员。连线是留在板块内部的产业链关系——某成员的供应商 / 客户 / 同业且同属该板块（连线颜色区分）。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time — every node belongs to THIS sector (a Tech graph shows only Tech names). Centre = the sector. Three rings by market cap: inner gold = mega-caps (≥ $1T), middle teal = large-caps ($100B–$1T), outer blue = the rest (< $100B). Edges are supply-chain ties that stay inside the sector — a member's supplier, customer, or peer that is also in this sector (edge colour tells you which). A glowing halo = it's on your Focus List. Click any node.",
+                    "一次看一个板块——每个节点都属于该板块（Tech 图里只有 Tech 的票）。中心 = 该板块。按市值分三圈：内圈金色 = 超大盘（≥$1万亿），中圈青色 = 大盘（$1000亿–$1万亿），外圈蓝色 = 其余（<$1000亿）。连线是留在板块内部的产业链关系——某成员的供应商 / 客户 / 同业且同属该板块（连线颜色区分）。发光光晕 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="flex items-center gap-1.5" style={{ color: "#f0d78a" }}>
                     <span className="h-2 w-2 rounded-full" style={{ background: "#e9c46a" }} />
-                    {t("large cap (≥$1T)", "大盘（≥$1万亿）")}
+                    {t("mega cap (≥$1T)", "超大盘（≥$1万亿）")}
+                  </span>
+                  <span className="flex items-center gap-1.5" style={{ color: "#5eead4" }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: "#2dd4bf" }} />
+                    {t("large cap ($100B–$1T)", "大盘（$1000亿–$1万亿）")}
                   </span>
                   <span className="flex items-center gap-1.5" style={{ color: "#8fd6ea" }}>
                     <span className="h-2 w-2 rounded-full" style={{ background: "#5fb0e8" }} />
-                    {t("smaller cap", "小市值")}
+                    {t("smaller (<$100B)", "中小盘（<$1000亿）")}
                   </span>
                   <span className="text-muted2">·</span>
                   <span className="text-muted2">{t("Edge colour = tie type:", "连线颜色 = 关系类型：")}</span>
@@ -354,12 +358,16 @@ export function ScreenView() {
 }
 
 // ── Ecosystem graph ────────────────────────────────────────────────────────
-// A radial network for ONE sector. Centre = the sector hub. Inner gold ring =
-// its large-cap members (≥$100B); outer blue ring = the smaller-cap members.
-// Every node belongs to this sector — no cross-sector nodes. Edges are
-// supply-chain ties that stay inside the sector, coloured by tie type.
+// A radial network for ONE sector. Centre = the sector hub. THREE rings by
+// market cap: inner gold = mega-caps (≥$1T), middle teal = large-caps
+// ($100B–$1T), outer blue = the rest (<$100B). Every node belongs to this
+// sector — no cross-sector nodes. Edges are supply-chain ties that stay inside
+// the sector, coloured by tie type. All members are shown.
 type EcoLink = { ticker: string; kind: string; importance: number };
 type EcoMember = { ticker: string; company: string; cap: number; large: boolean; links: EcoLink[] };
+
+// Cap tier: 1 = mega (≥$1T), 2 = large ($100B–$1T), 3 = the rest.
+const ecoTier = (cap: number): 1 | 2 | 3 => (cap >= 1e12 ? 1 : cap >= 1e11 ? 2 : 3);
 
 function EcoGraph({
   members,
@@ -374,29 +382,23 @@ function EcoGraph({
   onOpen: (t: string) => void;
   t: (en: string, zh: string) => string;
 }) {
-  const RING_BIG = 16; // max large-caps on the inner ring
-  const RING_SMALL = 30; // max smaller-caps on the outer ring
+  // Per-ring caps are generous so (nearly) every name shows; only truncate the
+  // huge small-cap ring, keeping the most connected / Focus-listed names.
+  const RING_MAX = { 1: 18, 2: 48, 3: 120 } as const;
   const byCap = [...members].sort((a, b) => b.cap - a.cap);
-  // Gold inner ring = the sector's 大盘 (market cap ≥ $1T), biggest first. No
-  // fallback: a sector with no $1T name simply shows an empty gold ring — every
-  // node goes on the outer ring. Overflow beyond the ring cap drops outward too.
-  let big = byCap.filter((m) => m.large);
-  let small = byCap.filter((m) => !m.large);
-  if (big.length > RING_BIG) {
-    small = [...big.slice(RING_BIG), ...small]; // large overflow → outer ring
-    big = big.slice(0, RING_BIG);
-  }
-  // Keep the most connected / Focus-listed smaller names when there are many.
-  small = [...small]
+  const t1 = byCap.filter((m) => ecoTier(m.cap) === 1).slice(0, RING_MAX[1]);
+  const t2 = byCap.filter((m) => ecoTier(m.cap) === 2).slice(0, RING_MAX[2]);
+  const t3 = byCap
+    .filter((m) => ecoTier(m.cap) === 3)
     .sort(
       (a, b) =>
         (scores.has(b.ticker) ? 1 : 0) - (scores.has(a.ticker) ? 1 : 0) ||
         b.links.length - a.links.length ||
         b.cap - a.cap,
     )
-    .slice(0, RING_SMALL);
+    .slice(0, RING_MAX[3]);
 
-  if (!big.length && !small.length) {
+  if (!t1.length && !t2.length && !t3.length) {
     return (
       <div className="py-10 text-center text-[12.5px] text-muted">
         {t(
@@ -407,23 +409,33 @@ function EcoGraph({
     );
   }
 
-  const W = 960;
+  const W = 1120;
+  const H = 1120;
   const cx = W / 2;
-  const cy = 350;
-  const H = 700;
-  const Ri = big.length > 1 ? 150 : 0;
-  const Ro = 300;
+  const cy = H / 2;
 
-  const bAngle = (i: number) => (big.length ? (i / big.length) * 2 * Math.PI - Math.PI / 2 : 0);
-  const bPos = (i: number) =>
-    big.length === 1 ? { x: cx, y: cy } : { x: cx + Ri * Math.cos(bAngle(i)), y: cy + Ri * Math.sin(bAngle(i)) };
-  const sAngle = (i: number) => (small.length ? (i / small.length) * 2 * Math.PI - Math.PI / 2 : 0);
-  const sPos = (i: number) => ({ x: cx + Ro * Math.cos(sAngle(i)), y: cy + Ro * Math.sin(sAngle(i)) });
+  type Ring = { tier: 1 | 2 | 3; r: number; stroke: string; fill: string; label: string; hotStroke: string; nodeR: number; ms: EcoMember[] };
+  const rings: Ring[] = [
+    { tier: 1, r: 172, stroke: "#e9c46a", fill: "#2a2413", label: "#f0d78a", hotStroke: "#ffe08a", nodeR: 18, ms: t1 },
+    { tier: 2, r: 322, stroke: "#2dd4bf", fill: "#0e2a28", label: "#5eead4", hotStroke: "#99f6e4", nodeR: 11, ms: t2 },
+    { tier: 3, r: 468, stroke: "#5fb0e8", fill: "#123244", label: "#8fb6cc", hotStroke: "#7ff0e2", nodeR: 0, ms: t3 },
+  ];
 
-  // Position lookup for edge drawing (every drawn node, by ticker).
+  // Place every node; build a position map for edges + a flat render list.
+  type Placed = { m: EcoMember; x: number; y: number; ang: number; ring: Ring; nodeR: number };
+  const placed: Placed[] = [];
   const pos = new Map<string, { x: number; y: number }>();
-  big.forEach((m, i) => pos.set(m.ticker, bPos(i)));
-  small.forEach((m, i) => pos.set(m.ticker, sPos(i)));
+  for (const ring of rings) {
+    const n = ring.ms.length;
+    ring.ms.forEach((m, i) => {
+      const ang = (n ? i / n : 0) * 2 * Math.PI - Math.PI / 2;
+      const x = cx + ring.r * Math.cos(ang);
+      const y = cy + ring.r * Math.sin(ang);
+      const nodeR = ring.tier === 3 ? 5 + Math.min(m.links.length, 8) * 0.7 : ring.nodeR;
+      placed.push({ m, x, y, ang, ring, nodeR });
+      pos.set(m.ticker, { x, y });
+    });
+  }
 
   // Same-sector edges, de-duplicated by unordered pair. Keep the strongest tie.
   const edges = new Map<string, { a: string; b: string; kind: string; importance: number }>();
@@ -439,32 +451,36 @@ function EcoGraph({
   }
 
   const GRP: Record<string, string> = GRP_COLOR;
-  const drawn = big.length + small.length;
+  const drawn = t1.length + t2.length + t3.length;
 
   return (
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `${hub} sector · ${drawn} names shown (${members.length} total) · ${big.length} large-cap (≥$1T) · ${small.length} smaller · glowing = on your Focus List · click any node`,
-          `${hub} 板块 · 展示 ${drawn} 只（共 ${members.length}）· ${big.length} 大盘(≥$1万亿) · ${small.length} 小市值 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
+          `${hub} sector · ${drawn} of ${members.length} shown · mega ${t1.length} (≥$1T) · large ${t2.length} ($100B–$1T) · small ${t3.length} · glow = on your Focus List · click any node`,
+          `${hub} 板块 · 展示 ${drawn}/${members.length} · 超大盘 ${t1.length}(≥$1万亿) · 大盘 ${t2.length}($1000亿–$1万亿) · 中小盘 ${t3.length} · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 680, display: "block" }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ minWidth: 760, display: "block" }}>
           <defs>
             <radialGradient id="ecoCoreGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#3dd6c4" stopOpacity="0.35" />
+              <stop offset="0%" stopColor="#3dd6c4" stopOpacity="0.30" />
               <stop offset="100%" stopColor="#3dd6c4" stopOpacity="0" />
             </radialGradient>
           </defs>
-          <circle cx={cx} cy={cy} r={210} fill="url(#ecoCoreGlow)" />
+          <circle cx={cx} cy={cy} r={250} fill="url(#ecoCoreGlow)" />
 
-          {/* center → large-cap spokes */}
-          {big.length > 1 &&
-            big.map((_, i) => {
-              const p = bPos(i);
-              return <line key={`cb${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e9c46a55" strokeWidth={1.2} />;
-            })}
+          {/* faint ring guides */}
+          {rings.map((ring) => (
+            <circle key={`ring${ring.tier}`} cx={cx} cy={cy} r={ring.r} fill="none" stroke={`${ring.stroke}22`} strokeWidth={1} />
+          ))}
+
+          {/* center → mega-cap spokes (innermost populated tier) */}
+          {t1.map((m) => {
+            const p = pos.get(m.ticker)!;
+            return <line key={`sp${m.ticker}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e9c46a55" strokeWidth={1.2} />;
+          })}
 
           {/* same-sector supply-chain edges, coloured by tie type */}
           {[...edges.values()].map((e) => {
@@ -481,68 +497,45 @@ function EcoGraph({
                 y2={pb.y}
                 stroke={c}
                 strokeWidth={e.importance >= 3 ? 2 : 1}
-                strokeOpacity={e.importance >= 3 ? 0.85 : 0.45}
+                strokeOpacity={e.importance >= 3 ? 0.8 : 0.4}
               />
             );
           })}
 
           {/* center hub */}
-          <circle cx={cx} cy={cy} r={30} fill="#0e2a3a" stroke="#3dd6c4" strokeWidth={2} style={{ filter: "drop-shadow(0 0 12px #3dd6c4aa)" }} />
-          <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize={hub.length > 7 ? 9 : 11} fontWeight="700" fill="#3dd6c4">
+          <circle cx={cx} cy={cy} r={32} fill="#0e2a3a" stroke="#3dd6c4" strokeWidth={2} style={{ filter: "drop-shadow(0 0 12px #3dd6c4aa)" }} />
+          <text x={cx} y={cy + 4} textAnchor="middle" fontSize={hub.length > 7 ? 10 : 12} fontWeight="700" fill="#3dd6c4">
             {hub}
           </text>
 
-          {/* large-cap nodes (gold inner ring) */}
-          {big.length > 1 &&
-            big.map((m, i) => {
-              const p = bPos(i);
-              const hot = scores.has(m.ticker);
-              return (
-                <g key={m.ticker} className="eco-node" onClick={() => onOpen(m.ticker)}>
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={18}
-                    fill="#2a2413"
-                    stroke={hot ? "#ffe08a" : "#e9c46a"}
-                    strokeWidth={hot ? 2.6 : 2}
-                    style={{ filter: `drop-shadow(0 0 ${hot ? 10 : 7}px #e9c46a99)` }}
-                  />
-                  <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#f0d78a">
-                    {m.ticker}
-                  </text>
-                </g>
-              );
-            })}
-
-          {/* smaller-cap nodes (blue outer ring) + labels */}
-          {small.map((m, i) => {
-            const p = sPos(i);
-            const rad = 5 + Math.min(m.links.length, 8) * 0.9;
-            const ang = sAngle(i);
-            const lx = cx + (Ro + 20) * Math.cos(ang);
-            const ly = cy + (Ro + 20) * Math.sin(ang);
-            const anchorRight = Math.cos(ang) >= 0;
+          {/* nodes + labels, per ring */}
+          {placed.map(({ m, x, y, ang, ring, nodeR }) => {
             const hot = scores.has(m.ticker); // in your Focus List → light up
+            const inside = ring.tier === 1; // mega-cap labels sit inside the node
+            const labelR = ring.r + nodeR + (ring.tier === 3 ? 9 : 12);
+            const lx = inside ? x : cx + labelR * Math.cos(ang);
+            const ly = inside ? y + 3.5 : cy + labelR * Math.sin(ang);
+            const anchorRight = Math.cos(ang) >= 0;
+            const fontSize = ring.tier === 1 ? 9.5 : ring.tier === 2 ? 9 : hot ? 8.5 : 7.8;
             return (
               <g key={m.ticker} className="eco-node" onClick={() => onOpen(m.ticker)}>
                 <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r={hot ? rad + 1.5 : rad}
-                  fill={hot ? "#3dd6c4" : "#123244"}
-                  stroke={hot ? "#7ff0e2" : "#5fb0e888"}
-                  strokeWidth={hot ? 2.5 : 1.4}
-                  style={hot ? { filter: "drop-shadow(0 0 8px #3dd6c4)" } : undefined}
+                  cx={x}
+                  cy={y}
+                  r={hot ? nodeR + 1.5 : nodeR}
+                  fill={ring.fill}
+                  stroke={hot ? ring.hotStroke : `${ring.stroke}bb`}
+                  strokeWidth={hot ? 2.6 : ring.tier === 3 ? 1.4 : 2}
+                  style={{ filter: `drop-shadow(0 0 ${hot ? 9 : ring.tier === 3 ? 0 : 6}px ${ring.stroke}${hot ? "" : "88"})` }}
                 />
                 <text
                   x={lx}
-                  y={ly + 3}
-                  textAnchor={anchorRight ? "start" : "end"}
-                  fontSize={hot ? 11.5 : 10}
+                  y={ly}
+                  textAnchor={inside ? "middle" : anchorRight ? "start" : "end"}
+                  fontSize={fontSize}
                   fontFamily="ui-monospace, monospace"
-                  fontWeight={hot ? 700 : 500}
-                  fill={hot ? "#7ff0e2" : "#8fb6cc"}
+                  fontWeight={ring.tier === 1 || hot ? 700 : 500}
+                  fill={hot ? ring.hotStroke : ring.label}
                 >
                   {m.ticker}
                 </text>
