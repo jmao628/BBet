@@ -10,7 +10,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     outDir: "../web/dashboard",
-    emptyOutDir: true,
+    // Do NOT empty the output dir first. This dir is served live by the local
+    // server; emptying it at build start means any interrupted/failed build
+    // leaves the site 404ing until the next full build. Overwriting in place
+    // keeps the site up throughout. Old hashed assets linger (harmless; a few
+    // KB) — index.html always points at the current bundle.
+    emptyOutDir: false,
   },
   server: {
     port: 5173,
