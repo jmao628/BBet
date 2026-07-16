@@ -48,6 +48,23 @@ logger = logging.getLogger("newsagg.catalyst")
 CATALYST_FILE = "catalyst.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
+# The gateway routes/filters by request headers: the OpenAI SDK's own headers
+# (User-Agent: OpenAI/Python, X-Stainless-*) hit a BROKEN upstream channel and
+# 500, while a plain curl-style request works (curl=200 / SDK=500 on identical
+# bodies proved it). So we send curl-like headers to land on the good channel.
+# Overridable via GATEWAY_UA if the working User-Agent differs on your gateway.
+GATEWAY_HEADERS = {
+    "User-Agent": os.environ.get("GATEWAY_UA", "curl/8.7.1"),
+    "X-Stainless-Lang": "",
+    "X-Stainless-Package-Version": "",
+    "X-Stainless-OS": "",
+    "X-Stainless-Arch": "",
+    "X-Stainless-Runtime": "",
+    "X-Stainless-Runtime-Version": "",
+    "X-Stainless-Async": "",
+    "X-Stainless-Retry-Count": "",
+}
+
 # At most this many catalysts kept per name (the strongest few).
 MAX_CATALYSTS = 6
 
@@ -462,10 +479,11 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # High retry count + generous timeout: the gateway's upstream throws
-    # intermittent 500s ("do request failed"), especially over a flaky VPN route.
-    # The SDK retries 5xx with backoff, so more retries ride through the noise.
-    client = OpenAI(max_retries=8, timeout=180.0)
+    # The gateway routes/filters by request headers: the OpenAI SDK's own headers
+    # (User-Agent: OpenAI/Python, X-Stainless-*) land on a BROKEN upstream channel
+    # and 500, while a plain curl-style request hits a working one. Proven by
+    # curl=200 / SDK=500 on byte-identical bodies. So mimic curl's headers.
+    client = OpenAI(max_retries=8, timeout=180.0, default_headers=GATEWAY_HEADERS)
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:
