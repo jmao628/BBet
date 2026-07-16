@@ -101,14 +101,14 @@ export function ScreenView() {
     return rows;
   }, [supplychain, data, marketCaps]);
 
-  // A target shows in the graph if it depends on ANY in-universe mega-cap
-  // SUPPLIER (upstream hub). Suppliers are usually CROSS-sector (a Tech name
-  // depends on a semis-cap supplier, a Consumer name on an Industrials one), so
-  // we don't require the supplier to share the target's sector — that filter was
-  // excluding almost everything.
+  // A target shows in the graph if it's tied to ANY in-universe mega-cap
+  // ecosystem HUB (supplier, customer, OR peer — role shown by edge colour).
+  // Upstream-supplier-only was too narrow: whole sectors (esp. Technology) hang
+  // their mega-cap ties on CUSTOMERS/PEERS (NVDA, MSFT, AMZN), while their true
+  // suppliers (TSMC, ASML) are foreign / not in your universe — so they vanished.
   const graphEligible = (r: { ticker: string; neighbors: { anchor: boolean; kind: string; ticker: string }[] }) => {
     const sec = sectorOf(r.ticker);
-    return !!sec && r.neighbors.some((n) => n.anchor && n.kind === "upstream");
+    return !!sec && r.neighbors.some((n) => n.anchor);
   };
   const ecoSectorCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -187,8 +187,8 @@ export function ScreenView() {
               <div className="mb-3 space-y-1.5 rounded-lg border border-line bg-inset px-3 py-2 text-[11px] leading-relaxed">
                 <div className="text-muted">
                   {t(
-                    "One sector at a time — every node is a name from YOUR seed universe. Centre = the sector; inner gold ring = the mega-cap SUPPLIERS these names depend on (≥$100B upstream hubs, any sector; peers/customers-only names like UBER are excluded); outer nodes = discovery targets, placed near the suppliers they depend on. A glowing node = it's on your Focus List. Click any node.",
-                    "一次看一个板块——每个节点都是你 seed 库里的票。中心 = 该板块；内圈金色 = 这些票依赖的大票**供应商**（≥$1000亿的上游枢纽,可跨板块；只是同业/客户的大票如 UBER 会被排除）；外圈 = 发现目标,摆在它依赖的供应商附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
+                    "One sector at a time — every node is a name from YOUR seed universe. Centre = the sector; inner gold ring = the mega-cap ecosystem HUBS these names are tied to (≥$100B, any sector — supplier, customer, or peer; the edge colour tells you which); outer nodes = discovery targets, placed near the hubs they connect to. A glowing node = it's on your Focus List. Click any node.",
+                    "一次看一个板块——每个节点都是你 seed 库里的票。中心 = 该板块；内圈金色 = 这些票关联到的大票**生态枢纽**（≥$1000亿,可跨板块——供应商 / 客户 / 同业,连线颜色区分）；外圈 = 发现目标,摆在它关联的枢纽附近。发光节点 = 在你的 Focus 名单里。点任意节点。",
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -359,16 +359,17 @@ function EcoGraph({
 }) {
   const TOPT = 24;
   // A supplier anchor = an in-universe mega-cap UPSTREAM hub the target depends
-  // on — cross-sector suppliers count (that's the norm). Peers/customers-only
-  // mega-caps (UBER) don't count.
-  const isSupplier = (n: EcoNeighbor) => n.anchor && n.kind === "upstream";
-  const eligible = rows.filter((r) => r.neighbors.some(isSupplier));
+  // A hub = any in-universe mega-cap ecosystem tie (supplier / customer / peer —
+  // the edge colour tells you which). Broadened from upstream-only so tech (tied
+  // to mega-cap customers/peers) and every other sector actually populate.
+  const isHub = (n: EcoNeighbor) => n.anchor;
+  const eligible = rows.filter((r) => r.neighbors.some(isHub));
   const total = eligible.length;
   const targets = eligible.slice(0, TOPT);
 
-  // The supplier anchors, most-cited first (cap the ring).
+  // The mega-cap hubs, most-cited first (cap the ring).
   const freq = new Map<string, number>();
-  for (const r of eligible) for (const n of r.neighbors) if (isSupplier(n)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
+  for (const r of eligible) for (const n of r.neighbors) if (isHub(n)) freq.set(n.ticker, (freq.get(n.ticker) ?? 0) + 1);
   const anchors = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).map((e) => e[0]);
   const anchorIdx = new Map(anchors.map((a, i) => [a, i]));
   if (!targets.length || !anchors.length) {
@@ -415,8 +416,8 @@ function EcoGraph({
     <div>
       <div className="mb-2 text-[11px] text-muted2">
         {t(
-          `${total > TOPT ? `Top ${targets.length} of ${total}` : `${total}`} supplier-linked targets · ${anchors.length} suppliers · glowing = on your Focus List · click any node`,
-          `${total > TOPT ? `前 ${targets.length} / 共 ${total}` : `${total}`} 个供应商关联目标 · ${anchors.length} 个供应商 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
+          `${total > TOPT ? `Top ${targets.length} of ${total}` : `${total}`} hub-linked targets · ${anchors.length} hubs · glowing = on your Focus List · click any node`,
+          `${total > TOPT ? `前 ${targets.length} / 共 ${total}` : `${total}`} 个枢纽关联目标 · ${anchors.length} 个枢纽 · 发光 = 在你的 Focus 名单里 · 点任意节点`,
         )}
       </div>
       <div className="overflow-x-auto rounded-xl border border-line bg-[#0a1017]">
