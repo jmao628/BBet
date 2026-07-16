@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, buildEcoAdjacency, buildFocus, bypassesHeat, capLabel, sectorLabel } from "../pipeline";
+import { buildScreen, buildUniverse, buildEcoAdjacency, buildFocus, capSizeFromCap, capLabel, sectorLabel } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -67,11 +67,17 @@ export function ScreenView() {
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
     const eco = buildEcoAdjacency(supplychain, marketCaps); // symmetrized
+    // A representative cap VALUE for ordering the ring. The numeric marketcaps
+    // feed is sparse (many mega-caps have no entry), so fall back to the SA
+    // cap-size label (Large/Mid/Small) → a nominal value. "large" ⇒ gold ring.
+    const CAP_NOMINAL: Record<string, number> = { large: 2e10, mid: 4e9, small: 5e8, unknown: 1e8 };
     for (const u of uni) {
       const sec = sectorOf(u.ticker);
       if (!sec) continue;
-      const cap = marketCaps?.[u.ticker];
-      if (typeof cap === "number" && cap < 3e8) continue; // drop tiny/illiquid
+      const size = capSizeFromCap(marketCaps?.[u.ticker], u.caps); // large|mid|small|unknown
+      const numeric = marketCaps?.[u.ticker];
+      if (typeof numeric === "number" && numeric > 0 && numeric < 3e8) continue; // drop tiny/illiquid
+      const capVal = typeof numeric === "number" && numeric > 0 ? numeric : CAP_NOMINAL[size];
       // Keep only ties whose other end is in THIS sector and in your universe —
       // that is what makes the graph a pure single-sector network.
       const links = (eco.get(u.ticker) ?? [])
@@ -80,8 +86,8 @@ export function ScreenView() {
       const m: EcoMember = {
         ticker: u.ticker,
         company: companyOf.get(u.ticker) ?? "",
-        cap: typeof cap === "number" ? cap : 0,
-        big: bypassesHeat(cap), // ≥$100B ⇒ inner gold ring
+        cap: capVal,
+        large: size === "large", // Large Cap / S&P 500 / ≥$10B ⇒ inner gold ring
         links,
       };
       if (!bySector.has(sec)) bySector.set(sec, []);
@@ -335,7 +341,7 @@ export function ScreenView() {
 // Every node belongs to this sector — no cross-sector nodes. Edges are
 // supply-chain ties that stay inside the sector, coloured by tie type.
 type EcoLink = { ticker: string; kind: string; importance: number };
-type EcoMember = { ticker: string; company: string; cap: number; big: boolean; links: EcoLink[] };
+type EcoMember = { ticker: string; company: string; cap: number; large: boolean; links: EcoLink[] };
 
 function EcoGraph({
   members,
@@ -353,16 +359,21 @@ function EcoGraph({
   const RING_BIG = 16; // max large-caps on the inner ring
   const RING_SMALL = 30; // max smaller-caps on the outer ring
   const byCap = [...members].sort((a, b) => b.cap - a.cap);
-  let big = byCap.filter((m) => m.big);
-  let small = byCap.filter((m) => !m.big);
-  // Fallback: a sector with no true mega-cap still gets a gold "anchor" ring —
+  // Gold inner ring = the sector's large-caps, biggest first. Overflow beyond
+  // the ring cap drops to the outer ring so the ring stays readable.
+  let big = byCap.filter((m) => m.large);
+  let small = byCap.filter((m) => !m.large);
+  // Fallback: a sector with no large-cap still gets a gold "anchor" ring —
   // promote its largest few names so the graph has a readable inner hub.
   if (!big.length && byCap.length) {
     const k = Math.min(3, byCap.length);
     big = byCap.slice(0, k);
     small = byCap.slice(k);
   }
-  big = big.slice(0, RING_BIG);
+  if (big.length > RING_BIG) {
+    small = [...big.slice(RING_BIG), ...small]; // large overflow → outer ring
+    big = big.slice(0, RING_BIG);
+  }
   // Keep the most connected / Focus-listed smaller names when there are many.
   small = [...small]
     .sort(
