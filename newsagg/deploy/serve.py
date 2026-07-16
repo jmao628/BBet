@@ -101,7 +101,10 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         try:
             import yfinance as yf
 
-            df = yf.download(list(ymap.values()), period="2d", auto_adjust=False, progress=False, threads=True)
+            # timeout so a down Yahoo/VPN fails this endpoint in seconds instead
+            # of hanging — the live-quote overlay is optional, the page must not
+            # wait on it.
+            df = yf.download(list(ymap.values()), period="2d", auto_adjust=False, progress=False, threads=True, timeout=8)
             # df["Close"] works for both: a DataFrame (multi-ticker, columns = tickers)
             # or a Series (single ticker). `multi` distinguishes them.
             closes = df["Close"]
