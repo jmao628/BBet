@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -177,9 +178,19 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         pass
 
 
+def _repo_root() -> str:
+    # serve.py lives at <repo>/newsagg/deploy/serve.py, so the repo root is three
+    # levels up. Deriving it from __file__ (not cwd) means the server ALWAYS
+    # serves the right tree no matter what directory it's launched from — the
+    # cause of the recurring "dashboard 404 from a stale/wrong-cwd process".
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
-    directory = sys.argv[2] if len(sys.argv) > 2 else "."
+    # Absolute repo root, resolved from THIS file's location — ignore cwd. An
+    # explicit dir arg still wins (made absolute) but is no longer required.
+    directory = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else _repo_root()
     # Make `newsagg` importable for the live-quote endpoint (directory = repo root).
     if directory not in sys.path:
         sys.path.insert(0, directory)

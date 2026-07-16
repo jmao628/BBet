@@ -428,6 +428,16 @@ $PROXY_LINES
 </plist>
 EOF
 
+# Clear any stale process squatting on the web port (e.g. a manual `serve.py`
+# left running, or an old launchd process that didn't exit) so the reloaded web
+# job actually owns the port and serves from the correct repo root. This is what
+# prevents the recurring "dashboard 404 from a zombie server" problem.
+PORT_PIDS=$(lsof -ti tcp:"$PORT" 2>/dev/null || true)
+if [[ -n "$PORT_PIDS" ]]; then
+  echo "Clearing stale process on port $PORT: $PORT_PIDS"
+  kill -9 $PORT_PIDS 2>/dev/null || true
+fi
+
 # Reload jobs (unload first if already installed; ignore errors).
 for plist in "$SCRAPE_PLIST" "$HEAT_PLIST" "$MCAP_PLIST" "$TECH_PLIST" "$SECTOR_PLIST" "$SUPPLY_PLIST" "$CATALYST_PLIST" "$CONVICTION_PLIST" "$TRACK_PLIST" "$WEB_PLIST"; do
   launchctl unload "$plist" 2>/dev/null || true
