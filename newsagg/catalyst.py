@@ -442,7 +442,10 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    client = OpenAI()
+    # High retry count + generous timeout: the gateway's upstream throws
+    # intermittent 500s ("do request failed"), especially over a flaky VPN route.
+    # The SDK retries 5xx with backoff, so more retries ride through the noise.
+    client = OpenAI(max_retries=8, timeout=180.0)
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:
