@@ -116,7 +116,7 @@ export interface TechnicalData {
   tickers: Record<string, TechTicker>;
 }
 
-export type SectorData = Record<string, { sector: string; industry: string; name?: string }>;
+export type SectorData = Record<string, { sector: string; industry: string; name?: string; market_cap?: number }>;
 
 // LLM-derived supply chain (newsagg/supplychain.py). One short reason per edge.
 export interface SupplyEdge {

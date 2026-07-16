@@ -236,6 +236,44 @@ export function bypassesHeat(marketCap: number | undefined): boolean {
   return !!marketCap && marketCap >= BYPASS_MARKET_CAP;
 }
 
+// Static safety-net set of well-known US large-caps (~$10B+). Used ONLY as a
+// last-resort cap signal for the ecosystem graph's gold/blue ring split when
+// neither sectors.json's market_cap nor the (flaky) marketcaps.json feed has a
+// value — e.g. NVDA/MSFT/AMD when yfinance's fast_info dropped them. Once
+// sectors.json backfills market_cap (python -m newsagg.sectors), that reliable
+// number takes over and this list is just a floor.
+export const LARGE_CAP_TICKERS = new Set<string>([
+  // Semis & semicap
+  "NVDA", "AMD", "INTC", "MU", "AVGO", "QCOM", "TXN", "AMAT", "ADI", "LRCX", "KLAC", "MCHP",
+  "MRVL", "NXPI", "ON", "STM", "SWKS", "QRVO", "MPWR", "TER", "ENPH", "FSLR", "SNPS", "CDNS",
+  // Tech hardware / software / services
+  "AAPL", "MSFT", "ORCL", "CRM", "NOW", "INTU", "ADBE", "IBM", "ACN", "CSCO", "ANET", "APH",
+  "TEL", "GLW", "HPQ", "HPE", "DELL", "WDC", "STX", "PANW", "CRWD", "FTNT", "SNOW", "PLTR",
+  "WDAY", "TEAM", "DDOG", "ZS", "NET", "SNX",
+  // Communication services
+  "GOOGL", "GOOG", "META", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS",
+  // Consumer
+  "AMZN", "TSLA", "HD", "LOW", "NKE", "MCD", "SBUX", "BKNG", "TGT", "WMT", "COST", "PG",
+  "KO", "PEP", "PM", "MO", "CL", "KMB", "MDLZ", "MNST", "EL",
+  // Financials
+  "BRK-B", "JPM", "BAC", "WFC", "C", "GS", "MS", "AXP", "BLK", "SPGI", "SCHW", "USB", "PNC",
+  "TFC", "COF", "MMC", "ICE", "CME", "V", "MA", "PYPL",
+  // Healthcare
+  "UNH", "JNJ", "LLY", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "AMGN", "BMY", "GILD",
+  "CVS", "CI", "ELV", "ISRG", "MDT", "SYK", "BSX", "VRTX", "REGN",
+  // Industrials
+  "CAT", "DE", "HON", "UNP", "UPS", "BA", "GE", "MMM", "LMT", "RTX", "NOC", "GD", "EMR",
+  "ETN", "ITW", "CSX", "NSC", "FDX", "PH", "ZBRA",
+  // Energy
+  "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "WMB", "KMI", "OKE",
+  // Materials
+  "LIN", "APD", "SHW", "FCX", "NEM", "ECL", "DOW", "DD", "NUE",
+  // Utilities
+  "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL",
+  // Real estate
+  "AMT", "PLD", "CCI", "EQIX", "PSA", "O", "SPG", "WELL", "DLR",
+]);
+
 // Seeds held out of the ranked universe: any name with NO numeric SA quant
 // Micro-caps too small to be worth ranking — e.g. PERF, a $1.92 / ~$195M penny
 // stock. This is the ONLY inclusion filter on the seed universe: everything else

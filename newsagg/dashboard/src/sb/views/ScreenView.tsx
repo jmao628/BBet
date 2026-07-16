@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore, useT } from "../../store";
-import { buildScreen, buildUniverse, buildEcoAdjacency, buildFocus, capSizeFromCap, capLabel, sectorLabel } from "../pipeline";
+import { buildScreen, buildUniverse, buildEcoAdjacency, buildFocus, capSizeFromCap, capLabel, sectorLabel, LARGE_CAP_TICKERS } from "../pipeline";
 import { ViewHead, Card, StatStrip } from "../ui";
 import { MethodInfo } from "../MethodInfo";
 
@@ -67,17 +67,29 @@ export function ScreenView() {
     const inUni = new Set(uni.map((u) => u.ticker));
     const companyOf = new Map(uni.map((u) => [u.ticker, u.company]));
     const eco = buildEcoAdjacency(supplychain, marketCaps); // symmetrized
-    // A representative cap VALUE for ordering the ring. The numeric marketcaps
-    // feed is sparse (many mega-caps have no entry), so fall back to the SA
-    // cap-size label (Large/Mid/Small) → a nominal value. "large" ⇒ gold ring.
+    // A representative cap VALUE for ordering the ring. Cap sources, in order of
+    // reliability: (1) sectors.json market_cap — from yfinance .info, populated
+    // for every node; (2) the marketcaps.json fast_info feed — flaky, often
+    // missing mega-caps; (3) the static large-cap safety net; (4) the SA cap-size
+    // label → a nominal value. "large" ⇒ inner gold ring.
     const CAP_NOMINAL: Record<string, number> = { large: 2e10, mid: 4e9, small: 5e8, unknown: 1e8 };
     for (const u of uni) {
       const sec = sectorOf(u.ticker);
       if (!sec) continue;
-      const size = capSizeFromCap(marketCaps?.[u.ticker], u.caps); // large|mid|small|unknown
-      const numeric = marketCaps?.[u.ticker];
-      if (typeof numeric === "number" && numeric > 0 && numeric < 3e8) continue; // drop tiny/illiquid
-      const capVal = typeof numeric === "number" && numeric > 0 ? numeric : CAP_NOMINAL[size];
+      // Best numeric cap we have: prefer the reliable sectors.json .info cap,
+      // then the flaky fast_info feed.
+      const secCap = sectors?.[u.ticker]?.market_cap;
+      const numeric =
+        typeof secCap === "number" && secCap > 0
+          ? secCap
+          : typeof marketCaps?.[u.ticker] === "number" && marketCaps[u.ticker] > 0
+            ? marketCaps[u.ticker]
+            : undefined;
+      if (typeof numeric === "number" && numeric < 3e8) continue; // drop tiny/illiquid
+      const size = capSizeFromCap(numeric, u.caps); // large|mid|small|unknown
+      const known = LARGE_CAP_TICKERS.has(u.ticker);
+      const large = size === "large" || known; // gold-ring eligibility
+      const capVal = numeric ?? (known ? 2e10 : CAP_NOMINAL[size]);
       // Keep only ties whose other end is in THIS sector and in your universe —
       // that is what makes the graph a pure single-sector network.
       const links = (eco.get(u.ticker) ?? [])
@@ -87,7 +99,7 @@ export function ScreenView() {
         ticker: u.ticker,
         company: companyOf.get(u.ticker) ?? "",
         cap: capVal,
-        large: size === "large", // Large Cap / S&P 500 / ≥$10B ⇒ inner gold ring
+        large,
         links,
       };
       if (!bySector.has(sec)) bySector.set(sec, []);

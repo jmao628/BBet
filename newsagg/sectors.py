@@ -5,7 +5,12 @@ Sector rarely changes, so this is a *cached* fetch: only tickers missing from
 ``data/newsagg/sectors.json`` are looked up; existing ones are kept. That keeps
 the daily run cheap (usually a no-op) even though yfinance's .info is heavy.
 
-Writes ``data/newsagg/sectors.json`` = {ticker: {sector, industry, name}}.
+Writes ``data/newsagg/sectors.json`` = {ticker: {sector, industry, name, market_cap}}.
+
+The market cap comes from the SAME ``.info`` call (free — it's already fetched),
+and unlike ``marketcap.py``'s ``fast_info`` feed (flaky, often missing mega-caps)
+``.info["marketCap"]`` is reliably populated, so the dashboard uses it as the
+cap source for the per-sector ecosystem graph's large/small ring split.
 
     python -m newsagg.sectors
 """
@@ -48,15 +53,21 @@ def _fetch_one(ticker: str) -> dict | None:
     name = info.get("longName") or info.get("shortName") or ""
     if not sector and not industry:
         return None
-    return {"sector": sector or "", "industry": industry or "", "name": name}
+    mc = info.get("marketCap")
+    # Always store the key (0 = genuinely no cap from yfinance) so the backfill
+    # check below treats it as done and never re-fetches it every run.
+    market_cap = int(mc) if isinstance(mc, (int, float)) and mc > 0 else 0
+    return {"sector": sector or "", "industry": industry or "", "name": name, "market_cap": market_cap}
 
 
 def fetch_missing(tickers: list[str], have: dict[str, dict], workers: int = 8) -> dict[str, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # Re-fetch tickers with no cached entry OR an entry that predates the `name`
-    # field, so company names backfill on a normal run (no --refresh needed).
-    missing = [t for t in tickers if t not in have or not have[t].get("name")]
+    # Re-fetch tickers with no cached entry OR an entry that predates a field we
+    # now store (`name`, `market_cap`), so both backfill on a normal run without
+    # a --refresh. Cap size only needs a rough bucket, so a one-time backfill is
+    # enough — we don't re-pull caps daily.
+    missing = [t for t in tickers if t not in have or not have[t].get("name") or "market_cap" not in have[t]]
     if not missing:
         logger.info("no new tickers — sectors cache already complete (%d)", len(have))
         return {}
