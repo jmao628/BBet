@@ -65,9 +65,13 @@ def curl_responses(prompt: str, model: str, tools: list | None = None, timeout: 
     body: dict = {"model": model, "input": [{"role": "user", "content": prompt}]}
     if tools:
         body["tools"] = tools
+    # --noproxy '*': the LLM gateway is reached DIRECTLY (VPN routes it), but the
+    # shell usually has HTTP(S)_PROXY set to the yfinance proxy (127.0.0.1:3213).
+    # Without this, curl would tunnel the gateway request through that proxy and
+    # fail (000). yfinance keeps using the proxy; only this call bypasses it.
     proc = subprocess.run(
         [
-            "curl", "-sS", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses",
+            "curl", "-sS", "--noproxy", "*", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses",
             "-H", f"Authorization: Bearer {key}",
             "-H", "Content-Type: application/json",
             "--data-binary", json.dumps(body),
