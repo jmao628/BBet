@@ -270,11 +270,11 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # curl-style headers + retries to hit the gateway's working upstream channel
-    # (the SDK's own headers land on a broken one). See catalyst.py.
-    from newsagg.catalyst import GATEWAY_HEADERS
+    # curl-style client (strips SDK header fingerprint) to hit the gateway's
+    # working upstream channel. See catalyst.build_gateway_client.
+    from newsagg.catalyst import build_gateway_client
 
-    client = OpenAI(max_retries=8, timeout=180.0, default_headers=GATEWAY_HEADERS)
+    client = build_gateway_client()
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {

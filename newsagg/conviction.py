@@ -52,7 +52,7 @@ from pathlib import Path
 
 from newsagg.catalyst import (
     BYPASS_CAP,
-    GATEWAY_HEADERS,
+    build_gateway_client,
     _complete,
     _eco_neighbors,
     _extract_json,
@@ -332,9 +332,9 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # curl-style headers to hit the gateway's working upstream channel (the SDK's
-    # own headers land on a broken one), plus retries/timeout. See catalyst.py.
-    client = OpenAI(max_retries=8, timeout=180.0, default_headers=GATEWAY_HEADERS)
+    # curl-style client (strips SDK header fingerprint) to hit the gateway's
+    # working upstream channel. See catalyst.build_gateway_client.
+    client = build_gateway_client()
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:

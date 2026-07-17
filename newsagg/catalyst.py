@@ -48,22 +48,29 @@ logger = logging.getLogger("newsagg.catalyst")
 CATALYST_FILE = "catalyst.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
-# The gateway routes/filters by request headers: the OpenAI SDK's own headers
-# (User-Agent: OpenAI/Python, X-Stainless-*) hit a BROKEN upstream channel and
-# 500, while a plain curl-style request works (curl=200 / SDK=500 on identical
-# bodies proved it). So we send curl-like headers to land on the good channel.
-# Overridable via GATEWAY_UA if the working User-Agent differs on your gateway.
-GATEWAY_HEADERS = {
-    "User-Agent": os.environ.get("GATEWAY_UA", "curl/8.7.1"),
-    "X-Stainless-Lang": "",
-    "X-Stainless-Package-Version": "",
-    "X-Stainless-OS": "",
-    "X-Stainless-Arch": "",
-    "X-Stainless-Runtime": "",
-    "X-Stainless-Runtime-Version": "",
-    "X-Stainless-Async": "",
-    "X-Stainless-Retry-Count": "",
-}
+def build_gateway_client(max_retries: int = 8, timeout: float = 180.0):
+    """An OpenAI client whose requests look like plain curl.
+
+    The gateway routes by request headers: the SDK's own User-Agent
+    (OpenAI/Python) + X-Stainless-* headers hit a BROKEN upstream that 500s,
+    while a curl-style request hits a working one (curl=200 / SDK=500 on
+    byte-identical bodies proved it). Blanking the headers wasn't enough — the
+    gateway keys on their PRESENCE — so an httpx request hook fully STRIPS the
+    X-Stainless-* headers and rewrites the User-Agent just before send. Override
+    the working User-Agent via env GATEWAY_UA if your gateway differs.
+    """
+    import httpx
+    from openai import OpenAI
+
+    ua = os.environ.get("GATEWAY_UA", "curl/8.7.1")
+
+    def _mimic_curl(request: httpx.Request) -> None:
+        request.headers["user-agent"] = ua
+        for h in [k for k in request.headers if k.lower().startswith("x-stainless")]:
+            del request.headers[h]
+
+    http_client = httpx.Client(timeout=timeout, event_hooks={"request": [_mimic_curl]})
+    return OpenAI(max_retries=max_retries, http_client=http_client)
 
 # At most this many catalysts kept per name (the strongest few).
 MAX_CATALYSTS = 6
@@ -476,11 +483,9 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # The gateway routes/filters by request headers: the OpenAI SDK's own headers
-    # (User-Agent: OpenAI/Python, X-Stainless-*) land on a BROKEN upstream channel
-    # and 500, while a plain curl-style request hits a working one. Proven by
-    # curl=200 / SDK=500 on byte-identical bodies. So mimic curl's headers.
-    client = OpenAI(max_retries=8, timeout=180.0, default_headers=GATEWAY_HEADERS)
+    # curl-style client: strips the SDK header fingerprint so we hit the gateway's
+    # working upstream channel (the SDK's own headers 500). See build_gateway_client.
+    client = build_gateway_client()
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:
