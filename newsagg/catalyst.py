@@ -359,21 +359,18 @@ def _clean(parsed: dict, today: date) -> list[dict]:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed web-search call; returns the concatenated output text.
+    """One web-search call; returns the response's output text.
 
-    The gateway requires stream=True; we collect output_text deltas.
+    NON-streaming: the gateway's working upstream 500s on streaming SSE but
+    handles a plain request/response fine, so we take the whole response at once.
+    `output_text` aggregates the text parts (client timeout covers the web search).
     """
-    parts: list[str] = []
-    stream = client.responses.create(
+    resp = client.responses.create(
         model=model,
         input=[{"role": "user", "content": prompt}],
         tools=[{"type": "web_search"}],
-        stream=True,
     )
-    for ev in stream:
-        if getattr(ev, "type", "") == "response.output_text.delta":
-            parts.append(ev.delta)
-    return "".join(parts)
+    return getattr(resp, "output_text", "") or ""
 
 
 _FETCH_ATTEMPTS = 5  # persistent per-ticker retry — the gateway's upstream 500s

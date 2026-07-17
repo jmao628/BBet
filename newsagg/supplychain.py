@@ -182,18 +182,13 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed completion; returns the concatenated output text. The gateway
-    requires stream=True and input as a role/content list."""
-    parts: list[str] = []
-    stream = client.responses.create(
+    """One completion; returns the response's output text. NON-streaming: the
+    gateway's upstream 500s on streaming SSE but handles a plain request fine."""
+    resp = client.responses.create(
         model=model,
         input=[{"role": "user", "content": prompt}],
-        stream=True,
     )
-    for ev in stream:
-        if getattr(ev, "type", "") == "response.output_text.delta":
-            parts.append(ev.delta)
-    return "".join(parts)
+    return getattr(resp, "output_text", "") or ""
 
 
 def _clean_edges(raw: list) -> list[dict]:
@@ -275,7 +270,11 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    client = OpenAI()
+    # curl-style headers + retries to hit the gateway's working upstream channel
+    # (the SDK's own headers land on a broken one). See catalyst.py.
+    from newsagg.catalyst import GATEWAY_HEADERS
+
+    client = OpenAI(max_retries=8, timeout=180.0, default_headers=GATEWAY_HEADERS)
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {
