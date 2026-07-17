@@ -65,20 +65,19 @@ def curl_responses(prompt: str, model: str, tools: list | None = None, timeout: 
     body: dict = {"model": model, "input": [{"role": "user", "content": prompt}]}
     if tools:
         body["tools"] = tools
-    # --noproxy '*': the LLM gateway is reached DIRECTLY (VPN routes it), but the
-    # shell usually has HTTP(S)_PROXY set to the yfinance proxy (127.0.0.1:3213).
-    # Without this, curl would tunnel the gateway request through that proxy and
-    # fail (000). yfinance keeps using the proxy; only this call bypasses it.
-    proc = subprocess.run(
-        [
-            "curl", "-sS", "--noproxy", "*", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses",
-            "-H", f"Authorization: Bearer {key}",
-            "-H", "Content-Type: application/json",
-            "--data-binary", json.dumps(body),
-        ],
-        capture_output=True,
-        text=True,
-    )
+    # curl follows the shell's HTTP(S)_PROXY by default — which is correct here:
+    # the gateway is reached THROUGH the proxy/VPN (the SDK reached it that way).
+    # Set GATEWAY_NOPROXY=1 to force a direct connection instead, if your gateway
+    # is routed directly rather than through the proxy.
+    cmd = ["curl", "-sS", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses"]
+    if os.environ.get("GATEWAY_NOPROXY"):
+        cmd += ["--noproxy", "*"]
+    cmd += [
+        "-H", f"Authorization: Bearer {key}",
+        "-H", "Content-Type: application/json",
+        "--data-binary", json.dumps(body),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"curl failed (rc={proc.returncode}): {proc.stderr.strip()[:200]}")
     try:
