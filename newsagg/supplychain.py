@@ -182,13 +182,12 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One completion; returns the response's output text. NON-streaming: the
-    gateway's upstream 500s on streaming SSE but handles a plain request fine."""
-    resp = client.responses.create(
-        model=model,
-        input=[{"role": "user", "content": prompt}],
-    )
-    return getattr(resp, "output_text", "") or ""
+    """One completion; returns the response's output text. `client` is ignored —
+    the request goes out via curl (the only method that gets through this
+    gateway). No web-search tool here (supply-chain mapping is model-only)."""
+    from newsagg.catalyst import curl_responses
+
+    return curl_responses(prompt, model)
 
 
 def _clean_edges(raw: list) -> list[dict]:
@@ -251,12 +250,6 @@ def fetch_missing(
     """Look up the supply chain for tickers not already cached. If ``out_path``
     is given, checkpoint after every ticker (``base`` = the full existing cache
     to preserve, overlaid with new results) so a long run survives interruption."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        logger.warning("openai SDK not installed — `pip install openai`; skipping supply chain")
-        return {}
-
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not set — skipping supply-chain enrichment")
         return {}
@@ -270,11 +263,9 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # curl-style client (strips SDK header fingerprint) to hit the gateway's
-    # working upstream channel. See catalyst.build_gateway_client.
-    from newsagg.catalyst import build_gateway_client
-
-    client = build_gateway_client()
+    # No SDK client — _complete sends via curl (the only thing this gateway lets
+    # through). client stays None.
+    client = None
     out: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {

@@ -36,6 +36,7 @@ import logging
 import math
 import os
 import re
+import subprocess
 import time
 from datetime import date
 from pathlib import Path
@@ -48,29 +49,48 @@ logger = logging.getLogger("newsagg.catalyst")
 CATALYST_FILE = "catalyst.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
-def build_gateway_client(max_retries: int = 8, timeout: float = 180.0):
-    """An OpenAI client whose requests look like plain curl.
+def curl_responses(prompt: str, model: str, tools: list | None = None, timeout: float = 180.0) -> str:
+    """Call the OpenAI Responses API by shelling out to `curl`.
 
-    The gateway routes by request headers: the SDK's own User-Agent
-    (OpenAI/Python) + X-Stainless-* headers hit a BROKEN upstream that 500s,
-    while a curl-style request hits a working one (curl=200 / SDK=500 on
-    byte-identical bodies proved it). Blanking the headers wasn't enough — the
-    gateway keys on their PRESENCE — so an httpx request hook fully STRIPS the
-    X-Stainless-* headers and rewrites the User-Agent just before send. Override
-    the working User-Agent via env GATEWAY_UA if your gateway differs.
+    Why not the SDK: this gateway routes by the raw request, and ONLY plain curl
+    gets through — the Python SDK (httpx) and even `requests` 500 with a byte-
+    identical body (httpx lowercases header names, the SDK adds X-Stainless-*,
+    etc.; the gateway's upstream rejects anything that isn't curl-shaped). So we
+    literally run curl, which is proven to return 200. Non-streaming; returns the
+    aggregated output text. Raises on transport failure or an API error body so
+    the caller's retry loop can handle it.
     """
-    import httpx
-    from openai import OpenAI
-
-    ua = os.environ.get("GATEWAY_UA", "curl/8.7.1")
-
-    def _mimic_curl(request: httpx.Request) -> None:
-        request.headers["user-agent"] = ua
-        for h in [k for k in request.headers if k.lower().startswith("x-stainless")]:
-            del request.headers[h]
-
-    http_client = httpx.Client(timeout=timeout, event_hooks={"request": [_mimic_curl]})
-    return OpenAI(max_retries=max_retries, http_client=http_client)
+    base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    key = os.environ.get("OPENAI_API_KEY", "")
+    body: dict = {"model": model, "input": [{"role": "user", "content": prompt}]}
+    if tools:
+        body["tools"] = tools
+    proc = subprocess.run(
+        [
+            "curl", "-sS", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses",
+            "-H", f"Authorization: Bearer {key}",
+            "-H", "Content-Type: application/json",
+            "--data-binary", json.dumps(body),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"curl failed (rc={proc.returncode}): {proc.stderr.strip()[:200]}")
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError as exc:
+        raise RuntimeError(f"non-JSON response: {proc.stdout[:200]}") from exc
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"api error: {str(data['error'])[:200]}")
+    # Aggregate the text parts of the message items (the SDK's `output_text`).
+    parts: list[str] = []
+    for item in (data.get("output") or []) if isinstance(data, dict) else []:
+        if item.get("type") == "message":
+            for c in item.get("content") or []:
+                if c.get("type") == "output_text":
+                    parts.append(c.get("text", ""))
+    return "".join(parts)
 
 # At most this many catalysts kept per name (the strongest few).
 MAX_CATALYSTS = 6
@@ -366,18 +386,10 @@ def _clean(parsed: dict, today: date) -> list[dict]:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One web-search call; returns the response's output text.
-
-    NON-streaming: the gateway's working upstream 500s on streaming SSE but
-    handles a plain request/response fine, so we take the whole response at once.
-    `output_text` aggregates the text parts (client timeout covers the web search).
-    """
-    resp = client.responses.create(
-        model=model,
-        input=[{"role": "user", "content": prompt}],
-        tools=[{"type": "web_search"}],
-    )
-    return getattr(resp, "output_text", "") or ""
+    """One web-search call; returns the response's output text. `client` is
+    ignored — the request goes out via curl (see curl_responses), the only
+    method that gets through this gateway."""
+    return curl_responses(prompt, model, tools=[{"type": "web_search"}])
 
 
 _FETCH_ATTEMPTS = 5  # persistent per-ticker retry — the gateway's upstream 500s
@@ -460,11 +472,6 @@ def fetch_missing(
     refetch: set[str] | None = None,
     base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
-    try:
-        from openai import OpenAI
-    except ImportError:
-        logger.warning("openai SDK not installed — `pip install openai`; skipping catalyst")
-        return {}
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not set — skipping catalyst discovery")
         return {}
@@ -483,9 +490,9 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # curl-style client: strips the SDK header fingerprint so we hit the gateway's
-    # working upstream channel (the SDK's own headers 500). See build_gateway_client.
-    client = build_gateway_client()
+    # No SDK client — requests go out via curl (curl_responses), the only method
+    # that gets through this gateway. `client` stays None; _complete ignores it.
+    client = None
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:

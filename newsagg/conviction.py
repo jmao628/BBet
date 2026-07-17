@@ -52,7 +52,6 @@ from pathlib import Path
 
 from newsagg.catalyst import (
     BYPASS_CAP,
-    build_gateway_client,
     _complete,
     _eco_neighbors,
     _extract_json,
@@ -308,11 +307,6 @@ def fetch_missing(
     refetch: set[str] | None = None,
     base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
-    try:
-        from openai import OpenAI
-    except ImportError:
-        logger.warning("openai SDK not installed — `pip install openai`; skipping conviction")
-        return {}
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not set — skipping conviction read")
         return {}
@@ -332,9 +326,9 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # curl-style client (strips SDK header fingerprint) to hit the gateway's
-    # working upstream channel. See catalyst.build_gateway_client.
-    client = build_gateway_client()
+    # No SDK client — _complete sends via curl (the only thing this gateway lets
+    # through). client stays None.
+    client = None
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:
