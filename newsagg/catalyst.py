@@ -36,8 +36,6 @@ import logging
 import math
 import os
 import re
-import subprocess
-import time
 from datetime import date
 from pathlib import Path
 
@@ -48,52 +46,6 @@ logger = logging.getLogger("newsagg.catalyst")
 
 CATALYST_FILE = "catalyst.json"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
-
-def curl_responses(prompt: str, model: str, tools: list | None = None, timeout: float = 180.0) -> str:
-    """Call the OpenAI Responses API by shelling out to `curl`.
-
-    Why not the SDK: this gateway routes by the raw request, and ONLY plain curl
-    gets through — the Python SDK (httpx) and even `requests` 500 with a byte-
-    identical body (httpx lowercases header names, the SDK adds X-Stainless-*,
-    etc.; the gateway's upstream rejects anything that isn't curl-shaped). So we
-    literally run curl, which is proven to return 200. Non-streaming; returns the
-    aggregated output text. Raises on transport failure or an API error body so
-    the caller's retry loop can handle it.
-    """
-    base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-    key = os.environ.get("OPENAI_API_KEY", "")
-    body: dict = {"model": model, "input": [{"role": "user", "content": prompt}]}
-    if tools:
-        body["tools"] = tools
-    # curl follows the shell's HTTP(S)_PROXY by default — which is correct here:
-    # the gateway is reached THROUGH the proxy/VPN (the SDK reached it that way).
-    # Set GATEWAY_NOPROXY=1 to force a direct connection instead, if your gateway
-    # is routed directly rather than through the proxy.
-    cmd = ["curl", "-sS", "--max-time", str(int(timeout)), "-X", "POST", f"{base}/responses"]
-    if os.environ.get("GATEWAY_NOPROXY"):
-        cmd += ["--noproxy", "*"]
-    cmd += [
-        "-H", f"Authorization: Bearer {key}",
-        "-H", "Content-Type: application/json",
-        "--data-binary", json.dumps(body),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"curl failed (rc={proc.returncode}): {proc.stderr.strip()[:200]}")
-    try:
-        data = json.loads(proc.stdout)
-    except ValueError as exc:
-        raise RuntimeError(f"non-JSON response: {proc.stdout[:200]}") from exc
-    if isinstance(data, dict) and data.get("error"):
-        raise RuntimeError(f"api error: {str(data['error'])[:200]}")
-    # Aggregate the text parts of the message items (the SDK's `output_text`).
-    parts: list[str] = []
-    for item in (data.get("output") or []) if isinstance(data, dict) else []:
-        if item.get("type") == "message":
-            for c in item.get("content") or []:
-                if c.get("type") == "output_text":
-                    parts.append(c.get("text", ""))
-    return "".join(parts)
 
 # At most this many catalysts kept per name (the strongest few).
 MAX_CATALYSTS = 6
@@ -389,36 +341,28 @@ def _clean(parsed: dict, today: date) -> list[dict]:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One web-search call; returns the response's output text. `client` is
-    ignored — the request goes out via curl (see curl_responses), the only
-    method that gets through this gateway."""
-    return curl_responses(prompt, model, tools=[{"type": "web_search"}])
+    """One streamed web-search call; returns the concatenated output text.
 
-
-_FETCH_ATTEMPTS = 5  # persistent per-ticker retry — the gateway's upstream 500s
-# intermittently (worse over a flaky VPN route). Each attempt already carries the
-# SDK's own max_retries=8 backoff, so this grinds through as long as the route
-# succeeds SOME of the time. If it's ~always failing, no retry count saves it.
+    The gateway requires stream=True; we collect output_text deltas.
+    """
+    parts: list[str] = []
+    stream = client.responses.create(
+        model=model,
+        input=[{"role": "user", "content": prompt}],
+        tools=[{"type": "web_search"}],
+        stream=True,
+    )
+    for ev in stream:
+        if getattr(ev, "type", "") == "response.output_text.delta":
+            parts.append(ev.delta)
+    return "".join(parts)
 
 
 def _fetch_one(client, ticker: str, name: str, today: date, model: str, sector: str = "") -> dict | None:
-    text = ""
-    last_err: Exception | None = None
-    for attempt in range(1, _FETCH_ATTEMPTS + 1):
-        try:
-            text = _complete(client, model, _prompt(ticker, name, sector))
-        except Exception as exc:  # noqa: BLE001
-            last_err = exc
-            text = ""
-        if text.strip():
-            break
-        if attempt < _FETCH_ATTEMPTS:
-            wait = min(2 ** attempt, 30)
-            reason = type(last_err).__name__ if last_err else "empty response"
-            logger.info("  %s: attempt %d/%d failed (%s) — retry in %ds", ticker, attempt, _FETCH_ATTEMPTS, reason, wait)
-            time.sleep(wait)
-    if not text.strip():
-        logger.warning("  %s: gave up after %d attempts (%s)", ticker, _FETCH_ATTEMPTS, last_err)
+    try:
+        text = _complete(client, model, _prompt(ticker, name, sector))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("  %s: API error (%s)", ticker, exc)
         return None
     parsed = _extract_json(text)
     if parsed is None:
@@ -475,6 +419,11 @@ def fetch_missing(
     refetch: set[str] | None = None,
     base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
+    try:
+        from openai import OpenAI
+    except ImportError:
+        logger.warning("openai SDK not installed — `pip install openai`; skipping catalyst")
+        return {}
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not set — skipping catalyst discovery")
         return {}
@@ -493,9 +442,7 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # No SDK client — requests go out via curl (curl_responses), the only method
-    # that gets through this gateway. `client` stays None; _complete ignores it.
-    client = None
+    client = OpenAI()
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:

@@ -307,6 +307,11 @@ def fetch_missing(
     refetch: set[str] | None = None,
     base: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
+    try:
+        from openai import OpenAI
+    except ImportError:
+        logger.warning("openai SDK not installed — `pip install openai`; skipping conviction")
+        return {}
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("OPENAI_API_KEY not set — skipping conviction read")
         return {}
@@ -326,9 +331,7 @@ def fetch_missing(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     sectors = sectors or {}
-    # No SDK client — _complete sends via curl (the only thing this gateway lets
-    # through). client stays None.
-    client = None
+    client = OpenAI()
     endpoint = str(getattr(client, "base_url", "") or "")
     logger.info("OpenAI endpoint: %s", endpoint)
     if "api.openai.com" in endpoint:
