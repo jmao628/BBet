@@ -1,5 +1,37 @@
 import type { ReactNode } from "react";
-import { useT } from "../store";
+import { useT, useStore } from "../store";
+import type { TechTiming } from "../types";
+import { TIMING_META } from "./pipeline";
+
+// Entry-timing badge (Bollinger+MACD state). Green = buy now, amber = wait,
+// violet = hot/overheated, slate = idle. Shared by the leaderboard + detail.
+const TIMING_TONE: Record<"buy" | "watch" | "hot" | "idle", { fg: string; bg: string; bd: string }> = {
+  buy: { fg: "#5fe3a1", bg: "rgba(72,199,142,0.14)", bd: "rgba(72,199,142,0.45)" },
+  watch: { fg: "#f0c862", bg: "rgba(240,200,98,0.12)", bd: "rgba(240,200,98,0.4)" },
+  hot: { fg: "#c99bf0", bg: "rgba(201,155,240,0.12)", bd: "rgba(201,155,240,0.4)" },
+  idle: { fg: "#7f8f9e", bg: "transparent", bd: "var(--line,#22303c)" },
+};
+
+export function TimingBadge({ timing, size = "sm" }: { timing: TechTiming | null | undefined; size?: "sm" | "md" }) {
+  const lang = useStore((s) => s.lang);
+  if (!timing) return null;
+  const meta = TIMING_META[timing.timing];
+  const tone = TIMING_TONE[meta.tone];
+  const label = lang === "zh" ? meta.zh : meta.en;
+  const hint = lang === "zh" ? meta.hint.zh : meta.hint.en;
+  const pad = size === "md" ? "px-2 py-0.5 text-[11.5px]" : "px-1.5 py-[1px] text-[9.5px]";
+  return (
+    <span
+      title={`${hint} · score ${timing.score}${timing.divergence ? " · RSI divergence" : ""}${timing.squeeze ? " · squeeze" : ""}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded font-semibold uppercase tracking-wide ${pad}`}
+      style={{ color: tone.fg, background: tone.bg, border: `1px solid ${tone.bd}` }}
+    >
+      {meta.tone === "buy" && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+      {label}
+      {timing.timing !== "neutral" && <span className="tabular-nums opacity-70">{timing.score}</span>}
+    </span>
+  );
+}
 
 export function ViewHead({
   eyebrow,

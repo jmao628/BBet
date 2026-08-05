@@ -656,6 +656,33 @@ export function capLabel(cap: CapSize, lang: "en" | "zh"): string {
   return lang === "zh" ? CAP_LABEL[cap].zh : CAP_LABEL[cap].en;
 }
 
+// ── Bollinger+MACD entry-timing display ──────────────────────────────────────
+// Presentation for the timing state computed in newsagg.technical. `tone` maps
+// to the UI's color roles: green = a buy signal now, amber = wait, slate = idle.
+import type { TechTiming, TechTicker } from "../types";
+
+export const TIMING_META: Record<
+  TechTiming["timing"],
+  { en: string; zh: string; tone: "buy" | "watch" | "hot" | "idle"; hint: { en: string; zh: string } }
+> = {
+  strong_buy: { en: "Strong Buy", zh: "强买入", tone: "buy", hint: { en: "oversold + confirmed turn", zh: "超卖见底 + 拐头确认" } },
+  oversold_watch: { en: "Oversold", zh: "超卖埋伏", tone: "watch", hint: { en: "oversold, turn not confirmed — may still fall", zh: "超卖，拐头未确认，可能续跌" } },
+  pullback_buy: { en: "Pullback Buy", zh: "强势回踩", tone: "buy", hint: { en: "dipped back into the bands after a breakout", zh: "突破后回落进轨道内" } },
+  momentum: { en: "Momentum", zh: "动能确定", tone: "hot", hint: { en: "confirmed uptrend, holding above MA20", zh: "上涨趋势确认，站稳 MA20" } },
+  overheated: { en: "Overheated", zh: "过热·等回落", tone: "hot", hint: { en: "above the upper band — wait for the pullback", zh: "突破上轨，等回落进轨道再买" } },
+  neutral: { en: "—", zh: "观望", tone: "idle", hint: { en: "no entry signal", zh: "无买点信号" } },
+};
+
+export function timingLabel(state: TechTiming["timing"], lang: "en" | "zh"): string {
+  return lang === "zh" ? TIMING_META[state].zh : TIMING_META[state].en;
+}
+
+// "Best entry now" sort key: the timing score, or -1 when a name has no timing
+// data yet (so it sinks below anything that does).
+export function timingSortKey(tech: TechTicker | null | undefined): number {
+  return tech?.timing ? tech.timing.score : -1;
+}
+
 // Focus List — step 2's synthesized output. A name earns a spot if it is
 // technically strong (gauge = strong buy) OR ecosystem-connected (linked to
 // another universe name). Each carries a transparent composite score that

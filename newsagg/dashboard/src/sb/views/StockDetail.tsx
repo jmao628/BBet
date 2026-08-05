@@ -19,10 +19,12 @@ import {
   SHORTLIST_CAT_BAR,
   SHORTLIST_W,
   CATALYST_BAR,
+  TIMING_META,
   type FocusItem,
   type LeaderRow,
 } from "../pipeline";
-import type { Catalyst, CatalystTicker, ConvictionTicker, SupplyEdge, SupplyMap, TechTicker } from "../../types";
+import { TimingBadge } from "../ui";
+import type { BandSeries, Catalyst, CatalystTicker, ConvictionTicker, SupplyEdge, SupplyMap, TechTicker, TechTiming } from "../../types";
 
 // Human labels for the ranking lenses a name advanced in (Heat Ignition).
 const LENS_LABEL: Record<string, { en: string; zh: string }> = {
@@ -563,6 +565,167 @@ function PriceChart({ closes, vols }: { closes: number[]; vols: number[] }) {
   );
 }
 
+// Price with the Bollinger envelope overlaid + a MACD-histogram subplot — the
+// two indicators the entry-timing state is read from, so you can eyeball why a
+// name reads oversold / overheated.
+function TimingChart({ closes, band, t }: { closes: number[]; band: BandSeries; t: (en: string, zh: string) => string }) {
+  const W = 720,
+    H = 240,
+    PADL = 40,
+    PADR = 12,
+    priceH = 150,
+    macdY = 176,
+    macdH = H - macdY - 8;
+  const n = closes.length;
+  if (n < 2) return <div className="p-4 text-[12px] text-muted">{t("series too short", "数据太短")}</div>;
+  const xs = (i: number) => PADL + (i * (W - PADL - PADR)) / (n - 1);
+  const bandVals = [...band.upper, ...band.lower, ...closes].filter((v): v is number => v != null);
+  const pMax = Math.max(...bandVals),
+    pMin = Math.min(...bandVals);
+  const yP = (v: number) => 10 + (1 - (v - pMin) / (pMax - pMin || 1)) * (priceH - 10);
+  // Bollinger envelope as a filled band between upper & lower (where both exist).
+  const envTop: string[] = [];
+  const envBot: string[] = [];
+  for (let i = 0; i < n; i++) {
+    if (band.upper[i] != null) envTop.push(`${xs(i)},${yP(band.upper[i]!)}`);
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    if (band.lower[i] != null) envBot.push(`${xs(i)},${yP(band.lower[i]!)}`);
+  }
+  const envelope = envTop.length && envBot.length ? `M${envTop.join(" L")} L${envBot.join(" L")} Z` : "";
+  const midPath = band.middle
+    .map((v, i) => (v != null ? `${xs(i)},${yP(v)}` : null))
+    .filter(Boolean)
+    .join(" L");
+  const pricePath = closes.map((c, i) => `${xs(i)},${yP(c)}`).join(" L");
+  const up = closes[n - 1] >= closes[0];
+  const col = up ? "#48c78e" : "#ff5a78";
+  // MACD histogram subplot (aligned to the right edge — it may be shorter than n).
+  const hist = band.macd_hist;
+  const hn = hist.length;
+  const hOffset = n - hn; // right-align the histogram under the price
+  const hMax = Math.max(1e-9, ...hist.map((h) => Math.abs(h)));
+  const hZero = macdY + macdH / 2;
+  const yH = (h: number) => hZero - (h / hMax) * (macdH / 2 - 2);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: "100%" }}>
+      {envelope && <path d={envelope} fill="rgba(95,176,232,0.10)" stroke="none" />}
+      <path d={`M${envTop.join(" L")}`} fill="none" stroke="#5fb0e8" strokeWidth="1" strokeOpacity="0.55" />
+      <path d={`M${envBot.join(" L")}`} fill="none" stroke="#5fb0e8" strokeWidth="1" strokeOpacity="0.55" />
+      {midPath && <path d={`M${midPath}`} fill="none" stroke="#e9c46a" strokeWidth="1" strokeDasharray="4 3" strokeOpacity="0.7" />}
+      <path d={`M${pricePath}`} fill="none" stroke={col} strokeWidth="1.7" strokeLinejoin="round" />
+      {/* MACD histogram */}
+      <line x1={PADL} y1={hZero} x2={W - PADR} y2={hZero} stroke="#3a4a59" strokeWidth="0.7" />
+      {hist.map((h, i) => {
+        const gi = hOffset + i;
+        return (
+          <rect
+            key={i}
+            x={xs(gi) - (W - PADL - PADR) / n / 2.6}
+            y={Math.min(hZero, yH(h))}
+            width={(W - PADL - PADR) / n / 1.3}
+            height={Math.abs(yH(h) - hZero)}
+            fill={h >= 0 ? "rgba(72,199,142,0.75)" : "rgba(255,90,120,0.7)"}
+          />
+        );
+      })}
+      <text x="2" y="12" fontSize="9" fill="#5a6a7c">{pMax.toFixed(1)}</text>
+      <text x="2" y={priceH} fontSize="9" fill="#5a6a7c">{pMin.toFixed(1)}</text>
+      <text x="2" y={macdY + 8} fontSize="9" fill="#5a6a7c">MACD</text>
+      <text x={W - PADR - 96} y="12" fontSize="9" fill="#5fb0e8">{t("Bollinger 20·2σ", "布林带 20·2σ")}</text>
+    </svg>
+  );
+}
+
+const REBOUND_PART_LABEL: Record<string, { en: string; zh: string; max: number }> = {
+  macd_upturn: { en: "MACD upturn", zh: "MACD 拐头", max: 30 },
+  rsi_divergence: { en: "RSI divergence", zh: "RSI 底背离", max: 25 },
+  reclaim: { en: "%B reclaim", zh: "%B 收复", max: 20 },
+  capitulation: { en: "Capitulation vol", zh: "恐慌放量", max: 15 },
+  oversold_depth: { en: "Oversold depth", zh: "超卖深度", max: 10 },
+};
+
+// The entry-timing readout: the state, the rebound-momentum breakdown (only when
+// an oversold setup is live), and the raw Bollinger / MACD numbers behind it.
+function TimingPanel({ timing, band, closes, t }: { timing: TechTiming; band: BandSeries | null | undefined; closes: number[]; t: (en: string, zh: string) => string }) {
+  const meta = TIMING_META[timing.timing];
+  const showRebound = timing.timing === "strong_buy" || timing.timing === "oversold_watch";
+  const pctb = timing.bb.pctb;
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Entry Timing · Bollinger + MACD", "择时买点 · 布林带 + MACD")}</div>
+        <TimingBadge timing={timing} size="md" />
+      </div>
+
+      <div className="mb-3 text-[11.5px] leading-relaxed text-muted2">{t(meta.hint.en, meta.hint.zh)}</div>
+
+      {band && closes.length >= 2 && <TimingChart closes={closes} band={band} t={t} />}
+
+      {/* rebound-momentum breakdown (buy-A setups only) */}
+      {showRebound && (
+        <div className="mt-3">
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <span className="text-[11.5px] font-semibold text-muted">{t("Rebound momentum", "反弹动能")}</span>
+            <span className="font-mono text-[15px] font-semibold" style={{ color: timing.rebound >= 50 ? "#48c78e" : "#f0c862" }}>
+              {timing.rebound}<span className="text-[11px] text-muted2">/100</span>
+            </span>
+          </div>
+          <div className="text-[10.5px] text-muted2">
+            {timing.rebound >= 50
+              ? t("Sellers exhausted — the bounce has strength (扣扳机).", "卖压衰竭，反弹有劲（扣扳机）。")
+              : t("Oversold but the turn isn't confirmed — may still fall (埋伏).", "超卖但拐头未确认，可能续跌（埋伏）。")}
+          </div>
+          {timing.rebound_parts && (
+            <div className="mt-2 space-y-1.5">
+              {Object.entries(REBOUND_PART_LABEL).map(([k, m]) => {
+                const v = timing.rebound_parts?.[k] ?? 0;
+                return (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="w-[92px] flex-none text-[10px] text-muted2">{t(m.en, m.zh)}</span>
+                    <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-inset">
+                      <span className="block h-full rounded-full" style={{ width: `${(v / m.max) * 100}%`, background: v > 0 ? "#48c78e" : "transparent" }} />
+                    </div>
+                    <span className="w-[46px] flex-none text-right font-mono text-[10px] text-muted">{v.toFixed(0)}/{m.max}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* raw indicator numbers */}
+      <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Stat
+          label={t("%B (band pos.)", "%B 带内位置")}
+          value={pctb.toFixed(2)}
+          color={pctb < 0.05 ? "#48c78e" : pctb > 1 ? "#c99bf0" : undefined}
+        />
+        <Stat label={t("Bandwidth", "带宽")} value={`${(timing.bb.bandwidth * 100).toFixed(1)}%`} color={timing.squeeze ? "#f0c862" : undefined} />
+        <Stat label={t("Trend regime", "趋势体制")} value={t(timing.regime, timing.regime === "up" ? "上涨" : timing.regime === "down" ? "下跌" : "震荡")} />
+        <Stat label={t("MACD hist z", "MACD 柱 z")} value={timing.macd.hist_z.toFixed(2)} color={timing.macd.hist_z <= -1.5 ? "#48c78e" : undefined} />
+        <Stat label="MACD line" value={timing.macd.line.toFixed(3)} color={timing.macd.line >= 0 ? "#48c78e" : "#ff5a78"} />
+        <Stat label={t("MACD cross", "MACD 交叉")} value={timing.macd.cross === "bull" ? t("bull", "金叉") : t("bear", "死叉")} color={timing.macd.cross === "bull" ? "#48c78e" : "#ff5a78"} />
+        <Stat label={t("Upper / Lower", "上轨/下轨")} value={`${timing.bb.upper} / ${timing.bb.lower}`} />
+        <Stat label="MA20" value={`$${timing.bb.middle}`} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Flag on={timing.divergence}>{t("RSI bullish divergence", "RSI 底背离")}</Flag>
+        <Flag on={timing.squeeze}>{t("Bollinger squeeze", "布林收口")}</Flag>
+      </div>
+
+      <div className="mt-3 text-[11px] leading-relaxed text-muted2">
+        {t(
+          "A buy-only entry overlay on a name the funnel already likes: buy oversold weakness once the bounce confirms, or buy the pullback back into the bands after a breakout. Never a filter — a good company at a bad price just waits.",
+          "在漏斗已经看好的票上叠加的『只做买点』择时：超卖见底、反弹确认后买入，或突破后回落进轨道再买。它从不做筛选——好公司但价格不好，就等。",
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Ecosystem map. Suppliers flow in from the left, customers out to the right —
 // a clean two-sided value chain (links stay in their own half, so they never
 // cross). Competitors (peers) aren't a flow, so they sit in a chip strip below.
@@ -1081,6 +1244,11 @@ export function StockDetail() {
                 </div>
                 <PriceChart closes={tech.close_series} vols={tech.vol_series} />
               </div>
+
+              {/* entry timing — Bollinger + MACD */}
+              {tech.timing && (
+                <TimingPanel timing={tech.timing} band={tech.band_series} closes={tech.close_series} t={t} />
+              )}
 
               {/* attention detail */}
               {a && (

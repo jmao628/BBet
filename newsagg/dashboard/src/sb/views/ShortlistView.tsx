@@ -5,11 +5,13 @@ import {
   buildShortlist,
   capLabel,
   sectorLabel,
+  timingSortKey,
   SHORTLIST_CAT_BAR,
   SHORTLIST_W,
   type LeaderRow,
 } from "../pipeline";
-import { ViewHead } from "../ui";
+import { ViewHead, TimingBadge } from "../ui";
+import type { TechTiming } from "../../types";
 
 const TIER_META: Record<1 | 2 | 3, { color: string; glow: string; medal: string; en: string; zh: string; cond: { en: string; zh: string } }> = {
   1: { color: "#f0c862", glow: "#f0c862", medal: "1st", en: "First — all three", zh: "第一名榜单 · 三条全中", cond: { en: "Focus · Core · Catalyst > 6", zh: "在名单 · 核心 · 催化剂 > 6" } },
@@ -71,7 +73,7 @@ function CondPill({ on, color, label }: { on: boolean; color: string; label: str
   );
 }
 
-function Row({ r, rank, idx, lang, onOpen, t }: { r: LeaderRow; rank: number; idx: number; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+function Row({ r, rank, idx, lang, timing, onOpen, t }: { r: LeaderRow; rank: number; idx: number; lang: "en" | "zh"; timing: TechTiming | null; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
   const meta = TIER_META[r.tier];
   const top = rank === 1;
   return (
@@ -97,6 +99,7 @@ function Row({ r, rank, idx, lang, onOpen, t }: { r: LeaderRow; rank: number; id
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-disp text-[15px] font-bold tracking-tight text-text transition-colors group-hover:text-signal">{r.ticker}</span>
           {top && <span className="text-[11px]" style={{ color: meta.color }} title={t("tier leader", "本榜第一")}>♛</span>}
+          <TimingBadge timing={timing} />
           <CondPill on={r.core} color="#f0c862" label={t("Core", "核心")} />
           <CondPill on={r.catHot} color={LENS.cat} label={r.catScore >= 0 ? `CAT ${r.catScore.toFixed(1)}` : t("no cat", "无催化")} />
         </div>
@@ -169,6 +172,7 @@ export function ShortlistView() {
 
   const [sector, setSector] = useState<string | null>(null);
   const [tab, setTab] = useState<1 | 2 | 3 | null>(null); // null = auto-pick first non-empty
+  const [sortBy, setSortBy] = useState<"strength" | "entry">("strength"); // "entry" = best buy point now
 
   const focus = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -183,7 +187,17 @@ export function ShortlistView() {
   const t3 = tier(3);
   // Active tab: user's choice, else the first tier that actually has names.
   const activeTier: 1 | 2 | 3 = tab ?? (t1.length ? 1 : t2.length ? 2 : 3);
-  const activeRows = activeTier === 1 ? t1 : activeTier === 2 ? t2 : t3;
+  const timingOf = (tk: string): TechTiming | null => technical?.tickers?.[tk]?.timing ?? null;
+  const baseRows = activeTier === 1 ? t1 : activeTier === 2 ? t2 : t3;
+  // "entry" re-ranks the board by the live Bollinger+MACD entry-timing score, so
+  // the best BUY POINTS float up (a good name at a good price) — independent of
+  // the composite strength order.
+  const activeRows = useMemo(() => {
+    if (sortBy !== "entry") return baseRows;
+    return [...baseRows].sort(
+      (a, b) => timingSortKey(technical?.tickers?.[b.ticker]) - timingSortKey(technical?.tickers?.[a.ticker]) || b.composite - a.composite,
+    );
+  }, [baseRows, sortBy, technical]);
 
   const sectorCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -226,6 +240,20 @@ export function ShortlistView() {
                 {sectorLabel(sec, lang)} {n}
               </button>
             ))}
+
+            {/* sort: composite strength vs live entry-timing */}
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[10.5px] text-muted2">{t("Sort:", "排序:")}</span>
+              {(["strength", "entry"] as const).map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setSortBy(k)}
+                  className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sortBy === k ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+                >
+                  {k === "strength" ? t("Strength", "强度") : t("Entry Now", "买点")}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* tier switcher — one board at a time */}
@@ -243,7 +271,7 @@ export function ShortlistView() {
               </div>
             ) : (
               activeRows.map((r, i) => (
-                <Row key={r.ticker} r={r} rank={i + 1} idx={i} lang={lang} onOpen={openDetail} t={t} />
+                <Row key={r.ticker} r={r} rank={i + 1} idx={i} lang={lang} timing={timingOf(r.ticker)} onOpen={openDetail} t={t} />
               ))
             )}
           </div>

@@ -95,6 +95,37 @@ export interface TechGauge {
   macd_hist: number | null;
 }
 
+// Bollinger + MACD entry-timing (newsagg.technical.compute_timing). A buy-only
+// overlay: the funnel picks a good company, this answers "is now a good price".
+export type TimingState =
+  | "strong_buy" // Buy A — 扣扳机: oversold, turned, bounce has strength
+  | "oversold_watch" // Buy A — 埋伏: oversold, turn not yet confirmed
+  | "pullback_buy" // Buy B — 强势回踩: dipped back into the bands after a breakout
+  | "momentum" // confirmed uptrend, holding above MA20
+  | "overheated" // above the upper band — wait for the pullback, don't chase
+  | "neutral";
+
+export interface TechTiming {
+  timing: TimingState;
+  label: string; // Chinese badge label
+  score: number; // 0-100, "best entry now" sort key (higher = buy sooner)
+  rebound: number; // 0-100 rebound-momentum strength
+  rebound_parts?: Record<string, number>;
+  regime: "up" | "down" | "range";
+  squeeze: boolean; // Bollinger bandwidth in the bottom 20% of its 120d range
+  divergence: boolean; // RSI bullish divergence present
+  bb: { upper: number; middle: number; lower: number; pctb: number; bandwidth: number };
+  macd: { line: number; signal: number; hist: number; hist_prev: number | null; hist_z: number; cross: "bull" | "bear" };
+}
+
+// Bollinger rails + MACD histogram over the 60d tail, aligned to close_series.
+export interface BandSeries {
+  upper: (number | null)[];
+  middle: (number | null)[];
+  lower: (number | null)[];
+  macd_hist: number[];
+}
+
 export interface TechTicker {
   price: number;
   change_pct: number | null;
@@ -106,8 +137,10 @@ export interface TechTicker {
   attention: TechAttention;
   gauge: TechGauge;
   buy_streak?: number; // consecutive recent days reading Buy/Strong-Buy
+  timing?: TechTiming | null; // Bollinger+MACD entry timing
   close_series: number[];
   vol_series: number[];
+  band_series?: BandSeries | null;
 }
 
 export interface TechnicalData {
