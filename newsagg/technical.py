@@ -499,6 +499,31 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
     else:
         state = "neutral"
 
+    # The concrete signals firing right now — the "receipts" for the state, shown
+    # as chips so you can see WHY it's a buy (broke the band, MACD turned, etc.).
+    # Ordered strongest-evidence first.
+    signals: list[str] = []
+    if touched_lower:
+        signals.append("band_break")       # broke the lower band (within 10d)
+    if macd_extreme:
+        signals.append("macd_capitulation")  # MACD histogram at an extreme trough
+    if turning_up:
+        signals.append("macd_turn")        # MACD histogram turning up
+    if rparts.get("rsi_divergence", 0) > 0:
+        signals.append("rsi_divergence")   # price lower low, RSI higher low
+    if rparts.get("capitulation", 0) > 0:
+        signals.append("capitulation")     # volume climax at the low
+    if touched_lower and not curr_below and pb > _LOWER_BAND_TOUCH:
+        signals.append("reclaim")          # back above the lower rail
+    if squeeze:
+        signals.append("squeeze")          # Bollinger bandwidth compressed
+    if was_above_upper and 0.3 < pb < 0.9:
+        signals.append("pullback")         # eased back into the bands after a breakout
+    if pb > _UPPER_BAND_BREAK:
+        signals.append("above_upper")      # above the upper band (overheated)
+    if regime == "up" and mid_streak >= _MID_STREAK_DAYS:
+        signals.append("uptrend_hold")     # holding above MA20 in an uptrend
+
     score = _TIMING_BASE[state]
     if state == "strong_buy":
         score = 85 + round(rebound * 0.15)          # 85-100
@@ -515,6 +540,7 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
         "timing": state,
         "label": _TIMING_LABEL[state],
         "score": int(_clamp(score, 0, 100)),
+        "signals": signals,
         "rebound": rebound,
         "rebound_parts": rparts,
         "regime": regime,

@@ -10,129 +10,155 @@ import {
   TIMING_BUY_STATES,
   type TimingRow,
 } from "../pipeline";
-import { ViewHead, TimingBadge } from "../ui";
+import { ViewHead, TimingBadge, SignalChips } from "../ui";
 import type { TechTiming } from "../../types";
 
-// Section accent per state tone, matched to the TimingBadge palette.
+// Tone → accent, matched to the TimingBadge palette.
 const TONE_COLOR: Record<"buy" | "watch" | "hot" | "idle", string> = {
   buy: "#5fe3a1",
   watch: "#f0c862",
   hot: "#c99bf0",
   idle: "#7f8f9e",
 };
+const stateColor = (s: TechTiming["timing"]): string => TONE_COLOR[TIMING_META[s].tone];
+const isBuy = (s: TechTiming["timing"]): boolean => TIMING_BUY_STATES.includes(s);
 
-function pctbBar(pctb: number): { label: string; color: string; pos: number } {
-  // Map %B onto a 0..1 rail position (clamped a bit beyond the bands).
+// A horizontal Bollinger gauge: lower rail — MA20 tick — upper rail, with the
+// price dot placed by %B. The band position at a glance.
+function BandGauge({ pctb }: { pctb: number }) {
+  // Map %B onto a 0..1 rail (a little headroom beyond each band).
   const pos = Math.max(0, Math.min(1, (pctb + 0.15) / 1.3));
+  const midPos = (0.5 + 0.15) / 1.3;
   const color = pctb < 0.05 ? "#48c78e" : pctb > 1 ? "#c99bf0" : "#5fb0e8";
-  return { label: pctb.toFixed(2), color, pos };
-}
-
-function Row({
-  r,
-  rank,
-  lang,
-  onOpen,
-  t,
-}: {
-  r: TimingRow;
-  rank: number;
-  lang: "en" | "zh";
-  onOpen: (x: string) => void;
-  t: (en: string, zh: string) => string;
-}) {
-  const tm = r.timing;
-  const pb = pctbBar(tm.bb.pctb);
-  const showReb = tm.timing === "strong_buy" || tm.timing === "band_break" || tm.timing === "oversold_watch";
   return (
-    <div
-      onClick={() => onOpen(r.ticker)}
-      className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5 transition-[transform,border-color] duration-200 hover:-translate-y-0.5 hover:border-signal/40"
-    >
-      <span className="w-6 flex-none text-right font-mono text-[12px] text-muted2">{rank}</span>
-
-      <div className="min-w-0 flex-[1.4]">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-disp text-[15px] font-bold tracking-tight text-text group-hover:text-signal">{r.ticker}</span>
-          <TimingBadge timing={tm} />
-          {tm.divergence && <span className="text-[9px] text-signal" title="RSI bullish divergence">◈</span>}
-          {tm.squeeze && <span className="text-[9px] text-gold" title="Bollinger squeeze">⧗</span>}
-        </div>
-        <div className="mt-0.5 truncate text-[10.5px] text-muted2">
-          {r.company || "—"}
-          {r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""} · {t("Tier", "档")} {r.tier}
-        </div>
-      </div>
-
-      {/* %B position on the band rail */}
-      <div className="hidden w-[150px] flex-none md:block">
-        <div className="mb-1 flex items-baseline justify-between text-[8.5px] uppercase tracking-wide text-muted2">
-          <span>{t("lower", "下轨")}</span>
-          <span className="text-muted">%B {pb.label}</span>
-          <span>{t("upper", "上轨")}</span>
-        </div>
-        <div className="relative h-[6px] w-full rounded-full bg-inset">
-          {/* mid (MA20) marker */}
-          <span className="absolute top-[-2px] h-[10px] w-px bg-white/25" style={{ left: `${((0.5 + 0.15) / 1.3) * 100}%` }} />
-          <span className="absolute top-1/2 h-[10px] w-[10px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${pb.pos * 100}%`, background: pb.color, boxShadow: `0 0 8px ${pb.color}aa` }} />
-        </div>
-      </div>
-
-      {/* rebound momentum (buy-A) or MACD state */}
-      <div className="hidden w-[92px] flex-none text-right sm:block">
-        {showReb ? (
-          <>
-            <div className="font-mono text-[15px] font-semibold" style={{ color: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }}>{tm.rebound}</div>
-            <div className="text-[8.5px] uppercase tracking-wide text-muted2">{t("rebound", "反弹动能")}</div>
-          </>
-        ) : (
-          <>
-            <div className="font-mono text-[13px] font-semibold" style={{ color: tm.macd.cross === "bull" ? "#48c78e" : "#ff5a78" }}>
-              {tm.macd.cross === "bull" ? t("bull", "金叉") : t("bear", "死叉")}
-            </div>
-            <div className="text-[8.5px] uppercase tracking-wide text-muted2">MACD</div>
-          </>
-        )}
-      </div>
-
-      {/* entry score */}
-      <div className="w-[56px] flex-none text-right">
-        <div className="font-disp text-[17px] font-semibold leading-none" style={{ color: TONE_COLOR[TIMING_META[tm.timing].tone] }}>{tm.score}</div>
-        <div className="text-[8.5px] uppercase tracking-wide text-muted2">{t("entry", "买点")}</div>
+    <div className="w-full">
+      <div className="relative h-[7px] w-full rounded-full" style={{ background: "linear-gradient(90deg, rgba(72,199,142,0.28), rgba(95,176,232,0.14) 50%, rgba(201,155,240,0.28))" }}>
+        <span className="absolute top-[-3px] h-[13px] w-px bg-white/30" style={{ left: `${midPos * 100}%` }} />
+        <span
+          className="absolute top-1/2 h-[12px] w-[12px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0b0f14]"
+          style={{ left: `${pos * 100}%`, background: color, boxShadow: `0 0 10px ${color}` }}
+        />
       </div>
     </div>
   );
 }
 
-function StateSection({
-  state,
-  rows,
-  lang,
-  onOpen,
-  t,
-}: {
-  state: TechTiming["timing"];
-  rows: TimingRow[];
-  lang: "en" | "zh";
-  onOpen: (x: string) => void;
-  t: (en: string, zh: string) => string;
-}) {
-  const meta = TIMING_META[state];
-  const color = TONE_COLOR[meta.tone];
+// A featured card for the very best buy points (podium look, glowing).
+function FeatureCard({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+  const tm = r.timing;
+  const col = stateColor(tm.timing);
+  const lifted = rank === 1;
+  const showReb = tm.timing === "strong_buy" || tm.timing === "band_break" || tm.timing === "oversold_watch";
   return (
-    <div className="mb-5">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-        <span className="font-disp text-[14px] font-semibold" style={{ color }}>{lang === "zh" ? meta.zh : meta.en}</span>
-        <span className="font-mono text-[12px] text-muted2">{rows.length}</span>
-        <span className="text-[10.5px] text-muted2">· {lang === "zh" ? meta.hint.zh : meta.hint.en}</span>
+    <button
+      onClick={() => onOpen(r.ticker)}
+      className="rank-rise group relative flex flex-1 flex-col rounded-2xl border bg-panel2 px-4 pb-4 pt-4 text-left transition-[transform,box-shadow] duration-200 hover:-translate-y-1"
+      style={{ borderColor: `${col}66`, boxShadow: lifted ? `0 0 34px ${col}33` : `0 0 18px ${col}22`, marginTop: lifted ? 0 : 16, background: `linear-gradient(180deg, ${col}16, transparent 62%)` }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 place-items-center rounded-lg font-disp text-[13px] font-bold" style={{ color: "#0b0f14", background: col, boxShadow: `0 0 14px ${col}88` }}>{rank}</span>
+          <span className="font-disp text-[20px] font-bold tracking-tight text-text group-hover:text-signal">{r.ticker}</span>
+        </div>
+        <div className="text-right">
+          <div className="font-disp text-[26px] font-bold leading-none tabular-nums" style={{ color: col }}>{tm.score}</div>
+          <div className="text-[8.5px] uppercase tracking-wide text-muted2">{t("entry", "买点分")}</div>
+        </div>
+      </div>
+      <div className="mb-2 truncate text-[10.5px] text-muted2">{r.company || "—"}{r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""} · {t("Tier", "档")} {r.tier}</div>
+      <div className="mb-2"><TimingBadge timing={tm} size="md" /></div>
+      <SignalChips signals={tm.signals} lang={lang} />
+      <div className="mt-3 flex items-center gap-3">
+        <div className="min-w-0 flex-1"><BandGauge pctb={tm.bb.pctb} /></div>
+        <span className="flex-none font-mono text-[11px] text-muted">%B {tm.bb.pctb.toFixed(2)}</span>
+      </div>
+      {showReb && (
+        <div className="mt-2 flex items-center gap-2 text-[10px] text-muted2">
+          <span>{t("rebound", "反弹动能")}</span>
+          <div className="h-[4px] flex-1 overflow-hidden rounded-full bg-inset">
+            <span className="block h-full rounded-full" style={{ width: `${tm.rebound}%`, background: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }} />
+          </div>
+          <span className="font-mono" style={{ color: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }}>{tm.rebound}</span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function Row({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+  const tm = r.timing;
+  const col = stateColor(tm.timing);
+  const showReb = tm.timing === "strong_buy" || tm.timing === "band_break" || tm.timing === "oversold_watch";
+  return (
+    <div
+      onClick={() => onOpen(r.ticker)}
+      className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-panel2 px-3 py-2.5 transition-[transform,border-color] duration-200 hover:-translate-y-0.5"
+      style={{ borderColor: "var(--line,#22303c)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.borderColor = `${col}55`)}
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--line,#22303c)")}
+    >
+      <span className="w-6 flex-none text-right font-mono text-[12px] text-muted2">{rank}</span>
+
+      {/* name + signal chips */}
+      <div className="min-w-0 flex-[1.7]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-disp text-[15px] font-bold tracking-tight text-text group-hover:text-signal">{r.ticker}</span>
+          <span className="truncate text-[10px] text-muted2">{r.company || "—"}{r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""} · {t("Tier", "档")} {r.tier}</span>
+        </div>
+        <div className="mt-1"><SignalChips signals={tm.signals} lang={lang} max={4} /></div>
+      </div>
+
+      {/* Bollinger gauge */}
+      <div className="hidden w-[160px] flex-none md:block">
+        <BandGauge pctb={tm.bb.pctb} />
+        <div className="mt-1 flex justify-between text-[8.5px] uppercase tracking-wide text-muted2">
+          <span>{t("lower", "下轨")}</span>
+          <span className="text-muted">%B {tm.bb.pctb.toFixed(2)}</span>
+          <span>{t("upper", "上轨")}</span>
+        </div>
+      </div>
+
+      {/* rebound (buy-A) or MACD cross */}
+      <div className="hidden w-[76px] flex-none text-right sm:block">
+        {showReb ? (
+          <>
+            <div className="font-mono text-[14px] font-semibold" style={{ color: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }}>{tm.rebound}</div>
+            <div className="text-[8px] uppercase tracking-wide text-muted2">{t("rebound", "反弹动能")}</div>
+          </>
+        ) : (
+          <>
+            <div className="font-mono text-[12px] font-semibold" style={{ color: tm.macd.cross === "bull" ? "#48c78e" : "#ff5a78" }}>{tm.macd.cross === "bull" ? t("bull", "金叉") : t("bear", "死叉")}</div>
+            <div className="text-[8px] uppercase tracking-wide text-muted2">MACD</div>
+          </>
+        )}
+      </div>
+
+      {/* entry score */}
+      <div className="w-[52px] flex-none text-right">
+        <div className="font-disp text-[17px] font-semibold leading-none" style={{ color: col }}>{tm.score}</div>
+        <div className="text-[8px] uppercase tracking-wide text-muted2">{t("entry", "买点")}</div>
+      </div>
+    </div>
+  );
+}
+
+function StateSection({ state, rows, lang, onOpen, t }: { state: TechTiming["timing"]; rows: TimingRow[]; lang: "en" | "zh"; onOpen: (x: string) => void; t: (en: string, zh: string) => string }) {
+  const meta = TIMING_META[state];
+  const col = stateColor(state);
+  return (
+    <section className="mb-6">
+      <div className="mb-3 flex items-center gap-2.5 border-b pb-2" style={{ borderColor: `${col}44` }}>
+        <span className="h-3.5 w-1 flex-none rounded-full" style={{ background: col, boxShadow: `0 0 8px ${col}` }} />
+        <h3 className="font-disp text-[15px] font-semibold tracking-tight" style={{ color: col }}>{lang === "zh" ? meta.zh : meta.en}</h3>
+        <span className="rounded-full bg-white/[0.06] px-1.5 py-[1px] font-mono text-[10.5px] text-muted2">{rows.length}</span>
+        <span className="ml-auto text-[10px] text-muted2">{lang === "zh" ? meta.hint.zh : meta.hint.en}</span>
       </div>
       <div className="space-y-2">
         {rows.map((r, i) => (
           <Row key={r.ticker} r={r} rank={i + 1} lang={lang} onOpen={onOpen} t={t} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -149,7 +175,6 @@ export function TimingView() {
   const t = useT();
 
   const [sector, setSector] = useState<string | null>(null);
-  const [buysOnly, setBuysOnly] = useState(false);
 
   const focus = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -169,7 +194,14 @@ export function TimingView() {
     return m;
   }, [shown]);
 
-  const buyCount = TIMING_BUY_STATES.reduce((s, st) => s + (byState.get(st)?.length ?? 0), 0);
+  // The very best buy points across all buy states → the podium.
+  const topBuys = useMemo(
+    () => shown.filter((r) => isBuy(r.timing.timing)).sort((a, b) => b.timing.score - a.timing.score).slice(0, 3),
+    [shown],
+  );
+
+  const buyCount = shown.filter((r) => isBuy(r.timing.timing)).length;
+  const buyBreakdown = TIMING_BUY_STATES.map((st) => ({ st, n: byState.get(st)?.length ?? 0 })).filter((x) => x.n > 0);
 
   const sectorCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -177,7 +209,7 @@ export function TimingView() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [board]);
 
-  const statesToShow = buysOnly ? TIMING_BUY_STATES : TIMING_ORDER.filter((s) => s !== "neutral");
+  const statesToShow = TIMING_ORDER.filter((s) => s !== "neutral");
 
   return (
     <div className="view-in">
@@ -185,8 +217,8 @@ export function TimingView() {
         eyebrow={t("Final · Buy Timing", "终章 · 择时买点")}
         title={t("Buy Timing · Bollinger + MACD", "择时买点 · 布林带 + MACD")}
         desc={t(
-          "A buy-only entry overlay on the vetted names: the funnel already decided a company is good — this decides whether NOW is a good price. Two setups — buy oversold weakness once the bounce confirms (Strong Buy), or buy the pullback back into the bands after a breakout (Pullback Buy). It never filters; a good name at a bad price simply waits.",
-          "在已筛出的好公司上叠加的『只做买点』择时:漏斗决定了公司好不好,这里决定现在是不是好价格。两个买点——超卖见底、反弹确认后买入(强买入),或突破后回落进轨道再买(强势回踩)。它从不做筛选;好公司但价格不好,就等。",
+          "A buy-only entry overlay on the vetted names: the funnel decided the company is good — this decides whether NOW is a good price. Each name carries its signal receipts (broke lower band, MACD turned, RSI divergence, …). It never filters; a good name at a bad price simply waits.",
+          "在已筛出的好公司上叠加的『只做买点』择时:漏斗决定了公司好不好,这里决定现在是不是好价格。每只票都标出它的信号凭据(跌破下轨、MACD 拐头、RSI 底背离……)。它从不做筛选;好公司但价格不好,就等。",
         )}
       />
 
@@ -198,18 +230,39 @@ export function TimingView() {
         </div>
       ) : (
         <>
-          {/* actionable summary */}
-          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel2 px-4 py-3">
-            <div className="flex items-baseline gap-2">
-              <span className="font-disp text-[26px] font-bold leading-none text-signal">{buyCount}</span>
-              <span className="text-[12px] text-muted">{t("names are a BUY right now", "只票现在是买点")}</span>
+          {/* hero: buy count + buy-state distribution */}
+          <div className="mb-5 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[#48c78e14] to-transparent p-5">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <div className="flex items-baseline gap-2.5">
+                <span className="font-disp text-[44px] font-bold leading-none" style={{ color: "#5fe3a1" }}>{buyCount}</span>
+                <div className="leading-tight">
+                  <div className="text-[13px] font-semibold text-text">{t("names are a BUY right now", "只票现在是买点")}</div>
+                  <div className="text-[11px] text-muted2">{t(`of ${board.length} vetted names scored`, `共 ${board.length} 只入围票已打分`)}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {buyBreakdown.map(({ st, n }) => (
+                  <div key={st} className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1" style={{ borderColor: `${stateColor(st)}44`, background: `${stateColor(st)}10` }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: stateColor(st) }} />
+                    <span className="text-[11px] font-medium text-text">{lang === "zh" ? TIMING_META[st].zh : TIMING_META[st].en}</span>
+                    <span className="font-mono text-[12px] font-semibold" style={{ color: stateColor(st) }}>{n}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <span className="text-muted2">·</span>
-            <span className="text-[12px] text-muted2">{t(`${board.length} vetted names scored`, `已对 ${board.length} 只入围票打分`)}</span>
           </div>
 
-          {/* filters */}
-          <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          {/* podium — the strongest buy points */}
+          {topBuys.length >= 2 && (
+            <div className="mb-6 flex items-start gap-3">
+              {topBuys[1] && <FeatureCard r={topBuys[1]} rank={2} lang={lang} onOpen={openDetail} t={t} />}
+              <FeatureCard r={topBuys[0]} rank={1} lang={lang} onOpen={openDetail} t={t} />
+              {topBuys[2] && <FeatureCard r={topBuys[2]} rank={3} lang={lang} onOpen={openDetail} t={t} />}
+            </div>
+          )}
+
+          {/* sector filter */}
+          <div className="mb-5 flex flex-wrap items-center gap-1.5">
             <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
             <button
               onClick={() => setSector(null)}
@@ -226,10 +279,6 @@ export function TimingView() {
                 {sectorLabel(sec, lang)} {n}
               </button>
             ))}
-            <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[12px] text-muted">
-              <input type="checkbox" checked={buysOnly} onChange={(e) => setBuysOnly(e.target.checked)} className="accent-signal" />
-              {t("Buy signals only", "只看买点")}
-            </label>
           </div>
 
           {statesToShow.map((st) => {

@@ -110,6 +110,7 @@ export interface TechTiming {
   timing: TimingState;
   label: string; // Chinese badge label
   score: number; // 0-100, "best entry now" sort key (higher = buy sooner)
+  signals: string[]; // active evidence codes (band_break, macd_turn, …) — the "receipts"
   rebound: number; // 0-100 rebound-momentum strength
   rebound_parts?: Record<string, number>;
   regime: "up" | "down" | "range";

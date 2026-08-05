@@ -23,7 +23,7 @@ import {
   type FocusItem,
   type LeaderRow,
 } from "../pipeline";
-import { TimingBadge } from "../ui";
+import { TimingBadge, SignalChips } from "../ui";
 import type { BandSeries, Catalyst, CatalystTicker, ConvictionTicker, SupplyEdge, SupplyMap, TechTicker, TechTiming } from "../../types";
 
 // Human labels for the ranking lenses a name advanced in (Heat Ignition).
@@ -658,7 +658,15 @@ function TimingPanel({ timing, band, closes, t }: { timing: TechTiming; band: Ba
         <TimingBadge timing={timing} size="md" />
       </div>
 
-      <div className="mb-3 text-[11.5px] leading-relaxed text-muted2">{t(meta.hint.en, meta.hint.zh)}</div>
+      <div className="mb-2 text-[11.5px] leading-relaxed text-muted2">{t(meta.hint.en, meta.hint.zh)}</div>
+
+      {/* signal receipts — why this reads the way it does */}
+      {timing.signals && timing.signals.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-muted2">{t("Signals firing", "触发信号")}</div>
+          <SignalChips signals={timing.signals} />
+        </div>
+      )}
 
       {band && closes.length >= 2 && <TimingChart closes={closes} band={band} t={t} />}
 

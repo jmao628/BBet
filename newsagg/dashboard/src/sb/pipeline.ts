@@ -677,6 +677,21 @@ export function timingLabel(state: TechTiming["timing"], lang: "en" | "zh"): str
   return lang === "zh" ? TIMING_META[state].zh : TIMING_META[state].en;
 }
 
+// The concrete evidence chips behind a timing state — the "why it's a buy".
+// tone: "buy" green · "hot" violet (overheated) · "info" blue (context).
+export const SIGNAL_META: Record<string, { en: string; zh: string; tone: "buy" | "hot" | "info" }> = {
+  band_break: { en: "Broke lower band", zh: "跌破下轨", tone: "buy" },
+  macd_capitulation: { en: "MACD extreme low", zh: "MACD 极度负", tone: "buy" },
+  macd_turn: { en: "MACD turning up", zh: "MACD 拐头", tone: "buy" },
+  rsi_divergence: { en: "RSI divergence", zh: "RSI 底背离", tone: "buy" },
+  capitulation: { en: "Capitulation volume", zh: "恐慌放量", tone: "buy" },
+  reclaim: { en: "Reclaimed band", zh: "收复下轨", tone: "buy" },
+  pullback: { en: "Pullback into bands", zh: "回落轨道内", tone: "buy" },
+  squeeze: { en: "Bollinger squeeze", zh: "布林收口", tone: "info" },
+  uptrend_hold: { en: "Holding above MA20", zh: "站稳 MA20", tone: "info" },
+  above_upper: { en: "Above upper band", zh: "突破上轨", tone: "hot" },
+};
+
 // "Best entry now" sort key: the timing score, or -1 when a name has no timing
 // data yet (so it sinks below anything that does).
 export function timingSortKey(tech: TechTicker | null | undefined): number {

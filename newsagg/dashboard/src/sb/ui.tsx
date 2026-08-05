@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useT, useStore } from "../store";
 import type { TechTiming } from "../types";
-import { TIMING_META } from "./pipeline";
+import { TIMING_META, SIGNAL_META } from "./pipeline";
 
 // Entry-timing badge (Bollinger+MACD state). Green = buy now, amber = wait,
 // violet = hot/overheated, slate = idle. Shared by the leaderboard + detail.
@@ -30,6 +30,41 @@ export function TimingBadge({ timing, size = "sm" }: { timing: TechTiming | null
       {label}
       {timing.timing !== "neutral" && <span className="tabular-nums opacity-70">{timing.score}</span>}
     </span>
+  );
+}
+
+// The evidence chips behind a timing state — "why it's a buy" (broke lower band,
+// MACD turned, RSI divergence, …). Reads the `signals` codes off the timing.
+const SIGNAL_TONE: Record<"buy" | "hot" | "info", { fg: string; bd: string }> = {
+  buy: { fg: "#5fe3a1", bd: "rgba(72,199,142,0.4)" },
+  hot: { fg: "#c99bf0", bd: "rgba(201,155,240,0.38)" },
+  info: { fg: "#7fb6e6", bd: "rgba(95,176,232,0.35)" },
+};
+
+export function SignalChips({ signals, max, lang: langProp }: { signals: string[] | undefined; max?: number; lang?: "en" | "zh" }) {
+  const storeLang = useStore((s) => s.lang);
+  const lang = langProp ?? storeLang;
+  if (!signals || signals.length === 0) return null;
+  const list = max ? signals.slice(0, max) : signals;
+  const extra = max && signals.length > max ? signals.length - max : 0;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {list.map((code) => {
+        const m = SIGNAL_META[code];
+        if (!m) return null;
+        const tone = SIGNAL_TONE[m.tone];
+        return (
+          <span
+            key={code}
+            className="inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-[1px] text-[9.5px] font-medium"
+            style={{ color: tone.fg, border: `1px solid ${tone.bd}`, background: `${tone.fg}12` }}
+          >
+            {lang === "zh" ? m.zh : m.en}
+          </span>
+        );
+      })}
+      {extra > 0 && <span className="text-[9.5px] text-muted2">+{extra}</span>}
+    </div>
   );
 }
 
