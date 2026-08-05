@@ -8,11 +8,14 @@ import math
 
 from newsagg.technical import (
     TechParams,
+    _bollinger,
+    _macd_full,
     _obv,
     _rsi,
     compute_attention,
     compute_gauge,
     compute_ticker,
+    compute_timing,
 )
 
 P = TechParams()
@@ -98,3 +101,119 @@ def test_too_short_history_is_none():
     assert compute_ticker(
         {"highs": highs, "lows": lows, "closes": closes, "volumes": vols}, P
     ) is None
+
+
+# ---- Bollinger + MACD entry-timing layer ------------------------------------
+
+
+def test_bollinger_pctb_at_middle_is_half():
+    # A flat series sits exactly on its MA20 → %B == 0.5, and with zero variance
+    # the band collapses (bandwidth 0).
+    closes = [50.0] * 60
+    bb = _bollinger(closes)
+    assert bb is not None
+    assert abs(bb["pctb"] - 0.5) < 1e-9
+    assert bb["bandwidth"] == 0.0
+
+
+def test_bollinger_pctb_below_lower_when_price_dumps():
+    closes = [50.0] * 40 + [50 - i for i in range(1, 6)]  # sharp drop off a flat base
+    bb = _bollinger(closes)
+    assert bb is not None
+    assert bb["pctb"] < 0  # price broke below the lower rail
+
+
+def test_macd_full_returns_aligned_series():
+    closes = [20 + i * 0.1 for i in range(120)]
+    m = _macd_full(closes)
+    assert m is not None
+    assert len(m["lines"]) == len(m["signals"]) == len(m["hists"])
+    assert len(m["hists"]) > 0
+
+
+def test_timing_oversold_bounce_scores_and_labels():
+    # Uptrend, then a deep flush to a new low, then a sharp reclaim on heavy
+    # volume — the oversold-bounce setup. Assert the engine produces a valid
+    # state, a 0-100 rebound score, and the band/MACD payloads.
+    n = 200
+    closes, highs, lows, vols = [], [], [], []
+    price = 30.0
+    for i in range(n):
+        price *= 1.004
+        closes.append(price); highs.append(price * 1.01); lows.append(price * 0.99); vols.append(1_000_000.0)
+    # a 6-day flush, capitulation volume on the low, then a 3-day snap-back
+    for k, mult in zip(range(6, 0, -1), (0.97, 0.96, 0.95, 0.955, 0.98, 1.02)):
+        closes[-k] = closes[-7] * mult
+        highs[-k] = closes[-k] * 1.01
+        lows[-k] = closes[-k] * 0.98
+        vols[-k] = 1_000_000.0 * (3.0 if mult < 0.96 else 1.2)
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] in _all_timing_states()
+    assert 0 <= t["rebound"] <= 100
+    assert 0 <= t["score"] <= 100
+    assert t["regime"] in ("up", "down", "range")
+    assert set(t["bb"]) >= {"upper", "middle", "lower", "pctb", "bandwidth"}
+    assert set(t["macd"]) >= {"line", "signal", "hist", "hist_z", "cross"}
+
+
+def test_compute_ticker_includes_timing_and_bands():
+    n = 120
+    closes = [20 + 5 * math.sin(i / 8) + i * 0.05 for i in range(n)]
+    highs = [c * 1.02 for c in closes]
+    lows = [c * 0.98 for c in closes]
+    vols = [1_000_000.0 + 50_000 * math.sin(i / 5) for i in range(n)]
+    out = compute_ticker({"highs": highs, "lows": lows, "closes": closes, "volumes": vols}, P)
+    assert out is not None
+    assert out["timing"] is not None
+    assert out["timing"]["timing"] in _all_timing_states()
+    assert out["band_series"] is not None
+    assert len(out["band_series"]["middle"]) == len(out["close_series"])
+
+
+def test_timing_sharp_v_bounce_is_strong_buy():
+    # A deep 4-day flush through the lower band on climax volume, then a hard
+    # 3-day rip back: oversold + a confirmed MACD turn + strong rebound = 扣扳机.
+    closes, vols, p = [], [], 50.0
+    for _ in range(170):
+        p *= 1.003
+        closes.append(p); vols.append(1_000_000.0)
+    for i in range(4):
+        p *= 0.955
+        closes.append(p); vols.append(1_000_000.0 * (3.5 if i == 3 else 1.5))
+    for _ in range(3):
+        p *= 1.03
+        closes.append(p); vols.append(1_600_000.0)
+    highs = [c * 1.015 for c in closes]
+    lows = [c * 0.985 for c in closes]
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] == "strong_buy"
+    assert t["rebound"] >= 50
+    assert t["score"] >= 85
+
+
+def test_timing_flat_series_is_neutral():
+    # No trend, no oversold flush → no buy signal (guards the momentum gate from
+    # firing on noise that merely drifts above MA20).
+    closes = [50.0 + math.sin(i / 3) * 0.2 for i in range(160)]
+    highs = [c * 1.01 for c in closes]
+    lows = [c * 0.99 for c in closes]
+    vols = [1_000_000.0] * len(closes)
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] == "neutral"
+
+
+def test_timing_steady_uptrend_is_momentum():
+    closes = [20 + i * 0.15 for i in range(160)]
+    highs = [c * 1.01 for c in closes]
+    lows = [c * 0.99 for c in closes]
+    vols = [1_000_000.0] * len(closes)
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] == "momentum"
+
+
+def _all_timing_states():
+    return {"strong_buy", "oversold_watch", "pullback_buy", "momentum", "overheated", "neutral"}

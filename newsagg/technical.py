@@ -173,6 +173,382 @@ def _obv(closes: list[float], volumes: list[float]) -> list[float]:
     return o
 
 
+def _stdev(xs: list[float], n: int) -> float | None:
+    """Population standard deviation of the last n values (Bollinger uses N, not N-1)."""
+    if len(xs) < n:
+        return None
+    w = xs[-n:]
+    m = sum(w) / n
+    return (sum((x - m) ** 2 for x in w) / n) ** 0.5
+
+
+def _bollinger(closes: list[float], n: int = 20, k: float = 2.0) -> dict | None:
+    """Bollinger Bands + the two normalized quantities the timing engine runs on:
+    %B (where price sits inside the bands: <0 below lower, >1 above upper, 0.5 at
+    the MA20 middle) and bandwidth ((upper−lower)/middle — the volatility regime)."""
+    mid = _sma(closes, n)
+    sd = _stdev(closes, n)
+    if mid is None or sd is None or mid == 0:
+        return None
+    upper = mid + k * sd
+    lower = mid - k * sd
+    price = closes[-1]
+    width = upper - lower
+    pctb = (price - lower) / width if width else 0.5
+    return {
+        "upper": upper,
+        "middle": mid,
+        "lower": lower,
+        "pctb": pctb,
+        "bandwidth": width / mid,
+    }
+
+
+def _bandwidth_series(closes: list[float], n: int = 20, k: float = 2.0, lookback: int = 120) -> list[float]:
+    """Bandwidth at each of the last ``lookback`` days — its own percentile tells
+    a squeeze (coiling, low band width) from an expansion (trend releasing)."""
+    out: list[float] = []
+    start = max(n, len(closes) - lookback)
+    for i in range(start, len(closes) + 1):
+        w = closes[:i]
+        mid = _sma(w, n)
+        sd = _stdev(w, n)
+        if mid and sd is not None and mid:
+            out.append((2 * k * sd) / mid)
+    return out
+
+
+def _pctb_series(closes: list[float], n: int = 20, k: float = 2.0, days: int = 12) -> list[float]:
+    """%B for each of the last ``days`` sessions (the middle-band streak + the
+    'recently touched the lower/upper band' tests read off this)."""
+    out: list[float] = []
+    start = max(n, len(closes) - days + 1)
+    for i in range(start, len(closes) + 1):
+        w = closes[:i]
+        mid = _sma(w, n)
+        sd = _stdev(w, n)
+        if mid and sd is not None:
+            width = 2 * k * sd
+            out.append((w[-1] - (mid - k * sd)) / width if width else 0.5)
+    return out
+
+
+def _macd_full(closes: list[float]) -> dict | None:
+    """MACD line / signal / histogram as ALIGNED series (not just the last value),
+    so the timing engine can measure the histogram's trough, its z-score, and its
+    turn. 12/26/9, matching the display gauge's _macd."""
+    e12 = _ema_series(closes, 12)
+    e26 = _ema_series(closes, 26)
+    if not e26 or e26[-1] is None:
+        return None
+    line_series = [(a - b) if (a is not None and b is not None) else None for a, b in zip(e12, e26)]
+    vals = [m for m in line_series if m is not None]
+    sig = _ema_series(vals, 9)
+    lines, signals, hists = [], [], []
+    for lv, sv in zip(vals, sig):
+        if sv is None:
+            continue
+        lines.append(lv)
+        signals.append(sv)
+        hists.append(lv - sv)
+    if not hists:
+        return None
+    return {"lines": lines, "signals": signals, "hists": hists}
+
+
+def _rsi_series(closes: list[float], n: int = 14, lookback: int = 40) -> list[tuple[int, float]]:
+    """(index, RSI) for the last ``lookback`` sessions — powers divergence."""
+    out: list[tuple[int, float]] = []
+    start = max(n + 1, len(closes) - lookback)
+    for i in range(start, len(closes) + 1):
+        r = _rsi(closes[:i], n)
+        if r is not None:
+            out.append((i - 1, r))
+    return out
+
+
+def _bullish_divergence(closes: list[float], window: int = 30, n_rsi: int = 14) -> bool:
+    """Price makes a LOWER low but RSI makes a HIGHER low = selling pressure
+    waning even as price drops — the strongest 'the bounce has legs' tell.
+
+    Robust + deterministic: split the recent window in half, take each half's
+    price-low bar, compare price and RSI-at-that-bar across the two lows.
+    """
+    if len(closes) < n_rsi + window + 1:
+        return False
+    idxs = list(range(len(closes) - window, len(closes)))
+    rsi_at = {i: _rsi(closes[: i + 1], n_rsi) for i in idxs}
+    half = len(idxs) // 2
+    older, recent = idxs[:half], idxs[half:]
+    lo_o = min(older, key=lambda i: closes[i])
+    lo_r = min(recent, key=lambda i: closes[i])
+    if rsi_at.get(lo_o) is None or rsi_at.get(lo_r) is None:
+        return False
+    return closes[lo_r] < closes[lo_o] and rsi_at[lo_r] > rsi_at[lo_o]
+
+
+def _capitulation(closes: list[float], volumes: list[float], lookback: int = 10) -> bool:
+    """A volume climax at a recent price low — panic sellers flushed out in one
+    go, a classic exhaustion/bottom tell. Volume at the lowest close of the last
+    ``lookback`` days ran ≥2× the prior 20-day baseline."""
+    if len(volumes) < 26:
+        return False
+    base = sum(volumes[-26:-6]) / 20
+    if base <= 0:
+        return False
+    rc = closes[-lookback:]
+    rv = volumes[-lookback:]
+    lo_i = min(range(len(rc)), key=lambda i: rc[i])
+    return rv[lo_i] >= 2.0 * base
+
+
+# ---------------------------------------------------- Bollinger + MACD timing
+#
+# A BUY-ONLY entry-timing overlay on top of the funnel. The first five funnel
+# stages already decided a name is a GOOD COMPANY; this layer only answers "is
+# NOW a good price to buy it". Two setups, both accumulation-on-weakness:
+#
+#   Buy A — oversold bounce : price broke the lower band while MACD hit an
+#           extreme trough (market oversold on a quality name = a discount). We
+#           WAIT (埋伏) while it may still fall, then TRIGGER (扣扳机) once the
+#           rebound-momentum score confirms sellers are exhausted.
+#   Buy B — pullback after strength : it rode ABOVE the upper band (overheated),
+#           took its brief profit-taking dip back INTO the bands, and the uptrend
+#           structure held — buy that discount, don't chase the breakout.
+#
+# Everything here is deterministic Python off the daily closes/volumes — no LLM,
+# no extra fetch. Thresholds are module constants so they're easy to tune.
+
+# Timing thresholds — the tunable knobs.
+_MACD_EXTREME_Z = -1.5     # MACD histogram z-score at/below this = "extremely negative"
+_REBOUND_TRIGGER = 50      # rebound-momentum score (with a confirmed turn) to fire Buy-A (扣扳机)
+_LOWER_BAND_TOUCH = 0.05   # %B at/below this = at/through the lower band
+_UPPER_BAND_BREAK = 1.0    # %B above this = above the upper band (overheated)
+_MID_STREAK_DAYS = 5       # consecutive days above MA20 to confirm momentum
+_SQUEEZE_PCTL = 0.20       # bandwidth in the bottom 20% of its 120d range = squeeze
+
+
+def _pctl_rank(xs: list[float], v: float) -> float:
+    """Fraction of xs at or below v (0-1) — v's own percentile within the series."""
+    if not xs:
+        return 0.5
+    return sum(1 for x in xs if x <= v) / len(xs)
+
+
+def _trend_regime(closes: list[float]) -> str:
+    """up / down / range from price vs a rising/falling MA50 (MA200 as a tie-break).
+    A label only — it NEVER vetoes a buy (quality names are bought on weakness)."""
+    price = closes[-1]
+    ma50 = _sma(closes, 50)
+    ma50_prev = _sma(closes[:-5], 50)
+    if ma50 is None or ma50_prev is None or ma50 == 0:
+        return "range"
+    slope = (ma50 - ma50_prev) / ma50  # MA50 must actually be sloping, not flat noise
+    if price > ma50 and slope > 0.001:
+        return "up"
+    if price < ma50 and slope < -0.001:
+        return "down"
+    return "range"
+
+
+def _rebound_momentum(
+    closes: list[float],
+    volumes: list[float],
+    bb: dict,
+    hists: list[float],
+    rsi: float | None,
+) -> tuple[int, dict]:
+    """0-100 — how much STRENGTH a bounce off the lows has (the thing 'is the
+    rebound strong?' actually asks). Weighted read of five exhaustion tells; a
+    high score means sellers are done, not merely that price is low.
+
+        30  MACD histogram turning up off its trough (+ how fast)
+        25  RSI bullish divergence (price lower low, RSI higher low)
+        20  %B reclaiming the lower band (mean-reversion actually underway)
+        15  a capitulation volume climax at the recent low
+        10  oversold depth (low RSI + stretched below MA50)
+    """
+    parts: dict[str, float] = {}
+
+    # 30 — MACD histogram recovery off its recent trough. A base for the turn
+    # itself (buying early is the point), then more as the recovery extends.
+    macd_pts = 0.0
+    if len(hists) >= 3 and hists[-1] > hists[-2]:  # must be turning up
+        trough = min(hists[-15:]) if len(hists) >= 15 else min(hists)
+        span = abs(trough) or 1e-9
+        macd_pts = 16 + _clamp((hists[-1] - trough) / span, 0.0, 1.0) * 14
+    parts["macd_upturn"] = round(macd_pts, 1)
+
+    # 25 — RSI bullish divergence (binary, but it's the strongest single tell).
+    div = _bullish_divergence(closes)
+    parts["rsi_divergence"] = 25.0 if div else 0.0
+
+    # 20 — %B reclaiming the band: rising and back above the lower rail.
+    pb = bb["pctb"]
+    prev_bb = _bollinger(closes[:-5]) if len(closes) >= 25 else None
+    reclaiming = prev_bb is not None and pb > prev_bb["pctb"] and pb > 0
+    parts["reclaim"] = round(_clamp(pb / 0.35, 0.0, 1.0) * 20, 1) if reclaiming else 0.0
+
+    # 15 — capitulation volume climax at the low.
+    parts["capitulation"] = 15.0 if _capitulation(closes, volumes) else 0.0
+
+    # 10 — oversold depth: low RSI + how far price is stretched below MA50.
+    depth = 0.0
+    if rsi is not None:
+        depth += _clamp((35 - rsi) / 20, 0.0, 1.0) * 0.6
+    ma50 = _sma(closes, 50)
+    if ma50 and closes[-1] < ma50:
+        depth += _clamp((ma50 - closes[-1]) / ma50 / 0.15, 0.0, 1.0) * 0.4
+    parts["oversold_depth"] = round(depth * 10, 1)
+
+    score = int(round(sum(parts.values())))
+    return _clamp(score, 0, 100), parts
+
+
+# Human-readable state labels (the badge text).
+_TIMING_LABEL = {
+    "strong_buy": "强买入",
+    "oversold_watch": "超卖埋伏",
+    "pullback_buy": "强势回踩",
+    "momentum": "动能确定",
+    "overheated": "过热·等回落",
+    "neutral": "观望",
+}
+# Sort key for "best entry right now" — higher = buy sooner.
+_TIMING_BASE = {
+    "strong_buy": 85,
+    "pullback_buy": 70,
+    "momentum": 58,
+    "oversold_watch": 45,
+    "neutral": 50,
+    "overheated": 25,
+}
+
+
+def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
+    """The Bollinger+MACD entry-timing state for one ticker (see section header)."""
+    if len(closes) < 40:
+        return None
+    bb = _bollinger(closes)
+    macd = _macd_full(closes)
+    if bb is None or macd is None:
+        return None
+    hists = macd["hists"]
+    rsi = _rsi(closes)
+
+    # MACD extremity (z-score of the histogram over ~120d) + its turn.
+    hwin = hists[-120:]
+    hmean = sum(hwin) / len(hwin)
+    hsd = (sum((x - hmean) ** 2 for x in hwin) / len(hwin)) ** 0.5
+    hist_z = (hists[-1] - hmean) / hsd if hsd else 0.0
+    # "Recently hit an extreme trough" — NOT "is extreme right now". The rebound
+    # score only builds AFTER the bottom, so pairing it with the current bar being
+    # extreme is self-contradictory; we key off the deepest histogram of the last
+    # ~10 sessions instead, which is what "the capitulation just happened" means.
+    recent_hist_min = min(hists[-10:])
+    hist_min_z = (recent_hist_min - hmean) / hsd if hsd else 0.0
+    macd_extreme = hist_min_z <= _MACD_EXTREME_Z
+    line, signal = macd["lines"][-1], macd["signals"][-1]
+    cross = "bull" if line > signal else "bear"
+
+    bwseries = _bandwidth_series(closes)
+    squeeze = bool(bwseries) and _pctl_rank(bwseries, bb["bandwidth"]) <= _SQUEEZE_PCTL
+
+    pbs = _pctb_series(closes)
+    pb = bb["pctb"]
+    touched_lower = bool(pbs) and min(pbs[-10:]) <= _LOWER_BAND_TOUCH
+    was_above_upper = bool(pbs) and max(pbs[-10:]) > _UPPER_BAND_BREAK
+    # consecutive trailing days above the MA20 middle band (%B > 0.5)
+    mid_streak = 0
+    for x in reversed(pbs):
+        if x > 0.5:
+            mid_streak += 1
+        else:
+            break
+
+    rebound, rparts = _rebound_momentum(closes, volumes, bb, hists, rsi)
+    regime = _trend_regime(closes)
+
+    # A CONFIRMED TURN decides 埋伏 vs 扣扳机 (structure), while the rebound score
+    # measures HOW STRONG the bounce is (magnitude / ranking). Keeping them
+    # separate is the fix for the chicken-and-egg where the score only builds
+    # after the extreme: we fire on the turn, then rank by strength.
+    turning_up = len(hists) >= 2 and hists[-1] > hists[-2]
+    reclaimed = pb > _LOWER_BAND_TOUCH  # price back above the lower rail
+    confirmed_turn = turning_up and reclaimed
+
+    # State machine — checked in priority order.
+    oversold = touched_lower and macd_extreme  # both hit their extreme recently
+    if pb > _UPPER_BAND_BREAK:
+        state = "overheated"
+    elif oversold and confirmed_turn and rebound >= _REBOUND_TRIGGER:
+        state = "strong_buy"            # Buy A — 扣扳机: bottomed, turned, and the bounce has strength
+    elif oversold:
+        state = "oversold_watch"        # Buy A — 埋伏: oversold, turn not yet confirmed (may still fall)
+    elif was_above_upper and 0.3 < pb < 0.8 and regime != "down" and line > 0:
+        state = "pullback_buy"          # Buy B — 强势回踩
+    elif regime == "up" and line > 0 and mid_streak >= _MID_STREAK_DAYS and hists[-1] > 0:
+        state = "momentum"              # real uptrend + MACD bull, not just above MA20 in chop
+    else:
+        state = "neutral"
+
+    score = _TIMING_BASE[state]
+    if state == "strong_buy":
+        score = 85 + round(rebound * 0.15)          # 85-100
+    elif state == "oversold_watch":
+        score = 40 + round(rebound * 0.25)          # 40-65, ranks埋伏 by strength
+    elif state == "pullback_buy":
+        score = 68 + round(_clamp((0.6 - abs(pb - 0.5)) / 0.6, 0, 1) * 10)
+
+    return {
+        "timing": state,
+        "label": _TIMING_LABEL[state],
+        "score": int(_clamp(score, 0, 100)),
+        "rebound": rebound,
+        "rebound_parts": rparts,
+        "regime": regime,
+        "squeeze": squeeze,
+        "divergence": rparts.get("rsi_divergence", 0) > 0,
+        "bb": {
+            "upper": round(bb["upper"], 2),
+            "middle": round(bb["middle"], 2),
+            "lower": round(bb["lower"], 2),
+            "pctb": round(pb, 3),
+            "bandwidth": round(bb["bandwidth"], 4),
+        },
+        "macd": {
+            "line": round(line, 3),
+            "signal": round(signal, 3),
+            "hist": round(hists[-1], 3),
+            "hist_prev": round(hists[-2], 3) if len(hists) >= 2 else None,
+            "hist_z": round(hist_z, 2),
+            "cross": cross,
+        },
+    }
+
+
+def timing_series(closes: list[float], tail: int = 60) -> dict | None:
+    """Bollinger bands + MACD histogram over the last ``tail`` sessions, aligned
+    to close_series, so the detail chart can draw the rails and the MACD subplot."""
+    if len(closes) < 40:
+        return None
+    upper, middle, lower = [], [], []
+    for i in range(len(closes) - tail + 1, len(closes) + 1):
+        if i < 20:
+            upper.append(None); middle.append(None); lower.append(None)
+            continue
+        bb = _bollinger(closes[:i])
+        if bb is None:
+            upper.append(None); middle.append(None); lower.append(None)
+        else:
+            upper.append(round(bb["upper"], 2))
+            middle.append(round(bb["middle"], 2))
+            lower.append(round(bb["lower"], 2))
+    macd = _macd_full(closes)
+    hist = [round(h, 3) for h in macd["hists"][-tail:]] if macd else []
+    return {"upper": upper, "middle": middle, "lower": lower, "macd_hist": hist}
+
+
 # ------------------------------------------------------------ attention signal
 
 
@@ -356,8 +732,10 @@ def compute_ticker(bars: dict, p: TechParams) -> dict | None:
         "attention": compute_attention(highs, lows, closes, volumes, p),
         "gauge": compute_gauge(highs, lows, closes, p),
         "buy_streak": _buy_streak(highs, lows, closes, p),
+        "timing": compute_timing(highs, lows, closes, volumes, p),
         "close_series": [round(c, 2) for c in closes[-tail:]],
         "vol_series": [int(v) for v in volumes[-tail:]],
+        "band_series": timing_series(closes, tail),
     }
     return out
 
