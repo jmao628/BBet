@@ -43,7 +43,7 @@ function Row({
 }) {
   const tm = r.timing;
   const pb = pctbBar(tm.bb.pctb);
-  const showReb = tm.timing === "strong_buy" || tm.timing === "oversold_watch";
+  const showReb = tm.timing === "strong_buy" || tm.timing === "band_break" || tm.timing === "oversold_watch";
   return (
     <div
       onClick={() => onOpen(r.ticker)}

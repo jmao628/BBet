@@ -215,5 +215,29 @@ def test_timing_steady_uptrend_is_momentum():
     assert t["timing"] == "momentum"
 
 
+def test_timing_below_lower_band_is_a_buy():
+    # Price sitting below its lower Bollinger band right now reads as band_break —
+    # a buy signal on its own (a vetted name at a discount), no confirmed turn
+    # required. Uptrend base, then a clean multi-day slide that ends below the band.
+    closes, vols, p = [], [], 40.0
+    for _ in range(180):
+        p *= 1.004
+        closes.append(p); vols.append(1_000_000.0)
+    for _ in range(6):  # steady slide that leaves price under the lower rail today
+        p *= 0.97
+        closes.append(p); vols.append(1_300_000.0)
+    highs = [c * 1.01 for c in closes]
+    lows = [c * 0.99 for c in closes]
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["bb"]["pctb"] <= 0.05  # actually below the band
+    assert t["timing"] == "band_break"
+    assert TIMING_META_BUY(t["timing"])  # a buy-tone state
+
+
+def TIMING_META_BUY(state: str) -> bool:
+    return state in {"strong_buy", "band_break", "pullback_buy"}
+
+
 def _all_timing_states():
-    return {"strong_buy", "oversold_watch", "pullback_buy", "momentum", "overheated", "neutral"}
+    return {"strong_buy", "band_break", "oversold_watch", "pullback_buy", "momentum", "overheated", "neutral"}

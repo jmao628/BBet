@@ -98,8 +98,9 @@ export interface TechGauge {
 // Bollinger + MACD entry-timing (newsagg.technical.compute_timing). A buy-only
 // overlay: the funnel picks a good company, this answers "is now a good price".
 export type TimingState =
-  | "strong_buy" // Buy A — 扣扳机: oversold, turned, bounce has strength
-  | "oversold_watch" // Buy A — 埋伏: oversold, turn not yet confirmed
+  | "strong_buy" // 扣扳机: broke the lower band, turned, bounce has strength
+  | "band_break" // 跌破下轨: below the lower band now — a buy on a vetted name
+  | "oversold_watch" // 埋伏: broke recently, bouncing weakly / not yet confirmed
   | "pullback_buy" // Buy B — 强势回踩: dipped back into the bands after a breakout
   | "momentum" // confirmed uptrend, holding above MA20
   | "overheated" // above the upper band — wait for the pullback, don't chase

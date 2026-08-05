@@ -664,8 +664,9 @@ export const TIMING_META: Record<
   TechTiming["timing"],
   { en: string; zh: string; tone: "buy" | "watch" | "hot" | "idle"; hint: { en: string; zh: string } }
 > = {
-  strong_buy: { en: "Strong Buy", zh: "强买入", tone: "buy", hint: { en: "oversold + confirmed turn", zh: "超卖见底 + 拐头确认" } },
-  oversold_watch: { en: "Oversold", zh: "超卖埋伏", tone: "watch", hint: { en: "oversold, turn not confirmed — may still fall", zh: "超卖，拐头未确认，可能续跌" } },
+  strong_buy: { en: "Strong Buy", zh: "强买入", tone: "buy", hint: { en: "broke the lower band + confirmed turn", zh: "跌破下轨 + 拐头确认" } },
+  band_break: { en: "Band Break", zh: "跌破下轨", tone: "buy", hint: { en: "below the lower band — a discount on a vetted name", zh: "跌破布林下轨——好票打折,买入信号" } },
+  oversold_watch: { en: "Oversold", zh: "超卖埋伏", tone: "watch", hint: { en: "broke recently, bouncing weakly — not yet confirmed", zh: "近期跌破，弱反弹，未确认" } },
   pullback_buy: { en: "Pullback Buy", zh: "强势回踩", tone: "buy", hint: { en: "dipped back into the bands after a breakout", zh: "突破后回落进轨道内" } },
   momentum: { en: "Momentum", zh: "动能确定", tone: "hot", hint: { en: "confirmed uptrend, holding above MA20", zh: "上涨趋势确认，站稳 MA20" } },
   overheated: { en: "Overheated", zh: "过热·等回落", tone: "hot", hint: { en: "above the upper band — wait for the pullback", zh: "突破上轨，等回落进轨道再买" } },
@@ -684,10 +685,11 @@ export function timingSortKey(tech: TechTicker | null | undefined): number {
 
 // The states that are an ACTIONABLE buy right now (green badges) — used for the
 // funnel count and to order the Buy-Timing board.
-export const TIMING_BUY_STATES: TechTiming["timing"][] = ["strong_buy", "pullback_buy"];
+export const TIMING_BUY_STATES: TechTiming["timing"][] = ["strong_buy", "band_break", "pullback_buy"];
 // Display order on the Buy-Timing board: buy signals first, idle last.
 export const TIMING_ORDER: TechTiming["timing"][] = [
   "strong_buy",
+  "band_break",
   "pullback_buy",
   "oversold_watch",
   "momentum",

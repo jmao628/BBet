@@ -408,6 +408,7 @@ def _rebound_momentum(
 # Human-readable state labels (the badge text).
 _TIMING_LABEL = {
     "strong_buy": "强买入",
+    "band_break": "跌破下轨",
     "oversold_watch": "超卖埋伏",
     "pullback_buy": "强势回踩",
     "momentum": "动能确定",
@@ -417,6 +418,7 @@ _TIMING_LABEL = {
 # Sort key for "best entry right now" — higher = buy sooner.
 _TIMING_BASE = {
     "strong_buy": 85,
+    "band_break": 62,
     "pullback_buy": 70,
     "momentum": 58,
     "oversold_watch": 45,
@@ -477,14 +479,19 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
     reclaimed = pb > _LOWER_BAND_TOUCH  # price back above the lower rail
     confirmed_turn = turning_up and reclaimed
 
-    # State machine — checked in priority order.
-    oversold = touched_lower and macd_extreme  # both hit their extreme recently
+    # State machine — checked in priority order. Breaking the lower band is, on a
+    # name the funnel already vetted, treated as a DISCOUNT — a buy signal on its
+    # own (band_break), no confirmed turn required. A confirmed turn on top of a
+    # recent break upgrades it to the premium strong_buy.
+    curr_below = pb <= _LOWER_BAND_TOUCH  # price at/through the lower band RIGHT NOW
     if pb > _UPPER_BAND_BREAK:
         state = "overheated"
-    elif oversold and confirmed_turn and rebound >= _REBOUND_TRIGGER:
-        state = "strong_buy"            # Buy A — 扣扳机: bottomed, turned, and the bounce has strength
-    elif oversold:
-        state = "oversold_watch"        # Buy A — 埋伏: oversold, turn not yet confirmed (may still fall)
+    elif touched_lower and confirmed_turn and rebound >= _REBOUND_TRIGGER:
+        state = "strong_buy"            # 扣扳机: broke the band, turned, bounce has strength
+    elif curr_below:
+        state = "band_break"            # 跌破下轨: below the lower band now = a buy on a vetted name
+    elif touched_lower:
+        state = "oversold_watch"        # 埋伏: broke recently, bouncing weakly / not yet confirmed
     elif was_above_upper and 0.3 < pb < 0.8 and regime != "down" and line > 0:
         state = "pullback_buy"          # Buy B — 强势回踩
     elif regime == "up" and line > 0 and mid_streak >= _MID_STREAK_DAYS and hists[-1] > 0:
@@ -495,6 +502,10 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
     score = _TIMING_BASE[state]
     if state == "strong_buy":
         score = 85 + round(rebound * 0.15)          # 85-100
+    elif state == "band_break":
+        # A buy now; ranked by how much momentum is building + deeper capitulation
+        # (MACD extreme) scores higher. Capped below strong_buy's 85 floor.
+        score = min(84, 58 + round(rebound * 0.2) + (8 if macd_extreme else 0))
     elif state == "oversold_watch":
         score = 40 + round(rebound * 0.25)          # 40-65, ranks埋伏 by strength
     elif state == "pullback_buy":

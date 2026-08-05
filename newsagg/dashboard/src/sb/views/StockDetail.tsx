@@ -649,7 +649,7 @@ const REBOUND_PART_LABEL: Record<string, { en: string; zh: string; max: number }
 // an oversold setup is live), and the raw Bollinger / MACD numbers behind it.
 function TimingPanel({ timing, band, closes, t }: { timing: TechTiming; band: BandSeries | null | undefined; closes: number[]; t: (en: string, zh: string) => string }) {
   const meta = TIMING_META[timing.timing];
-  const showRebound = timing.timing === "strong_buy" || timing.timing === "oversold_watch";
+  const showRebound = timing.timing === "strong_buy" || timing.timing === "band_break" || timing.timing === "oversold_watch";
   const pctb = timing.bb.pctb;
   return (
     <div className="rounded-xl border border-line bg-panel2 p-4">
