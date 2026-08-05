@@ -503,8 +503,8 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
     # as chips so you can see WHY it's a buy (broke the band, MACD turned, etc.).
     # Ordered strongest-evidence first.
     signals: list[str] = []
-    if touched_lower:
-        signals.append("band_break")       # broke the lower band (within 10d)
+    if curr_below:
+        signals.append("band_break")       # price is BELOW the lower band RIGHT NOW (a true break)
     if macd_extreme:
         signals.append("macd_capitulation")  # MACD histogram at an extreme trough
     if turning_up:
