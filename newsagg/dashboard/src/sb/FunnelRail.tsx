@@ -1,6 +1,6 @@
 import { useStore } from "../store";
 import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, buildTimingBoard, noDataSet, belowMinCap, TIMING_BUY_STATES, TIMING_SELL_STATES } from "./pipeline";
-import { OVERVIEW, FUNNEL, FOCUS, RANKING, TIMING, WARNINGS, BACKTEST, type NavStage } from "./nav";
+import { OVERVIEW, FUNNEL, FOCUS, RANKING, TIMING, WARNINGS, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
 // their computations are wired.
@@ -163,13 +163,6 @@ export function FunnelRail() {
           )}
         </div>
       ))}
-
-      <div className="px-5 pb-2 pt-5 text-[10.5px] uppercase tracking-[0.14em] text-muted2">
-        {lang === "zh" ? "工具 · Lab" : "Lab"}
-      </div>
-      <div className="relative">
-        <NavRow stage={BACKTEST} count={null} />
-      </div>
     </aside>
   );
 }
