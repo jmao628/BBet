@@ -660,18 +660,26 @@ export function capLabel(cap: CapSize, lang: "en" | "zh"): string {
 // Presentation for the timing state computed in newsagg.technical. `tone` maps
 // to the UI's color roles: green = a buy signal now, amber = wait, slate = idle.
 
+export type TimingTone = "buy" | "watch" | "hot" | "idle" | "sell" | "trim";
+
 export const TIMING_META: Record<
   TechTiming["timing"],
-  { en: string; zh: string; tone: "buy" | "watch" | "hot" | "idle"; hint: { en: string; zh: string } }
+  { en: string; zh: string; tone: TimingTone; hint: { en: string; zh: string } }
 > = {
   strong_buy: { en: "Strong Buy", zh: "强买入", tone: "buy", hint: { en: "broke the lower band + confirmed turn", zh: "跌破下轨 + 拐头确认" } },
   band_break: { en: "Band Break", zh: "跌破下轨", tone: "buy", hint: { en: "below the lower band — a discount on a vetted name", zh: "跌破布林下轨——好票打折,买入信号" } },
   oversold_watch: { en: "Oversold", zh: "超卖埋伏", tone: "watch", hint: { en: "broke recently, bouncing weakly — not yet confirmed", zh: "近期跌破，弱反弹，未确认" } },
   pullback_buy: { en: "Pullback Buy", zh: "强势回踩", tone: "buy", hint: { en: "dipped back into the bands after a breakout", zh: "突破后回落进轨道内" } },
   momentum: { en: "Momentum", zh: "动能确定", tone: "hot", hint: { en: "confirmed uptrend, holding above MA20", zh: "上涨趋势确认，站稳 MA20" } },
+  breakdown: { en: "Breakdown", zh: "破位·减仓", tone: "sell", hint: { en: "broke MA20, momentum down, MA20 rolling — de-risk", zh: "跌破 MA20、动能向下、均线掉头——减仓去风险" } },
+  trim: { en: "Trim", zh: "减仓预警", tone: "trim", hint: { en: "early crack below MA20, momentum weakening — de-risk", zh: "初步跌破 MA20、动能转弱——减仓预警" } },
   overheated: { en: "Overheated", zh: "过热·等回落", tone: "hot", hint: { en: "above the upper band — wait for the pullback", zh: "突破上轨，等回落进轨道再买" } },
   neutral: { en: "—", zh: "观望", tone: "idle", hint: { en: "no entry signal", zh: "无买点信号" } },
 };
+
+// Sell states — de-risk WARNINGS, never a hard exit. Kept separate from the buy
+// count so they show under their own tabs.
+export const TIMING_SELL_STATES: TechTiming["timing"][] = ["breakdown", "trim"];
 
 export function timingLabel(state: TechTiming["timing"], lang: "en" | "zh"): string {
   return lang === "zh" ? TIMING_META[state].zh : TIMING_META[state].en;
@@ -679,7 +687,7 @@ export function timingLabel(state: TechTiming["timing"], lang: "en" | "zh"): str
 
 // The concrete evidence chips behind a timing state — the "why it's a buy".
 // tone: "buy" green · "hot" violet (overheated) · "info" blue (context).
-export const SIGNAL_META: Record<string, { en: string; zh: string; tone: "buy" | "hot" | "info" }> = {
+export const SIGNAL_META: Record<string, { en: string; zh: string; tone: "buy" | "hot" | "info" | "sell" }> = {
   band_break: { en: "Broke lower band", zh: "跌破下轨", tone: "buy" },
   macd_capitulation: { en: "MACD extreme low", zh: "MACD 极度负", tone: "buy" },
   macd_turn: { en: "MACD turning up", zh: "MACD 拐头", tone: "buy" },
@@ -690,6 +698,13 @@ export const SIGNAL_META: Record<string, { en: string; zh: string; tone: "buy" |
   squeeze: { en: "Bollinger squeeze", zh: "布林收口", tone: "info" },
   uptrend_hold: { en: "Holding above MA20", zh: "站稳 MA20", tone: "info" },
   above_upper: { en: "Above upper band", zh: "突破上轨", tone: "hot" },
+  // sell-side receipts
+  broke_ma20: { en: "Broke MA20", zh: "跌破 MA20", tone: "sell" },
+  macd_death_cross: { en: "MACD death cross", zh: "MACD 死叉", tone: "sell" },
+  macd_weakening: { en: "Momentum down", zh: "动能转弱", tone: "sell" },
+  ma20_rolling: { en: "MA20 rolling over", zh: "MA20 掉头", tone: "sell" },
+  below_ma50: { en: "Lost MA50", zh: "跌破 MA50", tone: "sell" },
+  breakdown_volume: { en: "Distribution volume", zh: "破位放量", tone: "sell" },
 };
 
 // "Best entry now" sort key: the timing score, or -1 when a name has no timing
@@ -708,6 +723,8 @@ export const TIMING_ORDER: TechTiming["timing"][] = [
   "pullback_buy",
   "oversold_watch",
   "momentum",
+  "breakdown",
+  "trim",
   "overheated",
   "neutral",
 ];

@@ -645,11 +645,20 @@ const REBOUND_PART_LABEL: Record<string, { en: string; zh: string; max: number }
   oversold_depth: { en: "Oversold depth", zh: "超卖深度", max: 10 },
 };
 
+const BREAKDOWN_PART_LABEL: Record<string, { en: string; zh: string; max: number }> = {
+  macd_down: { en: "MACD rolling", zh: "MACD 走弱", max: 30 },
+  below_mid_depth: { en: "Below MA20", zh: "跌破 MA20", max: 20 },
+  ma20_roll: { en: "MA20 rolling", zh: "MA20 掉头", max: 20 },
+  below_ma50: { en: "Lost MA50", zh: "跌破 MA50", max: 15 },
+  breakdown_vol: { en: "Distribution vol", zh: "破位放量", max: 15 },
+};
+
 // The entry-timing readout: the state, the rebound-momentum breakdown (only when
 // an oversold setup is live), and the raw Bollinger / MACD numbers behind it.
 function TimingPanel({ timing, band, closes, t }: { timing: TechTiming; band: BandSeries | null | undefined; closes: number[]; t: (en: string, zh: string) => string }) {
   const meta = TIMING_META[timing.timing];
   const showRebound = timing.timing === "strong_buy" || timing.timing === "band_break" || timing.timing === "oversold_watch";
+  const showBreakdown = timing.timing === "breakdown" || timing.timing === "trim";
   const pctb = timing.bb.pctb;
   return (
     <div className="rounded-xl border border-line bg-panel2 p-4">
@@ -693,6 +702,40 @@ function TimingPanel({ timing, band, closes, t }: { timing: TechTiming; band: Ba
                     <span className="w-[92px] flex-none text-[10px] text-muted2">{t(m.en, m.zh)}</span>
                     <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-inset">
                       <span className="block h-full rounded-full" style={{ width: `${(v / m.max) * 100}%`, background: v > 0 ? "#48c78e" : "transparent" }} />
+                    </div>
+                    <span className="w-[46px] flex-none text-right font-mono text-[10px] text-muted">{v.toFixed(0)}/{m.max}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* breakdown-severity meter (sell / de-risk states) */}
+      {showBreakdown && (
+        <div className="mt-3">
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <span className="text-[11.5px] font-semibold text-muted">{t("Breakdown severity", "破位强度")}</span>
+            <span className="font-mono text-[15px] font-semibold" style={{ color: "#ff6b81" }}>
+              {timing.breakdown}<span className="text-[11px] text-muted2">/100</span>
+            </span>
+          </div>
+          <div className="text-[10.5px] text-muted2">
+            {t(
+              "A de-risk WARNING, not a forced exit — the entry structure has broken (below MA20, momentum down). Trim / tighten; a fresh oversold dip can be re-bought.",
+              "这是减仓预警,不是强制清仓——买入结构已破(跌破 MA20、动能向下)。减仓/收紧;若再砸到超卖可重新买回。",
+            )}
+          </div>
+          {timing.breakdown_parts && (
+            <div className="mt-2 space-y-1.5">
+              {Object.entries(BREAKDOWN_PART_LABEL).map(([k, m]) => {
+                const v = timing.breakdown_parts?.[k] ?? 0;
+                return (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="w-[92px] flex-none text-[10px] text-muted2">{t(m.en, m.zh)}</span>
+                    <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-inset">
+                      <span className="block h-full rounded-full" style={{ width: `${(v / m.max) * 100}%`, background: v > 0 ? "#ff6b81" : "transparent" }} />
                     </div>
                     <span className="w-[46px] flex-none text-right font-mono text-[10px] text-muted">{v.toFixed(0)}/{m.max}</span>
                   </div>

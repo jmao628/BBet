@@ -103,6 +103,8 @@ export type TimingState =
   | "oversold_watch" // 埋伏: broke recently, bouncing weakly / not yet confirmed
   | "pullback_buy" // Buy B — 强势回踩: dipped back into the bands after a breakout
   | "momentum" // confirmed uptrend, holding above MA20
+  | "breakdown" // 破位·减仓: decisive MA20 break, momentum down, MA20 rolling — de-risk
+  | "trim" // 减仓预警: early crack below MA20, momentum weakening — de-risk warning
   | "overheated" // above the upper band — wait for the pullback, don't chase
   | "neutral";
 
@@ -111,8 +113,10 @@ export interface TechTiming {
   label: string; // Chinese badge label
   score: number; // 0-100, "best entry now" sort key (higher = buy sooner)
   signals: string[]; // active evidence codes (band_break, macd_turn, …) — the "receipts"
-  rebound: number; // 0-100 rebound-momentum strength
+  rebound: number; // 0-100 rebound-momentum strength (buy states)
   rebound_parts?: Record<string, number>;
+  breakdown: number; // 0-100 breakdown severity (sell states — trim/breakdown)
+  breakdown_parts?: Record<string, number>;
   regime: "up" | "down" | "range";
   squeeze: boolean; // Bollinger bandwidth in the bottom 20% of its 120d range
   divergence: boolean; // RSI bullish divergence present

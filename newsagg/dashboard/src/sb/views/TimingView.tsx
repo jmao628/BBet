@@ -16,14 +16,17 @@ import type { TechTiming } from "../../types";
 type TabKey = TechTiming["timing"] | "buys";
 
 // Tone → accent, matched to the TimingBadge palette.
-const TONE_COLOR: Record<"buy" | "watch" | "hot" | "idle", string> = {
+const TONE_COLOR: Record<string, string> = {
   buy: "#5fe3a1",
   watch: "#f0c862",
   hot: "#c99bf0",
   idle: "#7f8f9e",
+  sell: "#ff6b81",
+  trim: "#e8935f",
 };
-const stateColor = (s: TechTiming["timing"]): string => TONE_COLOR[TIMING_META[s].tone];
+const stateColor = (s: TechTiming["timing"]): string => TONE_COLOR[TIMING_META[s].tone] ?? "#7f8f9e";
 const hasReb = (s: TechTiming["timing"]): boolean => s === "strong_buy" || s === "band_break" || s === "oversold_watch";
+const isSell = (s: TechTiming["timing"]): boolean => s === "breakdown" || s === "trim";
 
 // A horizontal Bollinger gauge: lower rail — MA20 tick — upper rail, dot by %B.
 function BandGauge({ pctb }: { pctb: number }) {
@@ -61,7 +64,7 @@ function FeatureCard({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number;
         </div>
         <div className="text-right">
           <div className="font-disp text-[26px] font-bold leading-none tabular-nums" style={{ color: col }}>{tm.score}</div>
-          <div className="text-[8.5px] uppercase tracking-wide text-muted2">{t("entry", "买点分")}</div>
+          <div className="text-[8.5px] uppercase tracking-wide text-muted2">{isSell(tm.timing) ? t("de-risk", "减仓分") : t("entry", "买点分")}</div>
         </div>
       </div>
       <div className="mb-2 truncate text-[10.5px] text-muted2">{r.company || "—"}{r.sector ? ` · ${sectorLabel(r.sector, lang)}` : ""} · {t("Tier", "档")} {r.tier}</div>
@@ -78,6 +81,15 @@ function FeatureCard({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number;
             <span className="block h-full rounded-full transition-[width] duration-700" style={{ width: `${tm.rebound}%`, background: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }} />
           </div>
           <span className="font-mono" style={{ color: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }}>{tm.rebound}</span>
+        </div>
+      )}
+      {isSell(tm.timing) && (
+        <div className="mt-2 flex items-center gap-2 text-[10px] text-muted2">
+          <span>{t("breakdown", "破位强度")}</span>
+          <div className="h-[4px] flex-1 overflow-hidden rounded-full bg-inset">
+            <span className="block h-full rounded-full transition-[width] duration-700" style={{ width: `${tm.breakdown}%`, background: col }} />
+          </div>
+          <span className="font-mono" style={{ color: col }}>{tm.breakdown}</span>
         </div>
       )}
     </button>
@@ -117,12 +129,17 @@ function Row({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number; lang: "
         </div>
       </div>
 
-      {/* rebound (buy-A) or MACD cross */}
+      {/* rebound (buy) · breakdown (sell) · or MACD cross */}
       <div className="hidden w-[76px] flex-none text-right sm:block">
         {hasReb(tm.timing) ? (
           <>
             <div className="font-mono text-[14px] font-semibold" style={{ color: tm.rebound >= 50 ? "#48c78e" : "#f0c862" }}>{tm.rebound}</div>
             <div className="text-[8px] uppercase tracking-wide text-muted2">{t("rebound", "反弹动能")}</div>
+          </>
+        ) : isSell(tm.timing) ? (
+          <>
+            <div className="font-mono text-[14px] font-semibold" style={{ color: col }}>{tm.breakdown}</div>
+            <div className="text-[8px] uppercase tracking-wide text-muted2">{t("breakdown", "破位强度")}</div>
           </>
         ) : (
           <>
@@ -132,10 +149,10 @@ function Row({ r, rank, lang, onOpen, t }: { r: TimingRow; rank: number; lang: "
         )}
       </div>
 
-      {/* entry score */}
+      {/* score */}
       <div className="w-[52px] flex-none text-right">
         <div className="font-disp text-[17px] font-semibold leading-none" style={{ color: col }}>{tm.score}</div>
-        <div className="text-[8px] uppercase tracking-wide text-muted2">{t("entry", "买点")}</div>
+        <div className="text-[8px] uppercase tracking-wide text-muted2">{isSell(tm.timing) ? t("de-risk", "减仓") : t("entry", "买点")}</div>
       </div>
     </div>
   );
@@ -230,8 +247,8 @@ export function TimingView() {
         eyebrow={t("Final · Buy Timing", "终章 · 择时买点")}
         title={t("Buy Timing · Bollinger + MACD", "择时买点 · 布林带 + MACD")}
         desc={t(
-          "A buy-only entry overlay on the vetted names: the funnel decided the company is good — this decides whether NOW is a good price. Each name carries its signal receipts (broke lower band, MACD turned, RSI divergence, …). Refreshes daily with new prices; it never filters — a good name at a bad price simply waits.",
-          "在已筛出的好公司上叠加的『只做买点』择时:漏斗决定了公司好不好,这里决定现在是不是好价格。每只票都标出它的信号凭据(跌破下轨、MACD 拐头、RSI 底背离……)。每日随新价格自动重排;它从不做筛选——好公司但价格不好,就等。",
+          "An entry-timing overlay on the vetted names: the funnel decided the company is good — this decides whether NOW is a good price. Mostly buy points (broke lower band, MACD turned, RSI divergence, …), plus de-risk WARNINGS when a name breaks down through MA20 with momentum falling — a trim signal, never a forced exit. Refreshes daily with new prices.",
+          "在已筛出的好公司上叠加的择时:漏斗决定了公司好不好,这里决定现在是不是好价格。主要是买点(跌破下轨、MACD 拐头、RSI 底背离……),另有跌破 MA20、动能向下时的**减仓预警**——只提示去风险,不强制清仓。每日随新价格自动重排。",
         )}
       />
 

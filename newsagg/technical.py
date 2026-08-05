@@ -412,10 +412,14 @@ _TIMING_LABEL = {
     "oversold_watch": "超卖埋伏",
     "pullback_buy": "强势回踩",
     "momentum": "动能确定",
+    "breakdown": "破位·减仓",
+    "trim": "减仓预警",
     "overheated": "过热·等回落",
     "neutral": "观望",
 }
-# Sort key for "best entry right now" — higher = buy sooner.
+# Sort key for "best entry right now" — higher = buy sooner. Sell states carry a
+# LOW base (they're not buys); within their own tab they re-sort by breakdown
+# severity (set on `score` below).
 _TIMING_BASE = {
     "strong_buy": 85,
     "band_break": 62,
@@ -423,8 +427,63 @@ _TIMING_BASE = {
     "momentum": 58,
     "oversold_watch": 45,
     "neutral": 50,
+    "breakdown": 30,
+    "trim": 20,
     "overheated": 25,
 }
+
+
+def _breakdown_volume(closes: list[float], volumes: list[float], lookback: int = 5) -> bool:
+    """A recent DOWN day on expanded volume — distribution as the trend cracks."""
+    if len(volumes) < 26:
+        return False
+    base = sum(volumes[-26:-6]) / 20
+    if base <= 0:
+        return False
+    for i in range(-lookback, 0):
+        if closes[i] < closes[i - 1] and volumes[i] >= 1.5 * base:
+            return True
+    return False
+
+
+def _breakdown_momentum(highs, lows, closes, volumes, bb: dict, hists: list[float], line: float, signal: float) -> tuple[int, dict]:
+    """0-100 — how decisively the uptrend is breaking DOWN through the MA20 middle
+    band (the mirror of _rebound_momentum). Higher = trend more broken.
+
+        30  MACD rolling over (falling histogram + death cross)
+        20  distance price has slipped below MA20 (in ATR)
+        20  MA20 itself rolling over (slope turning down)
+        15  price lost the MA50
+        15  volume expansion on the breakdown
+    """
+    parts: dict[str, float] = {}
+    mid = bb["middle"]
+    price = closes[-1]
+
+    macd_pts = 0.0
+    if len(hists) >= 2 and hists[-1] < hists[-2]:  # histogram falling = momentum down
+        macd_pts = 14.0
+        if line < signal:  # death cross
+            macd_pts += 10.0
+        peak = max((abs(h) for h in hists[-15:]), default=0.0) or 1e-9
+        macd_pts += _clamp(-hists[-1] / peak, 0.0, 1.0) * 6
+    parts["macd_down"] = round(macd_pts, 1)
+
+    atr = _atr(highs, lows, closes)
+    parts["below_mid_depth"] = round(_clamp((mid - price) / atr / 2.0, 0.0, 1.0) * 20, 1) if (atr and mid and price < mid) else 0.0
+
+    mid_prev = _sma(closes[:-5], 20)
+    roll = 0.0
+    if mid and mid_prev:
+        slope = (mid - mid_prev) / mid
+        roll = _clamp(-slope / 0.02, 0.0, 1.0) * 20  # −2% over 5d = full marks
+    parts["ma20_roll"] = round(roll, 1)
+
+    ma50 = _sma(closes, 50)
+    parts["below_ma50"] = 15.0 if (ma50 and price < ma50) else 0.0
+    parts["breakdown_vol"] = 15.0 if _breakdown_volume(closes, volumes) else 0.0
+
+    return int(_clamp(sum(parts.values()), 0, 100)), parts
 
 
 def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
@@ -479,6 +538,31 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
     reclaimed = pb > _LOWER_BAND_TOUCH  # price back above the lower rail
     confirmed_turn = turning_up and reclaimed
 
+    # ── SELL side (de-risk WARNING, not a hard exit) — a break DOWN through the
+    # MA20 middle band with short-term momentum turning down. Kept in the middle
+    # zone only: the extreme-oversold zone (at/through the lower band) is a BUY,
+    # never a sell, so the buy states below are checked FIRST and the sell states
+    # can only fire when price has NOT reached the lower band.
+    price = closes[-1]
+    sma20 = bb["middle"]
+    sma50 = _sma(closes, 50)
+    sma20_prev = _sma(closes[:-5], 20)
+    below_mid = pb < 0.5                                  # below the MA20 middle band
+    below_mid_streak = 0
+    for x in reversed(pbs):
+        if x < 0.5:
+            below_mid_streak += 1
+        else:
+            break
+    ma20_rolling = sma20 is not None and sma20_prev is not None and sma20 <= sma20_prev
+    below_ma50 = sma50 is not None and price < sma50
+    macd_death = line < signal                            # death cross
+    macd_weak = len(hists) >= 2 and hists[-1] < hists[-2]  # short-term momentum down
+    # Confirmed break (loud warning) vs an early crack (soft warning). A healthy
+    # pullback keeps MA20 RISING and price above MA50 → neither fires.
+    breakdown_now = below_mid and below_mid_streak >= 2 and macd_death and (ma20_rolling or below_ma50)
+    trim_now = below_mid and macd_weak and (ma20_rolling or macd_death)
+
     # State machine — checked in priority order. Breaking the lower band is, on a
     # name the funnel already vetted, treated as a DISCOUNT — a buy signal on its
     # own (band_break), no confirmed turn required. A confirmed turn on top of a
@@ -492,12 +576,22 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
         state = "band_break"            # 跌破下轨: below the lower band now = a buy on a vetted name
     elif touched_lower:
         state = "oversold_watch"        # 埋伏: broke recently, bouncing weakly / not yet confirmed
+    elif breakdown_now:
+        state = "breakdown"             # 破位·减仓: decisive MA20 break, momentum down, MA20 rolling
     elif was_above_upper and 0.3 < pb < 0.8 and regime != "down" and line > 0:
-        state = "pullback_buy"          # Buy B — 强势回踩
+        state = "pullback_buy"          # Buy B — 强势回踩 (a healthy pullback, MA20 still up)
+    elif trim_now:
+        state = "trim"                  # 减仓预警: early crack below MA20, momentum weakening
     elif regime == "up" and line > 0 and mid_streak >= _MID_STREAK_DAYS and hists[-1] > 0:
         state = "momentum"              # real uptrend + MACD bull, not just above MA20 in chop
     else:
         state = "neutral"
+
+    # Breakdown severity (0-100) — only meaningful for the two sell states.
+    breakdown_score, bparts = (
+        _breakdown_momentum(highs, lows, closes, volumes, bb, hists, line, signal)
+        if state in ("breakdown", "trim") else (0, {})
+    )
 
     # The concrete signals firing right now — the "receipts" for the state, shown
     # as chips so you can see WHY it's a buy (broke the band, MACD turned, etc.).
@@ -523,6 +617,21 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
         signals.append("above_upper")      # above the upper band (overheated)
     if regime == "up" and mid_streak >= _MID_STREAK_DAYS:
         signals.append("uptrend_hold")     # holding above MA20 in an uptrend
+    # SELL-side receipts — only on the two sell states (so a death cross on an
+    # oversold BUY name doesn't read as a sell).
+    if state in ("breakdown", "trim"):
+        if below_mid and below_mid_streak >= 1:
+            signals.append("broke_ma20")       # closed below the MA20 middle band
+        if macd_death:
+            signals.append("macd_death_cross")  # MACD line crossed below signal
+        elif macd_weak:
+            signals.append("macd_weakening")   # short-term momentum turning down
+        if ma20_rolling:
+            signals.append("ma20_rolling")     # MA20 flattening / turning down
+        if below_ma50:
+            signals.append("below_ma50")       # lost the MA50 trend line
+        if bparts.get("breakdown_vol", 0) > 0:
+            signals.append("breakdown_volume")  # distribution — down day on heavy volume
 
     score = _TIMING_BASE[state]
     if state == "strong_buy":
@@ -535,6 +644,10 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
         score = 40 + round(rebound * 0.25)          # 40-65, ranks埋伏 by strength
     elif state == "pullback_buy":
         score = 68 + round(_clamp((0.6 - abs(pb - 0.5)) / 0.6, 0, 1) * 10)
+    elif state in ("breakdown", "trim"):
+        # Sells sort within their own tab by breakdown severity (higher = more
+        # urgent to de-risk). Segregated from the buy tabs, so this never mixes.
+        score = breakdown_score
 
     return {
         "timing": state,
@@ -543,6 +656,8 @@ def compute_timing(highs, lows, closes, volumes, p: TechParams) -> dict | None:
         "signals": signals,
         "rebound": rebound,
         "rebound_parts": rparts,
+        "breakdown": breakdown_score,
+        "breakdown_parts": bparts,
         "regime": regime,
         "squeeze": squeeze,
         "divergence": rparts.get("rsi_divergence", 0) > 0,

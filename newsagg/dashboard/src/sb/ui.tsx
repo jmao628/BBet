@@ -5,11 +5,13 @@ import { TIMING_META, SIGNAL_META } from "./pipeline";
 
 // Entry-timing badge (Bollinger+MACD state). Green = buy now, amber = wait,
 // violet = hot/overheated, slate = idle. Shared by the leaderboard + detail.
-const TIMING_TONE: Record<"buy" | "watch" | "hot" | "idle", { fg: string; bg: string; bd: string }> = {
+const TIMING_TONE: Record<"buy" | "watch" | "hot" | "idle" | "sell" | "trim", { fg: string; bg: string; bd: string }> = {
   buy: { fg: "#5fe3a1", bg: "rgba(72,199,142,0.14)", bd: "rgba(72,199,142,0.45)" },
   watch: { fg: "#f0c862", bg: "rgba(240,200,98,0.12)", bd: "rgba(240,200,98,0.4)" },
   hot: { fg: "#c99bf0", bg: "rgba(201,155,240,0.12)", bd: "rgba(201,155,240,0.4)" },
   idle: { fg: "#7f8f9e", bg: "transparent", bd: "var(--line,#22303c)" },
+  sell: { fg: "#ff6b81", bg: "rgba(255,90,120,0.14)", bd: "rgba(255,90,120,0.45)" },
+  trim: { fg: "#e8935f", bg: "rgba(224,120,90,0.13)", bd: "rgba(224,120,90,0.42)" },
 };
 
 export function TimingBadge({ timing, size = "sm" }: { timing: TechTiming | null | undefined; size?: "sm" | "md" }) {
@@ -26,7 +28,7 @@ export function TimingBadge({ timing, size = "sm" }: { timing: TechTiming | null
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded font-semibold uppercase tracking-wide ${pad}`}
       style={{ color: tone.fg, background: tone.bg, border: `1px solid ${tone.bd}` }}
     >
-      {meta.tone === "buy" && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+      {(meta.tone === "buy" || meta.tone === "sell" || meta.tone === "trim") && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       {label}
       {timing.timing !== "neutral" && <span className="tabular-nums opacity-70">{timing.score}</span>}
     </span>
@@ -35,10 +37,11 @@ export function TimingBadge({ timing, size = "sm" }: { timing: TechTiming | null
 
 // The evidence chips behind a timing state — "why it's a buy" (broke lower band,
 // MACD turned, RSI divergence, …). Reads the `signals` codes off the timing.
-const SIGNAL_TONE: Record<"buy" | "hot" | "info", { fg: string; bd: string }> = {
+const SIGNAL_TONE: Record<"buy" | "hot" | "info" | "sell", { fg: string; bd: string }> = {
   buy: { fg: "#5fe3a1", bd: "rgba(72,199,142,0.4)" },
   hot: { fg: "#c99bf0", bd: "rgba(201,155,240,0.38)" },
   info: { fg: "#7fb6e6", bd: "rgba(95,176,232,0.35)" },
+  sell: { fg: "#ff6b81", bd: "rgba(255,90,120,0.4)" },
 };
 
 export function SignalChips({ signals, max, lang: langProp }: { signals: string[] | undefined; max?: number; lang?: "en" | "zh" }) {

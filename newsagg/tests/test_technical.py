@@ -239,5 +239,48 @@ def TIMING_META_BUY(state: str) -> bool:
     return state in {"strong_buy", "band_break", "pullback_buy"}
 
 
+def test_timing_ma20_breakdown_is_a_sell():
+    # Strong uptrend then a break down through the MA20 middle band with MACD
+    # rolling over (but not yet all the way to the lower band) → a de-risk SELL
+    # warning (trim or breakdown), carrying the MA20-break receipt.
+    closes, p = [], 40.0
+    for _ in range(150):
+        p *= 1.005
+        closes.append(p)
+    for _ in range(6):  # a gentle 6-day slide below MA20, momentum turning down
+        p *= 0.994
+        closes.append(p)
+    highs = [c * 1.015 for c in closes]
+    lows = [c * 0.985 for c in closes]
+    vols = [1_000_000.0] * len(closes)
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] in ("trim", "breakdown")
+    assert "broke_ma20" in t["signals"]
+    assert t["breakdown"] >= 0
+
+
+def test_timing_deep_dip_stays_buy_not_sell():
+    # A deep dip all the way through the lower band is the EXTREME-oversold zone —
+    # a BUY on a vetted name, never a sell.
+    closes, p = [], 40.0
+    for _ in range(180):
+        p *= 1.004
+        closes.append(p)
+    for _ in range(6):
+        p *= 0.97
+        closes.append(p)
+    highs = [c * 1.01 for c in closes]
+    lows = [c * 0.99 for c in closes]
+    vols = [1_000_000.0] * len(closes)
+    t = compute_timing(highs, lows, closes, vols, P)
+    assert t is not None
+    assert t["timing"] in ("band_break", "strong_buy", "oversold_watch")  # a buy zone
+    assert t["timing"] not in ("trim", "breakdown")
+
+
 def _all_timing_states():
-    return {"strong_buy", "band_break", "oversold_watch", "pullback_buy", "momentum", "overheated", "neutral"}
+    return {
+        "strong_buy", "band_break", "oversold_watch", "pullback_buy", "momentum",
+        "breakdown", "trim", "overheated", "neutral",
+    }
