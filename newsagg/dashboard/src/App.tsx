@@ -13,6 +13,7 @@ import { ShortlistView } from "./sb/views/ShortlistView";
 import { ConvictionView } from "./sb/views/ConvictionView";
 import { RankingView } from "./sb/views/RankingView";
 import { TimingView } from "./sb/views/TimingView";
+import { WarningView } from "./sb/views/WarningView";
 import { BacktestView } from "./sb/views/BacktestView";
 import { StockDetail } from "./sb/views/StockDetail";
 
@@ -27,6 +28,7 @@ const VIEWS = {
   conviction: ConvictionView,
   ranking: RankingView,
   timing: TimingView,
+  warnings: WarningView,
   backtest: BacktestView,
 } as const;
 

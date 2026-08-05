@@ -215,7 +215,7 @@ export function TimingView() {
       { key: "buys", label: lang === "zh" ? "全部买点" : "All Buys", count: buyCount, color: "#5fe3a1" },
     ];
     for (const st of TIMING_ORDER) {
-      if (st === "neutral") continue;
+      if (st === "neutral" || st === "breakdown" || st === "trim") continue; // sells live on the Risk page
       const c = counts.get(st) ?? 0;
       if (c === 0) continue;
       out.push({ key: st, label: lang === "zh" ? TIMING_META[st].zh : TIMING_META[st].en, count: c, color: stateColor(st) });

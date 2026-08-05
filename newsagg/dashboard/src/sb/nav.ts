@@ -53,6 +53,16 @@ export const TIMING: NavStage = {
   hint: { en: "Bollinger + MACD · buy points now", zh: "布林带 + MACD · 当前买点" },
 };
 
+// The sell/de-risk companion to Buy Timing — vetted holdings breaking DOWN
+// through the MA20 with momentum falling. A warning to trim, never a hard exit.
+export const WARNINGS: NavStage = {
+  key: "warnings",
+  step: null,
+  en: "Risk · De-risk",
+  zh: "减仓预警",
+  hint: { en: "MA20 breakdown · trim warnings", zh: "跌破 MA20 · 减仓提示" },
+};
+
 // A standalone tool (not a funnel stage): backtest entry/exit points over the
 // price history and tune the rules.
 export const BACKTEST: NavStage = {
