@@ -132,6 +132,7 @@ export function WarningView() {
   const t = useT();
 
   const [tab, setTab] = useState<Tab>("all");
+  const [sector, setSector] = useState<string | null>(null);
 
   const focus = useMemo(
     () => buildFocus(data, heat, technical, marketCaps, sectors, supplychain),
@@ -140,10 +141,17 @@ export function WarningView() {
   const shortlist = useMemo(() => buildShortlist(focus, catalyst), [focus, catalyst]);
   const board = useMemo(() => buildTimingBoard(shortlist, technical), [shortlist, technical]);
 
-  const sells = useMemo(
+  const allSells = useMemo(
     () => board.filter((r) => TIMING_SELL_STATES.includes(r.timing.timing)).sort((a, b) => b.timing.breakdown - a.timing.breakdown),
     [board],
   );
+  // Sector counts across ALL warnings (so a chip reads e.g. "Technology 4").
+  const sectorCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of allSells) if (r.sector) m.set(r.sector, (m.get(r.sector) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [allSells]);
+  const sells = useMemo(() => (sector ? allSells.filter((r) => r.sector === sector) : allSells), [allSells, sector]);
   const nBreakdown = sells.filter((r) => r.timing.timing === "breakdown").length;
   const nTrim = sells.filter((r) => r.timing.timing === "trim").length;
 
@@ -170,7 +178,7 @@ export function WarningView() {
           <code className="font-mono text-signal">python -m newsagg.technical</code>
           {t(" on the Mac.", " 后自动出现。")}
         </div>
-      ) : sells.length === 0 ? (
+      ) : allSells.length === 0 ? (
         <div className="rounded-2xl border p-8 text-center" style={{ borderColor: "rgba(72,199,142,0.35)", background: "linear-gradient(160deg, rgba(72,199,142,0.08), transparent)" }}>
           <div className="mb-1 font-disp text-[20px] font-bold" style={{ color: "#5fe3a1" }}>{t("All clear", "全部安全")}</div>
           <div className="text-[13px] text-muted">
@@ -193,13 +201,33 @@ export function WarningView() {
           </div>
 
           {/* tabs */}
-          <div className="mb-5 flex flex-wrap gap-2">
+          <div className="mb-4 flex flex-wrap gap-2">
             <Pill label={t("All Warnings", "全部预警")} count={sells.length} color="#ff8a5f" active={tab === "all"} onClick={() => setTab("all")} />
             <Pill label={t("Breakdown", "破位·减仓")} count={nBreakdown} color={SELL_COLOR.breakdown} active={tab === "breakdown"} onClick={() => setTab("breakdown")} />
             <Pill label={t("Trim", "减仓预警")} count={nTrim} color={SELL_COLOR.trim} active={tab === "trim"} onClick={() => setTab("trim")} />
           </div>
 
-          <div key={tab} className="view-in">
+          {/* sector filter — same as Buy Timing */}
+          <div className="mb-5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10.5px] text-muted2">{t("Sector:", "板块:")}</span>
+            <button
+              onClick={() => setSector(null)}
+              className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === null ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+            >
+              {t("All", "全部")} {allSells.length}
+            </button>
+            {sectorCounts.slice(0, 8).map(([sec, n]) => (
+              <button
+                key={sec}
+                onClick={() => setSector(sector === sec ? null : sec)}
+                className={`rounded-full border px-2.5 py-0.5 text-[12px] transition-colors ${sector === sec ? "border-signal/50 bg-signal/10 text-signal" : "border-line text-muted hover:text-text"}`}
+              >
+                {sectorLabel(sec, lang)} {n}
+              </button>
+            ))}
+          </div>
+
+          <div key={`${tab}-${sector ?? "all"}`} className="view-in">
             {rows.length === 0 ? (
               <div className="rounded-xl border border-dashed border-line2 bg-panel2 p-8 text-center text-[13px] text-muted">
                 {t("No names in this category right now.", "该分类当前没有票。")}
