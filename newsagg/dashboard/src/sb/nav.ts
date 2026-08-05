@@ -42,6 +42,17 @@ export const RANKING: NavStage = {
   hint: { en: "Tier-1/2 · conviction > 6", zh: "金/银档 · 语气 > 6" },
 };
 
+// The entry-timing layer — a buy-only Bollinger+MACD overlay on the ranked
+// names, answering "of the good companies, which is a buy right NOW". Sits after
+// Composite Rank as the funnel's final, actionable output node.
+export const TIMING: NavStage = {
+  key: "timing",
+  step: null,
+  en: "Buy Timing",
+  zh: "择时买点",
+  hint: { en: "Bollinger + MACD · buy points now", zh: "布林带 + MACD · 当前买点" },
+};
+
 // A standalone tool (not a funnel stage): backtest entry/exit points over the
 // price history and tune the rules.
 export const BACKTEST: NavStage = {

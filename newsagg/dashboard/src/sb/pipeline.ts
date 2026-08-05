@@ -3,7 +3,7 @@
 // today; heat / catalyst / conviction / technical are computed later and are
 // surfaced as "pending" in their views.
 
-import type { Catalyst, CatalystData, CatalystTPMN, CatalystTicker, ConvictionData, ConvictionTicker, HeatData, MarketCaps, SAData, TechnicalData, SectorData, SupplyChainData } from "../types";
+import type { Catalyst, CatalystData, CatalystTPMN, CatalystTicker, ConvictionData, ConvictionTicker, HeatData, MarketCaps, SAData, TechnicalData, TechTicker, TechTiming, SectorData, SupplyChainData } from "../types";
 
 // yfinance GICS sectors → short Chinese labels.
 export const SECTOR_CN: Record<string, string> = {
@@ -659,7 +659,6 @@ export function capLabel(cap: CapSize, lang: "en" | "zh"): string {
 // ── Bollinger+MACD entry-timing display ──────────────────────────────────────
 // Presentation for the timing state computed in newsagg.technical. `tone` maps
 // to the UI's color roles: green = a buy signal now, amber = wait, slate = idle.
-import type { TechTiming, TechTicker } from "../types";
 
 export const TIMING_META: Record<
   TechTiming["timing"],
@@ -681,6 +680,46 @@ export function timingLabel(state: TechTiming["timing"], lang: "en" | "zh"): str
 // data yet (so it sinks below anything that does).
 export function timingSortKey(tech: TechTicker | null | undefined): number {
   return tech?.timing ? tech.timing.score : -1;
+}
+
+// The states that are an ACTIONABLE buy right now (green badges) — used for the
+// funnel count and to order the Buy-Timing board.
+export const TIMING_BUY_STATES: TechTiming["timing"][] = ["strong_buy", "pullback_buy"];
+// Display order on the Buy-Timing board: buy signals first, idle last.
+export const TIMING_ORDER: TechTiming["timing"][] = [
+  "strong_buy",
+  "pullback_buy",
+  "oversold_watch",
+  "momentum",
+  "overheated",
+  "neutral",
+];
+
+export interface TimingRow {
+  ticker: string;
+  company: string;
+  sector: string;
+  tier: 1 | 2 | 3;
+  composite: number; // Shortlist composite strength, for context
+  timing: TechTiming;
+}
+
+// Join the Shortlist (the vetted, good companies) with their live entry-timing
+// so the Buy-Timing page can answer "which good name is a buy right now". Ordered
+// by timing score, then composite strength.
+export function buildTimingBoard(
+  shortlist: LeaderRow[],
+  technical: TechnicalData | null,
+): TimingRow[] {
+  if (!technical) return [];
+  const rows: TimingRow[] = [];
+  for (const r of shortlist) {
+    const tm = technical.tickers?.[r.ticker]?.timing;
+    if (!tm) continue;
+    rows.push({ ticker: r.ticker, company: r.company, sector: r.sector, tier: r.tier, composite: r.composite, timing: tm });
+  }
+  rows.sort((a, b) => b.timing.score - a.timing.score || b.composite - a.composite || a.ticker.localeCompare(b.ticker));
+  return rows;
 }
 
 // Focus List — step 2's synthesized output. A name earns a spot if it is

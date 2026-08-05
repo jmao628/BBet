@@ -1,6 +1,6 @@
 import { useStore } from "../store";
-import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, noDataSet, belowMinCap } from "./pipeline";
-import { OVERVIEW, FUNNEL, FOCUS, RANKING, BACKTEST, type NavStage } from "./nav";
+import { buildSeeds, buildScreen, buildRankings, buildFocus, buildCatalystRows, buildShortlist, buildConviction, buildConvictionRanking, buildTimingBoard, noDataSet, belowMinCap, TIMING_BUY_STATES } from "./pipeline";
+import { OVERVIEW, FUNNEL, FOCUS, RANKING, TIMING, BACKTEST, type NavStage } from "./nav";
 
 // Funnel counts. Seeds + heat-ignition are real; the rest show "—" until
 // their computations are wired.
@@ -51,6 +51,11 @@ function useCounts(): Record<string, number | null> {
   // Composite Rank = Tier-1/2 names past Conviction 6 (the synthesis universe).
   const rankingCount = conviction ? buildConvictionRanking(convRows).length : null;
 
+  // Buy Timing = vetted names that are an ACTIONABLE buy right now.
+  const timingCount = technical
+    ? buildTimingBoard(shortlist, technical).filter((r) => TIMING_BUY_STATES.includes(r.timing.timing)).length
+    : null;
+
   return {
     seeds: seeds.length,
     heat: heatCount,
@@ -60,6 +65,7 @@ function useCounts(): Record<string, number | null> {
     shortlist: shortlistCount,
     conviction: convictionCount,
     ranking: rankingCount,
+    timing: timingCount,
   };
 }
 
@@ -138,11 +144,17 @@ export function FunnelRail() {
               <NavRow stage={FOCUS} count={counts.focus} />
             </div>
           )}
-          {/* the Conviction-gate synthesis sits right after the Conviction stage */}
+          {/* the Conviction-gate synthesis + the final buy-timing layer sit right
+              after the Conviction stage */}
           {s.key === "conviction" && (
-            <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
-              <NavRow stage={RANKING} count={counts.ranking} />
-            </div>
+            <>
+              <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
+                <NavRow stage={RANKING} count={counts.ranking} />
+              </div>
+              <div className="relative bg-gradient-to-r from-signal/[0.06] to-transparent">
+                <NavRow stage={TIMING} count={counts.timing} />
+              </div>
+            </>
           )}
         </div>
       ))}
