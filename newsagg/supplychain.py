@@ -182,17 +182,20 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed completion; returns the concatenated output text. The gateway
-    requires stream=True and input as a role/content list."""
+    """One streamed chat.completions call; returns the concatenated text. The
+    gateway implements /chat/completions but NOT /responses, so we use chat
+    completions (no native web search — the model uses its own knowledge)."""
     parts: list[str] = []
-    stream = client.responses.create(
+    stream = client.chat.completions.create(
         model=model,
-        input=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": prompt}],
         stream=True,
     )
-    for ev in stream:
-        if getattr(ev, "type", "") == "response.output_text.delta":
-            parts.append(ev.delta)
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                parts.append(delta)
     return "".join(parts)
 
 

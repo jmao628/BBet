@@ -341,20 +341,24 @@ def _clean(parsed: dict, today: date) -> list[dict]:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed web-search call; returns the concatenated output text.
+    """One streamed chat.completions call; returns the concatenated text.
 
-    The gateway requires stream=True; we collect output_text deltas.
+    The gateway implements /chat/completions but NOT /responses (the Responses
+    API 500s for every model there), so we use chat completions. That means no
+    native web_search tool — the model answers from its own knowledge, so dates
+    and sources are only as current as its training cutoff (see the module note).
     """
     parts: list[str] = []
-    stream = client.responses.create(
+    stream = client.chat.completions.create(
         model=model,
-        input=[{"role": "user", "content": prompt}],
-        tools=[{"type": "web_search"}],
+        messages=[{"role": "user", "content": prompt}],
         stream=True,
     )
-    for ev in stream:
-        if getattr(ev, "type", "") == "response.output_text.delta":
-            parts.append(ev.delta)
+    for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                parts.append(delta)
     return "".join(parts)
 
 
