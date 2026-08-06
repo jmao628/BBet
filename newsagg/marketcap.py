@@ -20,6 +20,31 @@ logger = logging.getLogger("newsagg.marketcap")
 
 MARKETCAP_FILE = "marketcaps.json"
 
+# A persistent skip-list of tickers Yahoo can't price (delisted / OTC / foreign
+# `.CA` names). They never resolve, so re-fetching them every run is pure waste;
+# once a run confirms a ticker has no data it's parked here and skipped next time.
+# `--recheck` (in the price jobs) ignores this and re-validates the whole
+# universe, so a name that later relists comes back.
+NO_PRICE_FILE = "no_price.json"
+
+
+def load_dead_tickers(output_dir: Path) -> set[str]:
+    """Tickers previously confirmed to have no Yahoo price data."""
+    try:
+        raw = json.loads((output_dir / NO_PRICE_FILE).read_text())
+        return {str(t).upper() for t in (raw.get("tickers") or [])}
+    except (OSError, ValueError):
+        return set()
+
+
+def save_dead_tickers(output_dir: Path, dead: set[str]) -> None:
+    from datetime import datetime, timezone
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / NO_PRICE_FILE).write_text(
+        json.dumps({"tickers": sorted(dead), "updated_at": datetime.now(timezone.utc).isoformat()})
+    )
+
 
 def seed_names(output_dir: Path) -> dict[str, str]:
     """Every seed ticker → company name — the FULL universe the dashboard shows:
@@ -97,14 +122,21 @@ def fetch_caps(tickers: list[str], workers: int = 10) -> dict[str, int]:
 def main() -> int:
     p = argparse.ArgumentParser(description="Fetch seed-universe market caps (yfinance)")
     p.add_argument("--config", default=None)
+    p.add_argument("--recheck", action="store_true", help="ignore the no-price skip-list and re-fetch the whole universe (re-validates relisted names)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
 
     settings = load_settings(args.config)
-    tickers = seed_tickers(settings.output_dir)
-    if not tickers:
+    universe = seed_tickers(settings.output_dir)
+    if not universe:
         logger.warning("no seed tickers found (run the SA scrape first)")
         return 1
+
+    # Skip tickers Yahoo has already told us it can't price (delisted/OTC/.CA).
+    dead = set() if args.recheck else load_dead_tickers(settings.output_dir)
+    tickers = [t for t in universe if t not in dead]
+    if dead:
+        logger.info("skipping %d known no-price tickers (--recheck to re-validate)", len(universe) - len(tickers))
     logger.info("fetching market caps for %d tickers…", len(tickers))
     caps = fetch_caps(tickers)
     out_path = settings.output_dir / MARKETCAP_FILE

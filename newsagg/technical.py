@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from newsagg.config import load_settings
-from newsagg.marketcap import seed_tickers
+from newsagg.marketcap import seed_tickers, load_dead_tickers, save_dead_tickers
 
 logger = logging.getLogger("newsagg.technical")
 
@@ -950,17 +950,37 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Compute price-volume attention + technical gauge (yfinance)")
     ap.add_argument("--config", default=None)
     ap.add_argument("--tickers", default=None, help="comma-separated override (e.g. FORM,IREN)")
+    ap.add_argument("--recheck", action="store_true", help="ignore the no-price skip-list and re-fetch the whole universe (re-validates relisted names)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
 
     settings = load_settings(args.config)
-    if args.tickers:
-        tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    manual = bool(args.tickers)
+    if manual:
+        universe = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     else:
-        tickers = seed_tickers(settings.output_dir)
-    if not tickers:
+        universe = seed_tickers(settings.output_dir)
+    if not universe:
         logger.warning("no tickers (run the SA scrape first, or pass --tickers)")
         return 1
+
+    # Skip tickers Yahoo has already confirmed it can't price (delisted/OTC/.CA),
+    # so a full run doesn't burn minutes re-failing hundreds of dead names. Only
+    # on the full-universe pass (a manual --tickers run fetches exactly what's asked).
+    dead = load_dead_tickers(settings.output_dir)
+    # First run after this feature ships: seed the skip-list from the last run's
+    # no_data so the very next run is already fast (no need to re-learn the dead).
+    if not dead and not manual:
+        try:
+            prev = json.loads((settings.output_dir / TECHNICAL_FILE).read_text())
+            dead = {str(t).upper() for t in (prev.get("no_data") or [])}
+        except (OSError, ValueError):
+            dead = set()
+    if not manual and not args.recheck and dead:
+        tickers = [t for t in universe if t not in dead]
+        logger.info("skipping %d known no-price tickers (--recheck to re-validate)", len(universe) - len(tickers))
+    else:
+        tickers = universe
 
     logger.info("computing technicals for %d tickers…", len(tickers))
     tech, history = build_technical(tickers)
@@ -976,10 +996,9 @@ def main() -> int:
             )
         return 1
 
-    # Tickers we ACTUALLY tried this run but got nothing for = confirmed no-data
-    # (OTC / foreign ADRs). The dashboard hides only these — a newly-added seed
-    # that simply hasn't been fetched yet is NOT in this list, so it still shows.
-    no_data = sorted(set(tickers) - set(tech.keys()))
+    # no-data over the FULL universe — the skipped dead names stay hidden in the
+    # UI even though we didn't re-fetch them this run.
+    no_data = sorted(set(universe) - set(tech.keys()))
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "tickers": tech,
@@ -987,6 +1006,16 @@ def main() -> int:
     }
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload))
+
+    # Update the persistent no-price skip-list (full-universe runs only — this is
+    # the authoritative price pass). A ticker we FETCHED but got nothing for is
+    # parked; --recheck rebuilds the list from scratch so relisted names return.
+    if not manual:
+        newly_dead = set(tickers) - set(tech.keys())
+        new_dead = (newly_dead if args.recheck else (dead | newly_dead)) & set(universe)
+        save_dead_tickers(settings.output_dir, new_dead)
+        added = len(newly_dead - dead)
+        logger.info("no-price skip-list: %d tickers (%+d this run)", len(new_dead), added)
 
     # Dated 1y close history for the tracker (return-since-Day-1). Merge with any
     # existing file so a name that failed this run keeps its prior history.
