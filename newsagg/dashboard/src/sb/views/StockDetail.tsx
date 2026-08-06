@@ -1067,17 +1067,30 @@ export function StockDetail() {
     if (!ticker) return;
     setLoading(true);
     setLiveErr(false);
-    try {
-      const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}&t=${Date.now()}`);
-      if (!res.ok) throw new Error(String(res.status));
-      const j = await res.json();
-      if (j && typeof j.price === "number") setLive(j as TechTicker & { generated_at?: string });
-      else throw new Error("no data");
-    } catch {
-      setLiveErr(true);
-    } finally {
-      setLoading(false);
+    // The first on-demand yfinance pull is often slow/cold and can drop once
+    // (proxy hiccup) — which left the panel stuck on the stale daily close until
+    // you clicked refresh. Retry a couple of times so the AUTO-load succeeds.
+    const attempt = async (): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}&t=${Date.now()}`);
+        if (!res.ok) throw new Error(String(res.status));
+        const j = await res.json();
+        if (j && typeof j.price === "number") {
+          setLive(j as TechTicker & { generated_at?: string });
+          return true;
+        }
+      } catch {
+        /* fall through to retry */
+      }
+      return false;
+    };
+    let ok = false;
+    for (let i = 0; i < 3 && !ok; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 1500 * i));
+      ok = await attempt();
     }
+    setLiveErr(!ok);
+    setLoading(false);
   }, [ticker]);
 
   useEffect(() => {
