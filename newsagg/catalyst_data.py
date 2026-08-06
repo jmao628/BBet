@@ -66,13 +66,17 @@ def _classify(title: str) -> str:
 def _next_earnings(tk) -> str | None:
     """Next FUTURE earnings date (ISO) from yfinance — tolerant of the several
     shapes yfinance has used across versions (earnings_dates DataFrame, or the
-    calendar dict/DataFrame)."""
+    calendar dict/DataFrame). Never raises (needs lxml; degrades to None)."""
     today = date.today()
     # 1) earnings_dates: a DataFrame indexed by timestamp (past + a few future).
+    ed = None
     try:
         ed = tk.get_earnings_dates(limit=12)
     except Exception:  # noqa: BLE001
-        ed = getattr(tk, "earnings_dates", None)
+        try:
+            ed = tk.earnings_dates
+        except Exception:  # noqa: BLE001
+            ed = None
     try:
         if ed is not None and hasattr(ed, "index") and len(ed.index):
             future = []

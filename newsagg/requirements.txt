@@ -12,6 +12,8 @@ playwright>=1.44
 
 # Market caps for cap-size gating (big caps bypass the heat gate).
 yfinance>=0.2.40
+# yfinance needs lxml to parse the earnings-calendar / news HTML.
+lxml>=5.0
 
 # LLM steps (supply-chain map + Stage-3 catalyst discovery) call OpenAI.
 # Needs OPENAI_API_KEY in the environment; those steps are skipped without it.
