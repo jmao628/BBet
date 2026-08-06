@@ -73,8 +73,10 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         try:
             from newsagg import technical as tech
 
-            bars = tech._fetch_bars(ticker)
-            out = tech.compute_ticker(bars, tech.TechParams()) if bars else None
+            # live_ticker splices the reliable fast_info price onto the series, so
+            # the price + day's % are stable (not derived from a flickering
+            # intraday tail bar) and every indicator matches the shown price.
+            out = tech.live_ticker(ticker)
         except Exception as exc:  # noqa: BLE001
             self._send_json(502, {"error": f"fetch failed: {exc}"})
             return

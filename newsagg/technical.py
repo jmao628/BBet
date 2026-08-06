@@ -913,6 +913,61 @@ def _fetch_bars(ticker: str) -> dict | None:
     return {"highs": highs, "lows": lows, "closes": closes, "volumes": volumes, "dates": dates}
 
 
+def _fast_quote(ticker: str) -> tuple[float, float] | None:
+    """(last_price, previous_close) from yfinance fast_info — a stable, purpose-
+    built live price + official prior close. Unlike the tail of a 1y daily
+    history (whose last bar flickers intraday — sometimes today's partial print,
+    sometimes not), these two fields are consistent, so the header price and the
+    day's % never jump around."""
+    import yfinance as yf
+
+    try:
+        fi = yf.Ticker(ticker.replace(".", "-")).fast_info
+        lp = fi.last_price
+        pc = fi.previous_close
+        lp = float(lp) if lp is not None else 0.0
+        pc = float(pc) if pc is not None else 0.0
+        if lp > 0 and pc > 0:
+            return lp, pc
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def live_ticker(ticker: str, p: TechParams | None = None) -> dict | None:
+    """Technicals computed against the LIVE price. Splices the reliable fast_info
+    price onto the daily series as the provisional latest close, so the header
+    price, the day's %, %B, and every timing signal are all consistent and
+    current — instead of reading an unreliable intraday tail bar. Falls back to
+    the plain daily computation when fast_info is unavailable."""
+    p = p or TechParams()
+    bars = _fetch_bars(ticker)
+    if not bars or len(bars["closes"]) < 30:
+        return None
+    fq = _fast_quote(ticker)
+    if fq:
+        live_price, prev_close = fq
+        closes = bars["closes"]
+        # Last daily bar == the official prior close → series ends yesterday, so
+        # APPEND the live price as today. Else the last bar is today's partial →
+        # OVERWRITE it with the live price. Either way the series ends at `live`.
+        if abs(closes[-1] - prev_close) <= max(1e-4, prev_close * 1e-5):
+            bars["highs"].append(max(live_price, closes[-1]))
+            bars["lows"].append(min(live_price, closes[-1]))
+            bars["closes"].append(live_price)
+            bars["volumes"].append(bars["volumes"][-1] if bars["volumes"] else 0.0)
+        else:
+            bars["closes"][-1] = live_price
+            bars["highs"][-1] = max(bars["highs"][-1], live_price)
+            bars["lows"][-1] = min(bars["lows"][-1], live_price)
+        out = compute_ticker(bars, p)
+        if out:
+            out["price"] = round(live_price, 2)
+            out["change_pct"] = round(100 * (live_price - prev_close) / prev_close, 2)
+        return out
+    return compute_ticker(bars, p)
+
+
 def build_technical(tickers: list[str], p: TechParams | None = None, workers: int = 8) -> tuple[dict, dict]:
     """Returns (technicals, price_history) — the second is dated 1y closes per
     ticker for the tracker (return-since-Day-1 for any date)."""
