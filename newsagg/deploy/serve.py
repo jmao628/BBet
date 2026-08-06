@@ -77,15 +77,39 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
             # the price + day's % are stable (not derived from a flickering
             # intraday tail bar) and every indicator matches the shown price.
             out = tech.live_ticker(ticker)
-        except Exception as exc:  # noqa: BLE001
-            self._send_json(502, {"error": f"fetch failed: {exc}"})
-            return
+        except Exception:  # noqa: BLE001
+            out = None
+
+        # Contamination guard: yfinance-through-a-proxy occasionally returns
+        # ANOTHER ticker's data under concurrency (e.g. a $131 name coming back as
+        # $5.72). If the fresh price is wildly off the stored daily close, it's a
+        # wrong-ticker response — discard it and serve the trusted stored row.
+        stored = self._stored_tech(ticker)
+        if out and out.get("price") and stored and stored.get("price"):
+            base = stored["price"]
+            if base > 0 and abs(out["price"] - base) / base > 0.40:
+                out = None
         if not out:
-            self._send_json(404, {"error": f"no data for {ticker}"})
-            return
+            if stored and stored.get("price"):
+                out = dict(stored)
+                out["from_snapshot"] = True  # fresh fetch failed/contaminated → trusted snapshot
+            else:
+                self._send_json(404, {"error": f"no data for {ticker}"})
+                return
         out["ticker"] = ticker
         out["generated_at"] = datetime.now(timezone.utc).isoformat()
         self._send_json(200, out)
+
+    def _stored_tech(self, ticker: str) -> dict | None:
+        """The last daily row for a ticker from technical_latest.json — a trusted
+        magnitude anchor for the contamination guard + a fallback when the live
+        fetch fails."""
+        try:
+            path = os.path.join(self.directory, "data", "newsagg", "technical_latest.json")
+            with open(path, encoding="utf-8") as f:
+                return json.load(f).get("tickers", {}).get(ticker)
+        except (OSError, ValueError):
+            return None
 
     def _serve_quotes(self) -> None:
         """Batch today's-move for many tickers in ONE yfinance call, so the

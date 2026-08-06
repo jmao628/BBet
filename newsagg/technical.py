@@ -944,10 +944,15 @@ def live_ticker(ticker: str, p: TechParams | None = None) -> dict | None:
     bars = _fetch_bars(ticker)
     if not bars or len(bars["closes"]) < 30:
         return None
+    closes = bars["closes"]
+    # Median of the last 20 closes = a robust magnitude anchor for this stock.
+    _recent = sorted(closes[-20:])
+    anchor = _recent[len(_recent) // 2]
     fq = _fast_quote(ticker)
+    if fq and anchor > 0 and abs(fq[0] - anchor) / anchor > 0.35:
+        fq = None  # fast_info returned a wrong-ticker price → fall back to daily bars
     if fq:
         live_price, prev_close = fq
-        closes = bars["closes"]
         # Last daily bar == the official prior close → series ends yesterday, so
         # APPEND the live price as today. Else the last bar is today's partial →
         # OVERWRITE it with the live price. Either way the series ends at `live`.
