@@ -141,11 +141,18 @@ def _news_items(tk, limit: int = 8) -> list[dict]:
     return out
 
 
-def _build_one(ticker: str, today: date) -> dict | None:
+def _build_one(ticker: str, company: str, today: date) -> dict | None:
     import yfinance as yf
 
     tk = yf.Ticker(ticker.replace(".", "-"))
     cats: list[dict] = []
+    # Relevance tokens — a headline that names the ticker or the company is about
+    # THIS company; tangential market news (that yfinance sometimes returns) isn't.
+    rel_tokens = {ticker.lower()}
+    if company:
+        first = company.lower().split()[0]
+        if len(first) >= 3 and first not in ("the", "inc", "inc.", "corp"):
+            rel_tokens.add(first)
 
     # Forward catalyst: the next earnings date (scheduled → high probability).
     ed = _next_earnings(tk)
@@ -175,9 +182,11 @@ def _build_one(ticker: str, today: date) -> dict | None:
                 days_ago = (today - date.fromisoformat(n["published"][:10])).days
             except ValueError:
                 days_ago = None
-        # A recency-decayed 0-10 so fresh disclosures rank above stale ones.
+        # A recency-decayed 0-10 so fresh disclosures rank above stale ones,
+        # down-weighted when the headline doesn't actually name this company.
         recency = max(0.0, 1 - (days_ago or 30) / 30) if days_ago is not None else 0.3
-        score = round((3.0 + 4.0 * recency), 1)  # 3.0 (old) .. 7.0 (today)
+        relevant = any(tok in n["title"].lower() for tok in rel_tokens)
+        score = round((3.0 + 4.0 * recency) * (1.0 if relevant else 0.5), 1)
         cats.append({
             "type": typ, "title": n["title"], "cls": "news",
             "event_date": n.get("published"), "window_days": None,
@@ -185,11 +194,16 @@ def _build_one(ticker: str, today: date) -> dict | None:
             "summary": f"{n.get('publisher') or 'News'} — recent disclosure (keyword-typed, unscored by impact).",
             "thesis": "Recent disclosure", "evidence": f"{n.get('publisher') or 'news'} {n.get('published') or ''}".strip(),
             "tpmn": {"T": 0.0, "P": 0, "M": 0, "N": 0, "days": days_ago, "cls": "news", "score": score, "type": typ},
+            "_rel": relevant,
         })
 
     if not cats:
         return None
-    cats.sort(key=lambda c: c["tpmn"]["score"], reverse=True)
+    # Forward catalysts (the next earnings) rank ABOVE recent news; within each,
+    # by score. So the real dated catalyst is always on top, news is context.
+    cats.sort(key=lambda c: (c["cls"] != "news", c["tpmn"]["score"]), reverse=True)
+    for c in cats:
+        c.pop("_rel", None)
     return {
         "catalysts": cats[:8],
         "score": cats[0]["tpmn"]["score"],
@@ -200,14 +214,15 @@ def _build_one(ticker: str, today: date) -> dict | None:
     }
 
 
-def build(tickers: list[str], workers: int = 8) -> dict[str, dict]:
+def build(tickers: list[str], names: dict[str, str] | None = None, workers: int = 8) -> dict[str, dict]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     today = date.today()
+    names = names or {}
 
     def one(t: str):
         try:
-            return t, _build_one(t, today)
+            return t, _build_one(t, names.get(t, ""), today)
         except Exception as exc:  # noqa: BLE001
             logger.warning("  %s: %s", t, exc)
             return t, None
@@ -246,8 +261,11 @@ def main() -> int:
         logger.warning("no tickers (run the SA scrape first, or pass --tickers)")
         return 1
 
+    from newsagg.marketcap import seed_names
+
+    names = seed_names(settings.output_dir)
     logger.info("building no-LLM catalyst signals for %d tickers…", len(tickers))
-    data = build(tickers)
+    data = build(tickers, names=names)
     if not data:
         logger.warning("no signals resolved (network?); keeping existing file")
         return 1
