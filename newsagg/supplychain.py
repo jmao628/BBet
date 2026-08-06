@@ -182,21 +182,14 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed chat.completions call; returns the concatenated text. The
-    gateway implements /chat/completions but NOT /responses, so we use chat
-    completions (no native web search — the model uses its own knowledge)."""
-    parts: list[str] = []
-    stream = client.chat.completions.create(
+    """One NON-streamed chat.completions call; returns the text. This gateway
+    only serves plain non-streamed /chat/completions (both /responses and the
+    streaming path 500), so we use that (no web search — model's own knowledge)."""
+    resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        stream=True,
     )
-    for chunk in stream:
-        if chunk.choices:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                parts.append(delta)
-    return "".join(parts)
+    return (resp.choices[0].message.content or "") if resp.choices else ""
 
 
 def _clean_edges(raw: list) -> list[dict]:

@@ -341,25 +341,19 @@ def _clean(parsed: dict, today: date) -> list[dict]:
 
 
 def _complete(client, model: str, prompt: str) -> str:
-    """One streamed chat.completions call; returns the concatenated text.
+    """One NON-streamed chat.completions call; returns the text.
 
-    The gateway implements /chat/completions but NOT /responses (the Responses
-    API 500s for every model there), so we use chat completions. That means no
-    native web_search tool — the model answers from its own knowledge, so dates
-    and sources are only as current as its training cutoff (see the module note).
+    This gateway implements /chat/completions but NOT /responses (the Responses
+    API 500s for every model), AND its STREAMING path also 500s — only the plain
+    non-streamed /chat/completions works. So we use that. No native web_search
+    tool means the model answers from its own knowledge, so dates and sources are
+    only as current as its training cutoff (see the module note).
     """
-    parts: list[str] = []
-    stream = client.chat.completions.create(
+    resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        stream=True,
     )
-    for chunk in stream:
-        if chunk.choices:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                parts.append(delta)
-    return "".join(parts)
+    return (resp.choices[0].message.content or "") if resp.choices else ""
 
 
 def _fetch_one(client, ticker: str, name: str, today: date, model: str, sector: str = "") -> dict | None:
