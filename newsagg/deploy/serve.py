@@ -25,6 +25,7 @@ import functools
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -70,15 +71,23 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         if not ticker:
             self._send_json(400, {"error": "missing ticker"})
             return
-        try:
-            from newsagg import technical as tech
+        from newsagg import technical as tech
 
-            # live_ticker splices the reliable fast_info price onto the series, so
-            # the price + day's % are stable (not derived from a flickering
-            # intraday tail bar) and every indicator matches the shown price.
-            out = tech.live_ticker(ticker)
-        except Exception:  # noqa: BLE001
-            out = None
+        # live_ticker splices the reliable fast_info price onto the series, so the
+        # price + day's % are stable (not from a flickering intraday tail bar).
+        # The yfinance fetch through the VPN proxy fails intermittently, though —
+        # and a single failure falls back to the STALE daily snapshot, making the
+        # day's % flip between the live and the snapshot value. Retry a few times
+        # so a transient miss doesn't surface the stale %.
+        out = None
+        for i in range(4):
+            try:
+                out = tech.live_ticker(ticker)
+            except Exception:  # noqa: BLE001
+                out = None
+            if out and out.get("price"):
+                break
+            time.sleep(0.4 * (i + 1))
 
         # Contamination guard: yfinance-through-a-proxy occasionally returns
         # ANOTHER ticker's data under concurrency (e.g. a $131 name coming back as
