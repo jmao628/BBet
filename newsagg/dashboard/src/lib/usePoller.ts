@@ -11,6 +11,7 @@ const TECH_URL = "/data/newsagg/technical_latest.json";
 const SECTOR_URL = "/data/newsagg/sectors.json";
 const SUPPLY_URL = "/data/newsagg/supplychain.json";
 const CATALYST_URL = "/data/newsagg/catalyst.json";
+const CATALYST_DATA_URL = "/data/newsagg/catalyst_data.json";
 const CONVICTION_URL = "/data/newsagg/conviction.json";
 const TRACK_URL = "/data/newsagg/price_track.json";
 const HISTORY_URL = "/data/newsagg/price_history.json";
@@ -26,6 +27,7 @@ export function usePoller() {
   const setSectors = useStore((s) => s.setSectors);
   const setSupplychain = useStore((s) => s.setSupplychain);
   const setCatalyst = useStore((s) => s.setCatalyst);
+  const setCatalystData = useStore((s) => s.setCatalystData);
   const setConviction = useStore((s) => s.setConviction);
   const setTrack = useStore((s) => s.setTrack);
   const setHistory = useStore((s) => s.setHistory);
@@ -93,6 +95,12 @@ export function usePoller() {
         /* ignore */
       }
       try {
+        const cdres = await fetch(`${CATALYST_DATA_URL}?t=${Date.now()}`);
+        if (alive) setCatalystData(cdres.ok ? ((await cdres.json()) as CatalystData) : null);
+      } catch {
+        /* ignore */
+      }
+      try {
         const cvres = await fetch(`${CONVICTION_URL}?t=${Date.now()}`);
         if (alive) setConviction(cvres.ok ? ((await cvres.json()) as ConvictionData) : null);
       } catch {
@@ -130,5 +138,5 @@ export function usePoller() {
       alive = false;
       clearInterval(id);
     };
-  }, [setData, setHeat, setTechnical, setSectors, setSupplychain, setCatalyst, setConviction, setTrack, setHistory, setMarketCaps, setHealth, setStatus]);
+  }, [setData, setHeat, setTechnical, setSectors, setSupplychain, setCatalyst, setCatalystData, setConviction, setTrack, setHistory, setMarketCaps, setHealth, setStatus]);
 }

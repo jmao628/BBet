@@ -301,6 +301,70 @@ function CatItem({ c, lang, t }: { c: Catalyst; lang: Lang; t: (en: string, zh: 
   );
 }
 
+// No-LLM live signals: the next earnings date (a dated forward catalyst) + the
+// company's recent news headlines (keyword-typed, each linked to its source).
+// Always current — it never needs the LLM gateway.
+function LiveSignals({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
+  const items = cat.catalysts || [];
+  const forward = items.filter((c) => c.tpmn?.cls !== "news");
+  const news = items.filter((c) => c.tpmn?.cls === "news");
+  if (!forward.length && !news.length) return null;
+  const earn = forward[0];
+  let days: number | null = null;
+  if (earn?.event_date) {
+    const d = Math.round((new Date(earn.event_date).getTime() - Date.now()) / 86400000);
+    days = Number.isFinite(d) ? d : null;
+  }
+  return (
+    <div className="rounded-xl border border-line bg-panel2 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[13px] font-semibold">{t("Latest Signals · no-LLM", "最新信号 · 无 LLM")}</div>
+        <div className="text-[10.5px] text-muted2">{t("earnings date + recent news (yfinance)", "财报日 + 最新新闻(yfinance)")}</div>
+      </div>
+
+      {earn?.event_date && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-line2 bg-inset px-3 py-2">
+          <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: "#0b0f14", background: "#5fb0e8" }}>{t("Earnings", "财报")}</span>
+          <span className="font-mono text-[13px] text-text">{earn.event_date}</span>
+          {days != null && (
+            <span className="font-mono text-[12px]" style={{ color: days <= 14 && days >= 0 ? "#48c78e" : "#8aa0b2" }}>
+              {days >= 0 ? t(`in ${days}d`, `${days} 天后`) : t("passed", "已过")}
+            </span>
+          )}
+          <a href={earn.source_url} target="_blank" rel="noreferrer" className="ml-auto text-[11px] text-signal hover:underline">{t("source ↗", "来源 ↗")}</a>
+        </div>
+      )}
+
+      {news.length > 0 && (
+        <div className="space-y-1.5">
+          {news.slice(0, 6).map((n, i) => (
+            <a
+              key={i}
+              href={n.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="group flex items-start gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-white/[0.03]"
+            >
+              <span className="mt-[2px] rounded px-1 py-[1px] text-[8.5px] font-semibold uppercase tracking-wide text-muted2" style={{ border: "1px solid var(--line2,#2b3a48)" }}>
+                {catalystTypeLabel(n.type, lang)}
+              </span>
+              <span className="min-w-0 flex-1 text-[11.5px] leading-snug text-muted group-hover:text-text">{n.title}</span>
+              <span className="flex-none font-mono text-[9.5px] text-muted2">{n.event_date || ""}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 text-[10.5px] leading-relaxed text-muted2">
+        {t(
+          "Raw signals from free feeds (no LLM): the scheduled earnings date, plus recent headlines keyword-typed by kind. It does NOT judge magnitude or sector impact — read the sources.",
+          "免费数据源的原始信号(无 LLM):已排定的财报日 + 最新新闻(按关键词粗分类)。它不判断量级/板块影响——点进来源自己读。",
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Full catalyst record for a ticker: an animated score ring, a base+depth
 // composition bar, and every catalyst laid out in detail.
 function CatBreakdown({ cat, lang, t }: { cat: CatalystTicker; lang: Lang; t: (en: string, zh: string) => string }) {
@@ -1050,6 +1114,7 @@ export function StockDetail() {
   const sectors = useStore((s) => s.sectors);
   const supplychain = useStore((s) => s.supplychain);
   const catalyst = useStore((s) => s.catalyst);
+  const catalystData = useStore((s) => s.catalystData);
   const conviction = useStore((s) => s.conviction);
   const marketCaps = useStore((s) => s.marketCaps);
   const lang = useStore((s) => s.lang);
@@ -1283,6 +1348,10 @@ export function StockDetail() {
 
           {catalyst?.[ticker] && catalyst[ticker].catalysts.length > 0 && (
             <CatBreakdown cat={catalyst[ticker]} lang={lang} t={t} />
+          )}
+
+          {catalystData?.[ticker] && catalystData[ticker].catalysts.length > 0 && (
+            <LiveSignals cat={catalystData[ticker]} lang={lang} t={t} />
           )}
 
           {shortlistRow && <ShortlistBreakdown row={shortlistRow} lang={lang} t={t} />}

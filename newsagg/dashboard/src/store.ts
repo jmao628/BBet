@@ -25,6 +25,7 @@ interface DashboardState {
   sectors: SectorData | null;
   supplychain: SupplyChainData | null;
   catalyst: CatalystData | null;
+  catalystData: CatalystData | null; // no-LLM signals (earnings date + recent news)
   conviction: ConvictionData | null;
   track: PriceTrack | null;
   history: PriceTrack | null; // dated 1y closes per ticker (tracker)
@@ -42,6 +43,7 @@ interface DashboardState {
   setSectors: (s: SectorData | null) => void;
   setSupplychain: (s: SupplyChainData | null) => void;
   setCatalyst: (c: CatalystData | null) => void;
+  setCatalystData: (c: CatalystData | null) => void;
   setConviction: (c: ConvictionData | null) => void;
   setTrack: (t: PriceTrack | null) => void;
   setHistory: (h: PriceTrack | null) => void;
@@ -62,6 +64,7 @@ export const useStore = create<DashboardState>((set) => ({
   sectors: null,
   supplychain: null,
   catalyst: null,
+  catalystData: null,
   conviction: null,
   track: null,
   history: null,
@@ -79,6 +82,7 @@ export const useStore = create<DashboardState>((set) => ({
   setSectors: (s) => set({ sectors: s }),
   setSupplychain: (s) => set({ supplychain: s }),
   setCatalyst: (c) => set({ catalyst: c }),
+  setCatalystData: (c) => set({ catalystData: c }),
   setConviction: (c) => set({ conviction: c }),
   setTrack: (t) => set({ track: t }),
   setHistory: (h) => set({ history: h }),
