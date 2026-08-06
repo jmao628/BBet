@@ -23,7 +23,7 @@ import logging
 from pathlib import Path
 
 from newsagg.config import load_settings
-from newsagg.marketcap import seed_tickers
+from newsagg.marketcap import seed_tickers, load_dead_tickers
 
 logger = logging.getLogger("newsagg.sectors")
 
@@ -105,6 +105,7 @@ def main() -> int:
     ap.add_argument("--config", default=None)
     ap.add_argument("--tickers", default=None, help="comma-separated override")
     ap.add_argument("--refresh", action="store_true", help="re-fetch all, ignore cache")
+    ap.add_argument("--recheck", action="store_true", help="ignore the no-price skip-list and try the whole universe")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s | %(message)s")
 
@@ -116,6 +117,13 @@ def main() -> int:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     else:
         tickers = seed_tickers(settings.output_dir)
+        # Skip tickers Yahoo can't price (delisted/OTC/.CA) — same dead-list the
+        # price jobs maintain, so sectors doesn't re-404 hundreds of them.
+        dead = set() if args.recheck else load_dead_tickers(settings.output_dir)
+        if dead:
+            before = len(tickers)
+            tickers = [t for t in tickers if t not in dead]
+            logger.info("skipping %d known no-price tickers (--recheck to re-validate)", before - len(tickers))
     if not tickers:
         logger.warning("no tickers (run the SA scrape first, or pass --tickers)")
         return 1
