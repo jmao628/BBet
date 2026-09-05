@@ -131,6 +131,38 @@ function t2(lang: "en" | "zh", en: string, zh: string) {
   return lang === "zh" ? zh : en;
 }
 
+// True only during the US regular trading session (Mon–Fri 09:30–16:00
+// America/New_York). The live batch move is only meaningful while the market is
+// actually trading — that's a genuine intraday move. OUTSIDE the session (nights,
+// weekends), the daily snapshot's `change_pct` already holds the last settled
+// session's move: stable, and matching what a finance site shows for the day. So
+// we only overlay live moves during the session; otherwise the settled bar wins,
+// which stops the board mixing days (some chips live, some snapshot) and stops
+// the number drifting after the close.
+function usMarketOpen(now: Date = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const get = (typ: string) => parts.find((p) => p.type === typ)?.value ?? "";
+  const wd = get("weekday");
+  if (wd === "Sat" || wd === "Sun") return false;
+  let hh = parseInt(get("hour"), 10);
+  if (hh === 24) hh = 0; // hour12:false can emit "24" at midnight
+  const mins = hh * 60 + parseInt(get("minute"), 10);
+  return mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+// Weekend in New York? Friday's close is the latest completed session, so the
+// snapshot isn't "stale" over a weekend even though it's > a day old.
+function nyWeekend(now: Date = new Date()): boolean {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(now);
+  return wd === "Sat" || wd === "Sun";
+}
+
 function MoverRow({
   rank,
   m,
@@ -236,6 +268,12 @@ export function OverviewView() {
     if (!sbKey) return;
     let alive = true;
     const pull = () => {
+      // Off-hours: the settled daily bar (change_pct) is the latest move — don't
+      // overlay a re-fetched number that would drift or disagree between chips.
+      if (!usMarketOpen()) {
+        if (alive) setLive(null);
+        return;
+      }
       fetch(`/api/quotes?tickers=${encodeURIComponent(sbKey)}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
@@ -321,7 +359,7 @@ export function OverviewView() {
               (() => {
                 const g = technical?.generated_at ? new Date(technical.generated_at) : null;
                 if (!g) return null;
-                const stale = Date.now() - g.getTime() > 30 * 3600 * 1000; // prices should refresh daily
+                const stale = !nyWeekend() && Date.now() - g.getTime() > 30 * 3600 * 1000; // prices should refresh daily (Fri data isn't stale over a weekend)
                 const d = g.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
                 return (
                   <span
