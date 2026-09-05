@@ -1188,7 +1188,16 @@ export interface ConvictionRow {
 }
 
 // Per-sector selection: all Tier-1 + top-N Tier-2 by composite (mirrors _read_targets).
-function selectConvictionTargets(rows: LeaderRow[]): LeaderRow[] {
+//
+// PLUS: any survivor that ALREADY has a real conviction read (conv.ok) is kept no
+// matter its current tier. The conviction.json read is expensive and only runs
+// occasionally, so the technical tiers drift underneath it between runs — a name
+// the LLM scored in the last read can slip to Tier 3 on fresh price data and
+// vanish from the tier-gated selection, leaving the page showing only the newly
+// promoted names the LLM never read (all "unsourced" 0/10 cards). Anchoring on
+// the real reads keeps those genuine scores on the page until the next read
+// re-aligns the tiers.
+function selectConvictionTargets(rows: LeaderRow[], conviction: ConvictionData | null): LeaderRow[] {
   const bySector = new Map<string, LeaderRow[]>();
   for (const r of rows) {
     if (r.tier > 2) continue;
@@ -1197,16 +1206,32 @@ function selectConvictionTargets(rows: LeaderRow[]): LeaderRow[] {
     bySector.set(r.sector, arr);
   }
   const selected: LeaderRow[] = [];
+  const picked = new Set<string>();
+  const take = (r: LeaderRow) => {
+    if (picked.has(r.ticker)) return;
+    picked.add(r.ticker);
+    selected.push(r);
+  };
   for (const secRows of bySector.values()) {
-    selected.push(...secRows.filter((r) => r.tier === 1));
-    const t2 = secRows.filter((r) => r.tier === 2).sort((a, b) => b.composite - a.composite);
-    selected.push(...t2.slice(0, CONV_TIER2_PER_SECTOR));
+    secRows.filter((r) => r.tier === 1).forEach(take);
+    secRows
+      .filter((r) => r.tier === 2)
+      .sort((a, b) => b.composite - a.composite)
+      .slice(0, CONV_TIER2_PER_SECTOR)
+      .forEach(take);
+  }
+  // Anchor: fold in every survivor that carries a genuine conviction read, even
+  // Tier-3 names the fresh tiers demoted out of the gate above.
+  if (conviction) {
+    for (const r of rows) {
+      if (conviction[r.ticker]?.ok) take(r);
+    }
   }
   return selected;
 }
 
 export function buildConviction(rows: LeaderRow[], conviction: ConvictionData | null): ConvictionRow[] {
-  const survivors = selectConvictionTargets(rows);
+  const survivors = selectConvictionTargets(rows, conviction);
   const out: ConvictionRow[] = survivors.map((r) => {
     const conv = conviction?.[r.ticker] ?? null;
     const total = conv ? conv.total : -1;

@@ -316,8 +316,9 @@ export function ConvictionView() {
   const nRead = bySector.filter((r) => r.status === "advance" || r.status === "watch").length;
   const nAdvance = bySector.filter((r) => r.status === "advance").length;
 
-  // Group the visible rows into per-sector sections, ordered by section size
-  // (same order as the chips); unclassified names sink to the end.
+  // Group the visible rows into per-sector sections. Sectors that actually carry
+  // real reads (advance/watch) lead — so a big all-unsourced sector can't push
+  // the genuine scores below the fold — then by section size; unclassified sinks.
   const grouped = useMemo(() => {
     const order = new Map(sectorCounts.map(([s], i) => [s, i]));
     const buckets = new Map<string, ConvictionRow[]>();
@@ -327,8 +328,12 @@ export function ConvictionView() {
       if (arr) arr.push(r);
       else buckets.set(key, [r]);
     }
+    const hasRead = (rs: ConvictionRow[]) => rs.some((r) => r.status === "advance" || r.status === "watch");
     return [...buckets.entries()].sort(
-      (a, b) => (order.get(a[0]) ?? 998) - (order.get(b[0]) ?? 998) || a[0].localeCompare(b[0]),
+      (a, b) =>
+        Number(hasRead(b[1])) - Number(hasRead(a[1])) ||
+        (order.get(a[0]) ?? 998) - (order.get(b[0]) ?? 998) ||
+        a[0].localeCompare(b[0]),
     );
   }, [shown, sectorCounts]);
 
